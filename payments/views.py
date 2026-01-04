@@ -36,7 +36,7 @@ class CreateMembershipPaymentView(APIView):
 
             # Default values for Premium plan
             if plan == 'premium':
-                amount_rands = 39.00
+                amount_rands = settings.MEMBERSHIP_PRICE
                 item_name = "Premium membership (quarterly)"
                 custom_str1 = f"membership_{membership_id}_premium"
             else:
@@ -47,8 +47,8 @@ class CreateMembershipPaymentView(APIView):
                 item_name = description
                 custom_str1 = f"membership_{user.id}_{plan}"
 
-            return_url = "https://medmap.co.za/memberships?status=success"
-            cancel_url = "https://medmap.co.za/memberships?status=cancelled"
+            return_url = f"{settings.FRONTEND_URL}/memberships?status=success"
+            cancel_url = f"{settings.FRONTEND_URL}/memberships?status=cancelled"
             notify_url = settings.PAYFAST_NOTIFY_URL
             
             data = {
@@ -103,22 +103,39 @@ class InitiatePaymentView(APIView):
         try:
             user = request.user
             service = PayFastService()
-            amount = request.data.get('amount')
-            description = request.data.get('description') or request.data.get('item_name')
             booking_id = request.data.get('booking_id')
+            
+            # Securely fetch amount from booking if present
+            amount_val = 0.0
+            description = request.data.get('description') or request.data.get('item_name')
 
-            if not amount or not description:
-                return Response({"error": "Amount and description are required"}, status=400)
+            if booking_id:
+                try:
+                    booking = Booking.objects.get(id=booking_id)
+                    # Use the total_amount from the booking model as source of truth
+                    amount_val = float(booking.total_amount)
+                    description = description or f"Booking {booking.id} with Dr. {booking.doctor.user.last_name}"
+                except Booking.DoesNotExist:
+                    return Response({"error": "Booking not found"}, status=404)
+            else:
+                 # Fallback for non-booking payments (should be restricted or removed if strictly booking platform)
+                 # Keeping logic but relying on user provided amount if no booking_id (legacy behavior)
+                 # Or strictly enforce booking_id for now as per "booking platform" requirement
+                 amount = request.data.get('amount')
+                 if not amount:
+                      return Response({"error": "Amount is required"}, status=400)
+                 try:
+                    amount_val = float(amount)
+                    if amount_val > 1000:  # assume cents
+                        amount_val /= 100
+                 except ValueError:
+                    return Response({"error": "Invalid amount"}, status=400)
 
-            try:
-                amount_val = float(amount)
-                if amount_val > 1000:  # assume cents
-                    amount_val /= 100
-            except ValueError:
-                return Response({"error": "Invalid amount"}, status=400)
+            if not description:
+                description = "Payment"
 
-            return_url = "https://medmap.co.za/bookings?status=success"
-            cancel_url = "https://medmap.co.za/bookings?status=cancelled"
+            return_url = f"{settings.FRONTEND_URL}/bookings?status=success"
+            cancel_url = f"{settings.FRONTEND_URL}/bookings?status=cancelled"
             notify_url = settings.PAYFAST_NOTIFY_URL
 
             data = {
@@ -173,6 +190,12 @@ class PayFastNotifyView(APIView):
             print(f"Signature mismatch: Calculated {calc_signature} != Received {pf_signature}")
             # Optional: return Response({"error": "Signature mismatch"}, status=400)
 
+        # Idempotency Check
+        pf_payment_id = data.get('pf_payment_id')
+        if pf_payment_id and PaymentTransaction.objects.filter(reference=pf_payment_id).exists():
+            print(f"Duplicate payment notification received: {pf_payment_id}")
+            return Response({"status": "OK"})
+
         # Log transaction
         try:
             user = None
@@ -196,7 +219,7 @@ class PayFastNotifyView(APIView):
                 amount=data.get('amount_gross', 0),
                 status=data.get('payment_status', 'pending').lower(),
                 transaction_type='membership' if custom_str1 and 'membership' in custom_str1 else 'booking',
-                reference=data.get('pf_payment_id'),
+                reference=pf_payment_id,
                 description=data.get('item_name', ''),
                 metadata=data
             )
@@ -206,17 +229,36 @@ class PayFastNotifyView(APIView):
         status = data.get('payment_status')
         if status == 'COMPLETE':
             custom_str1 = data.get('custom_str1')
+            amount_gross = float(data.get('amount_gross', 0))
+
             if custom_str1 and custom_str1.startswith('membership_'):
                 parts = custom_str1.split('_')
                 if len(parts) >= 3:
                     user_id = parts[1]
                     plan = parts[2]
                     try:
+                        # Security Check: Verify amount
+                        expected_amount = settings.MEMBERSHIP_PRICE
+                        if abs(amount_gross - expected_amount) > 1.0: # Allow small variance, but R1 is generous
+                            print(f"Security Alert: Payment amount mismatch. Expected {expected_amount}, got {amount_gross}")
+                            return Response({"status": "Failed: Amount mismatch"})
+
                         user = User.objects.get(id=user_id)
                         membership, created = Membership.objects.get_or_create(user=user)
                         membership.tier = plan
                         membership.status = 'active'
-                        membership.end_date = timezone.now() + timedelta(days=90)  # quarterly
+                        
+                        # Correct Renewal Logic
+                        now = timezone.now()
+                        current_end = membership.end_date
+                        
+                        if current_end and current_end > now:
+                            # Extend from current end date
+                            membership.end_date = current_end + timedelta(days=settings.MEMBERSHIP_DURATION_DAYS)
+                        else:
+                            # Start fresh from now
+                            membership.end_date = now + timedelta(days=settings.MEMBERSHIP_DURATION_DAYS)
+                            
                         membership.save()
                     except Exception as e:
                         print(f"Error updating membership: {e}")
@@ -226,6 +268,13 @@ class PayFastNotifyView(APIView):
                     booking_id = parts[1]
                     try:
                         booking = Booking.objects.get(id=booking_id)
+                        
+                        # Security Check: Verify amount
+                        expected_amount = float(booking.total_amount)
+                        if abs(amount_gross - expected_amount) > 1.0:
+                             print(f"Security Alert: Booking payment mismatch. Expected {expected_amount}, got {amount_gross}")
+                             return Response({"status": "Failed: Amount mismatch"})
+
                         booking.payment_status = 'COMPLETE'
                         booking.status = 'confirmed'
                         booking.save()

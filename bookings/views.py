@@ -5,6 +5,9 @@ from django_filters.rest_framework import DjangoFilterBackend
 from .models import Booking
 from .serializers import BookingSerializer
 from decimal import Decimal
+from django.conf import settings
+from django.db import IntegrityError
+from rest_framework.exceptions import ValidationError
 
 class BookingViewSet(viewsets.ModelViewSet):
     queryset = Booking.objects.all()
@@ -45,15 +48,29 @@ class BookingViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         doctor = serializer.validated_data.get('doctor')
-        booking_fee = Decimal('10.00')
+        appointment_date = serializer.validated_data.get('appointment_date')
+        appointment_time = serializer.validated_data.get('appointment_time')
+
+        # Check for existing booking (Double-check before DB constraint hit)
+        if Booking.objects.filter(
+            doctor=doctor, 
+            appointment_date=appointment_date, 
+            appointment_time=appointment_time
+        ).exclude(status='cancelled').exists():
+             raise ValidationError("This time slot is already booked.")
+
+        booking_fee = Decimal(str(settings.BOOKING_FEE))
         # Use doctor.price as the consultation fee source
         consultation_fee = doctor.price if doctor else Decimal('0.00')
         
-        serializer.save(
-            user=self.request.user,
-            booking_fee=booking_fee,
-            consultation_fee=consultation_fee,
-            total_amount=booking_fee + consultation_fee,
-            status='pending',
-            payment_status='unpaid'
-        )
+        try:
+            serializer.save(
+                user=self.request.user,
+                booking_fee=booking_fee,
+                consultation_fee=consultation_fee,
+                total_amount=booking_fee + consultation_fee,
+                status='pending',
+                payment_status='unpaid'
+            )
+        except IntegrityError:
+             raise ValidationError("This time slot is already booked.")

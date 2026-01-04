@@ -25,6 +25,8 @@ class Booking(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        # Removed unique_together to allow keeping cancelled bookings in history
+        # Uniqueness is enforced at the application level in BookingViewSet
 
     def __str__(self):
         return f"Booking {self.id} - {self.user} with {self.doctor}"

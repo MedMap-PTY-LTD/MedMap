@@ -171,6 +171,14 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 EMAIL_TIMEOUT = 10  # Timeout in seconds to prevent 502/Gateway Timeout
 
 
+# Frontend URL
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'https://medmap.co.za')
+
+# Payment Constants
+MEMBERSHIP_PRICE = 39.00
+MEMBERSHIP_DURATION_DAYS = 90
+BOOKING_FEE = 10.00
+
 # Payment Keys
 MERCHANT_ID = os.getenv('MERCHANT_ID', '32963323').strip()
 MERCHANT_KEY = os.getenv('MERCHANT_KEY', '16d8hpaaicfyc').strip()
