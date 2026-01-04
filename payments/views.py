@@ -37,7 +37,8 @@ class CreateMembershipPaymentView(APIView):
             # Default values for Premium plan
             if plan == 'premium':
                 amount_rands = settings.MEMBERSHIP_PRICE
-                item_name = "Premium membership (quarterly)"
+                # Simplified item name to avoid URL encoding issues with parentheses
+                item_name = "Premium Membership Quarterly"
                 custom_str1 = f"membership_{membership_id}_premium"
             else:
                 # Fallback or other plans
@@ -69,8 +70,14 @@ class CreateMembershipPaymentView(APIView):
             if user.last_name:
                 data["name_last"] = user.last_name
 
-            # Remove empty values
-            clean_data = {k: v for k, v in data.items() if v is not None and v != ""}
+            # Remove empty values and strip strings
+            clean_data = {}
+            for k, v in data.items():
+                if v is not None:
+                    val_str = str(v).strip()
+                    if val_str != "":
+                        clean_data[k] = val_str
+
             clean_data['signature'] = generate_payfast_signature(clean_data)
 
             # Debug logging
