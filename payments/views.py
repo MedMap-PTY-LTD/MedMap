@@ -9,197 +9,151 @@ from bookings.models import Booking
 from memberships.models import Membership
 from .models import PaymentTransaction
 from .serializers import PaymentTransactionSerializer
-from .services import generate_payfast_signature, PayFastService
-import traceback
+from .paystack import PaystackService
+import hashlib
+import hmac
 
 User = get_user_model()
 
 
+# =========================
+# ADMIN: VIEW TRANSACTIONS
+# =========================
 class PaymentTransactionViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = PaymentTransaction.objects.all().order_by('-created_at')
+    queryset = PaymentTransaction.objects.all().order_by("-created_at")
     serializer_class = PaymentTransactionSerializer
     permission_classes = [permissions.IsAdminUser]
 
 
-class CreateMembershipPaymentView(APIView):
+# =========================
+# FRONTEND CONFIG
+# =========================
+class PaystackConfigView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        return Response({
+            "publicKey": settings.PAYSTACK_PUBLIC_KEY
+        })
+
+
+# =========================
+# MEMBERSHIP PAYMENT INIT
+# =========================
+class PaystackInitializeMembershipView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        user = request.user
+        service = PaystackService()
+
+        amount = settings.MEMBERSHIP_PRICE  # R39.00
+        callback_url = f"{settings.FRONTEND_URL}/memberships"
+
+        metadata = {
+            "context": "membership",
+            "user_id": user.id,
+            "plan": "premium"
+        }
+
         try:
-            user = request.user
-            service = PayFastService()
-
-            plan = request.data.get("plan")
-            membership_id = request.data.get("membership_id")
-
-            # Membership pricing
-            amount_rands = settings.MEMBERSHIP_PRICE
-            item_name = "MedMap Premium Membership"
-            custom_str1 = f"membership_{user.id}_{plan or 'premium'}"
-
-            return_url = f"{settings.FRONTEND_URL}/memberships?status=success"
-            cancel_url = f"{settings.FRONTEND_URL}/memberships?status=cancelled"
-            notify_url = settings.PAYFAST_NOTIFY_URL
-
-            data = {
-                "merchant_id": service.merchant_id,
-                "merchant_key": service.merchant_key,
-                "return_url": return_url,
-                "cancel_url": cancel_url,
-                "notify_url": notify_url,
-                "amount": f"{amount_rands:.2f}",
-                "item_name": item_name,
-                "custom_str1": custom_str1,
-                "email_address": user.email,
-            }
-
-            if user.first_name:
-                data["name_first"] = user.first_name
-            if user.last_name:
-                data["name_last"] = user.last_name
-
-            # Remove empty values
-            clean_data = {
-                k: str(v).strip()
-                for k, v in data.items()
-                if v is not None and str(v).strip() != ""
-            }
-
-            # ✅ Correct signature handling
-            signature = generate_payfast_signature(clean_data)
-            clean_data["signature"] = signature
-
-            return Response({
-                "payment_url": f"{service.base_url}/eng/process",
-                "payment_data": clean_data
-            })
-
+            response = service.initialize_transaction(
+                email=user.email,
+                amount=amount,
+                callback_url=callback_url,
+                metadata=metadata
+            )
+            return Response(response)
         except Exception as e:
-            print("CreateMembershipPaymentView error:", e)
-            traceback.print_exc()
-            return Response({"error": "Payment initialization failed"}, status=500)
+            return Response({"error": str(e)}, status=400)
 
 
-class InitiatePaymentView(APIView):
+# =========================
+# BOOKING PAYMENT INIT
+# =========================
+class PaystackInitializeBookingView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        user = request.user
+        booking_id = request.data.get("booking_id")
+
+        if not booking_id:
+            return Response({"error": "booking_id is required"}, status=400)
+
         try:
-            user = request.user
-            service = PayFastService()
-            booking_id = request.data.get("booking_id")
+            booking = Booking.objects.get(id=booking_id, user=user)
+        except Booking.DoesNotExist:
+            return Response({"error": "Booking not found"}, status=404)
 
-            if not booking_id:
-                return Response({"error": "booking_id is required"}, status=400)
+        service = PaystackService()
+        amount = float(booking.total_amount)  # R10.00
+        callback_url = f"{settings.FRONTEND_URL}/booking-success?booking_id={booking.id}"
 
-            try:
-                booking = Booking.objects.get(id=booking_id)
-            except Booking.DoesNotExist:
-                return Response({"error": "Booking not found"}, status=404)
+        metadata = {
+            "context": "booking",
+            "user_id": user.id,
+            "booking_id": booking.id
+        }
 
-            amount_val = float(booking.total_amount)
-            item_name = f"MedMap Booking #{booking.id}"
-
-            return_url = f"{settings.FRONTEND_URL}/bookings?status=success"
-            cancel_url = f"{settings.FRONTEND_URL}/bookings?status=cancelled"
-            notify_url = settings.PAYFAST_NOTIFY_URL
-
-            data = {
-                "merchant_id": service.merchant_id,
-                "merchant_key": service.merchant_key,
-                "return_url": return_url,
-                "cancel_url": cancel_url,
-                "notify_url": notify_url,
-                "amount": f"{amount_val:.2f}",
-                "item_name": item_name,
-                "custom_str1": f"booking_{booking.id}",
-                "email_address": user.email,
-            }
-
-            if user.first_name:
-                data["name_first"] = user.first_name
-            if user.last_name:
-                data["name_last"] = user.last_name
-
-            clean_data = {
-                k: str(v).strip()
-                for k, v in data.items()
-                if v is not None and str(v).strip() != ""
-            }
-
-            # ✅ Correct signature handling
-            signature = generate_payfast_signature(clean_data)
-            clean_data["signature"] = signature
-
-            return Response({
-                "payment_url": f"{service.base_url}/eng/process",
-                "payment_data": clean_data
-            })
-
+        try:
+            response = service.initialize_transaction(
+                email=user.email,
+                amount=amount,
+                callback_url=callback_url,
+                metadata=metadata
+            )
+            return Response(response)
         except Exception as e:
-            print("InitiatePaymentView error:", e)
-            traceback.print_exc()
-            return Response({"error": "Payment initialization failed"}, status=500)
+            return Response({"error": str(e)}, status=400)
 
 
-class PayFastNotifyView(APIView):
+# =========================
+# PAYSTACK WEBHOOK
+# =========================
+class PaystackWebhookView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        data = request.data.dict() if hasattr(request.data, "dict") else request.data
+        secret = settings.PAYSTACK_SECRET_KEY
+        signature = request.headers.get("X-Paystack-Signature")
 
-        pf_signature = data.get("signature")
-        if not pf_signature:
+        if not signature:
             return Response({"error": "Missing signature"}, status=400)
 
-        verify_data = data.copy()
-        verify_data.pop("signature", None)
+        # Verify webhook signature
+        computed_signature = hmac.new(
+            secret.encode("utf-8"),
+            request.body,
+            digestmod=hashlib.sha512
+        ).hexdigest()
 
-        calculated_signature = generate_payfast_signature(verify_data)
-        if calculated_signature != pf_signature:
-            print("PayFast ITN signature mismatch")
+        if computed_signature != signature:
             return Response({"error": "Invalid signature"}, status=400)
 
-        pf_payment_id = data.get("pf_payment_id")
-        if pf_payment_id and PaymentTransaction.objects.filter(reference=pf_payment_id).exists():
-            return Response({"status": "OK"})
+        payload = request.data
+        event = payload.get("event")
+        data = payload.get("data", {})
 
-        custom_str1 = data.get("custom_str1")
-        payment_status = data.get("payment_status")
-        amount_gross = float(data.get("amount_gross", 0))
+        if event != "charge.success":
+            return Response({"status": "ignored"})
 
-        user = None
-        booking = None
+        reference = data.get("reference")
 
-        try:
-            if custom_str1:
-                parts = custom_str1.split("_")
-                if custom_str1.startswith("membership_"):
-                    user = User.objects.get(id=parts[1])
-                elif custom_str1.startswith("booking_"):
-                    booking = Booking.objects.get(id=parts[1])
-                    user = booking.user
-        except Exception:
-            pass
+        # Prevent duplicate processing
+        if PaymentTransaction.objects.filter(reference=reference).exists():
+            return Response({"status": "duplicate"})
 
-        PaymentTransaction.objects.create(
-            user=user,
-            amount=amount_gross,
-            status=payment_status.lower() if payment_status else "pending",
-            transaction_type="membership" if custom_str1 and "membership" in custom_str1 else "booking",
-            reference=pf_payment_id,
-            description=data.get("item_name", ""),
-            metadata=data
-        )
+        metadata = data.get("metadata", {})
+        context = metadata.get("context")
+        amount = data.get("amount", 0) / 100  # cents → rands
 
-        if payment_status == "COMPLETE":
-            if booking:
-                booking.payment_status = "COMPLETE"
-                booking.status = "confirmed"
-                booking.save()
-
-            elif custom_str1 and custom_str1.startswith("membership_") and user:
+        if context == "membership":
+            user_id = metadata.get("user_id")
+            try:
+                user = User.objects.get(id=user_id)
                 membership, _ = Membership.objects.get_or_create(user=user)
+
                 membership.tier = "premium"
                 membership.status = "active"
 
@@ -211,4 +165,37 @@ class PayFastNotifyView(APIView):
 
                 membership.save()
 
-        return Response({"status": "OK"})
+                PaymentTransaction.objects.create(
+                    user=user,
+                    amount=amount,
+                    status="complete",
+                    transaction_type="membership",
+                    reference=reference,
+                    description="MedMap Premium Membership",
+                    metadata=data
+                )
+            except Exception as e:
+                print("Membership webhook error:", e)
+
+        elif context == "booking":
+            booking_id = metadata.get("booking_id")
+            try:
+                booking = Booking.objects.get(id=booking_id)
+
+                booking.payment_status = "COMPLETE"
+                booking.status = "confirmed"
+                booking.save()
+
+                PaymentTransaction.objects.create(
+                    user=booking.user,
+                    amount=amount,
+                    status="complete",
+                    transaction_type="booking",
+                    reference=reference,
+                    description=f"Booking #{booking.id}",
+                    metadata=data
+                )
+            except Exception as e:
+                print("Booking webhook error:", e)
+
+        return Response({"status": "success"})
