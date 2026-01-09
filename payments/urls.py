@@ -1,13 +1,6 @@
-# payments/urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import (
-    PaystackInitializeMembershipView,
-    PaystackInitializeBookingView,
-    PaystackWebhookView,
-    PaymentTransactionViewSet,
-    PaystackConfigView,
-)
+from .views import PaymentTransactionViewSet, PaystackInitializeMembershipView, PaystackInitializeBookingView, PaystackWebhookView, PaystackConfigView
 
 # Router for transaction history (admin view)
 router = DefaultRouter()

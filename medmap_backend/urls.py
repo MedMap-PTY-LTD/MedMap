@@ -9,6 +9,7 @@ from rest_framework_simplejwt.views import (
 
 from django.conf import settings
 from django.conf.urls.static import static
+from payments.views import PaystackWebhookView
 
 def home(request):
     return JsonResponse({"message": "MedMap Backend API is running"})
@@ -17,6 +18,8 @@ urlpatterns = [
     path('', home),
     path('api/', home),
     path('admin/', admin.site.urls),
+    # Paystack Webhook Shortcut
+    path('api/paystack/webhook/', PaystackWebhookView.as_view(), name='paystack-webhook-shortcut'),
     path('api/users/', include('users.urls')),
     path('api/doctors/', include('doctors.urls')),
     path('api/bookings/', include('bookings.urls')),

@@ -179,17 +179,14 @@ MEMBERSHIP_PRICE = 39.00
 MEMBERSHIP_DURATION_DAYS = 90
 BOOKING_FEE = 10.00
 
-# Payment Keys
-MERCHANT_ID = os.getenv('MERCHANT_ID', '32963323').strip()
-MERCHANT_KEY = os.getenv('MERCHANT_KEY', '16d8hpaaicfyc').strip()
-PASSPHRASE = os.getenv('PASSPHRASE', 'MedMap.2025.').strip()
-PAYFAST_SANDBOX = os.getenv('PAYFAST_SANDBOX', 'False').strip() == 'True'
-
 BACKEND_URL = os.getenv('BACKEND_URL', 'https://medmap-backend-6t7y.onrender.com')
-PAYFAST_NOTIFY_URL = f"{BACKEND_URL}/api/payments/notify/"
 
 # Twilio
 TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID', '').strip()
 TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN', '').strip()
 TWILIO_PHONE_NUMBER = os.getenv('TWILIO_PHONE_NUMBER', '').strip()
 SUPPORT_PHONE_NUMBER = os.getenv('SUPPORT_PHONE_NUMBER', '').strip()  # The number to forward inbound calls to
+
+# Paystack
+PAYSTACK_SECRET_KEY = os.getenv('PAYSTACK_SECRET_KEY', '').strip()
+PAYSTACK_PUBLIC_KEY = os.getenv('PAYSTACK_PUBLIC_KEY', '').strip()

@@ -1,36 +1,79 @@
-// backend/repositories/payments.ts
-export const PaymentsRepo = {
-  /**
-   * Initiate Paystack payment for a booking
-   * @param bookingId - the backend booking ID
-   * @param amount - amount to charge (in rands)
-   * @param email - patient's email
-   */
-  initiatePaystackBookingPayment: async (bookingId: number, amount: number, email: string) => {
-    const res = await fetch(`/api/payments/booking/${bookingId}/paystack/initiate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount, email }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to initiate payment');
-    window.location.href = data.payment_url; // redirect to Paystack
-  },
+import { api } from '../../lib/django-api';
 
-  /**
-   * Initiate Paystack payment for a membership
-   * @param membershipId - identifier for the membership plan
-   * @param amount - amount to charge
-   * @param email - user's email
-   */
-  initiatePaystackMembershipPayment: async (membershipId: string, amount: number, email: string) => {
-    const res = await fetch(`/api/payments/membership/${membershipId}/paystack/initiate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount, email }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to initiate payment');
-    window.location.href = data.payment_url; // redirect to Paystack
-  }
+export const PaymentsRepo = {
+    async listTransactions() {
+        const response = await api.request('/payments/transactions/', {
+            method: 'GET'
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to fetch transactions');
+        }
+        return response.json();
+    },
+
+    async initiateBookingPayment(bookingId: string | number, amount: number) {
+        const response = await api.request('/payments/paystack/booking/', {
+            method: 'POST',
+            body: JSON.stringify({
+                booking_id: bookingId
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || error.error || 'Failed to initiate booking payment');
+        }
+        
+        const data = await response.json();
+        
+        // Paystack returns { status: true, message: "...", data: { authorization_url: "...", ... } }
+        // Our service returns the data object directly if successful from PaystackService
+        
+        if (data.data && data.data.authorization_url) {
+            window.location.href = data.data.authorization_url;
+        } else if (data.authorization_url) {
+             window.location.href = data.authorization_url;
+        } else {
+            throw new Error('Invalid payment response from server');
+        }
+        
+        return data;
+    },
+
+    async initiateMembershipPayment(plan: string) {
+        console.log('🚀 Starting membership payment for plan:', plan);
+        
+        const response = await api.request('/payments/paystack/membership/', {
+            method: 'POST',
+            body: JSON.stringify({
+                plan: plan
+            })
+        });
+        
+        console.log('📡 Response status:', response.status);
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || error.error || 'Failed to initiate membership payment');
+        }
+        
+        const data = await response.json();
+        console.log('📦 Payment data received:', data);
+        
+        // Paystack returns { status: true, message: "...", data: { authorization_url: "...", ... } }
+        
+        if (data.data && data.data.authorization_url) {
+            console.log('✅ Redirecting to Paystack:', data.data.authorization_url);
+            window.location.href = data.data.authorization_url;
+        } else if (data.authorization_url) {
+             console.log('✅ Redirecting to Paystack:', data.authorization_url);
+             window.location.href = data.authorization_url;
+        } else {
+            console.error('❌ Invalid payment response:', data);
+            throw new Error('Invalid payment response from server');
+        }
+        
+        return data;
+    }
 };
