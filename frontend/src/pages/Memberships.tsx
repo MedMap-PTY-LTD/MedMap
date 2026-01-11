@@ -48,7 +48,7 @@ const Memberships = () => {
 
     try {
       setProcessing(membership.id);
-      await PaymentsRepo.initiatePaystackMembershipPayment(membership.id, membership.price, profile.email || '');
+      await PaymentsRepo.initiateMembershipPayment(membership.id);
     } catch (err: any) {
       console.error('Payment error:', err);
       toast({ title: 'Payment failed', description: err?.message || 'Please try again', variant: 'destructive' });
