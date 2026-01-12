@@ -1,12 +1,12 @@
-// Memberships.tsx
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '@/hooks/useAuth';
-import { useToast } from '@/hooks/use-toast';
-import { PaymentsRepo } from '@/backend/repositories/payments';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import Header from '@/components/Header';
 import { formatCurrency } from '@/lib/utils';
+import { api } from '@/lib/django-api';
+import { useAuth } from '@/hooks/useAuth';
+import { useToast } from '@/components/ui/use-toast';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import PaymentsRepo from '@/backend/repositories/payments';
 
 interface Membership {
   id: string;
@@ -28,8 +28,8 @@ const Memberships = () => {
 
   const fetchMemberships = async () => {
     try {
-      // Replace with your API call to fetch memberships
-      const response = await fetch('/api/memberships/');
+      const response = await api.request('/memberships/plans/');
+      if (!response.ok) throw new Error('Failed to fetch plans');
       const data: Membership[] = await response.json();
       setMemberships(data);
     } catch (err) {
@@ -48,7 +48,12 @@ const Memberships = () => {
 
     try {
       setProcessing(membership.id);
-      await PaymentsRepo.initiateMembershipPayment(membership.id);
+      const res = await PaymentsRepo.initiateMembershipPayment(membership.id, membership.price);
+      const paymentUrl = res?.data?.authorization_url || res?.payment_url || res?.authorization_url || res?.data?.authorizationUrl;
+      if (!paymentUrl) {
+        throw new Error('Payment URL not returned by the server');
+      }
+      window.location.href = paymentUrl;
     } catch (err: any) {
       console.error('Payment error:', err);
       toast({ title: 'Payment failed', description: err?.message || 'Please try again', variant: 'destructive' });
