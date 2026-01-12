@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { DoctorsRepo } from '@/backend/repositories/doctors';
 import { BookingsRepo } from '@/backend/repositories/bookings';
-import { PaymentsRepo } from '@/backend/repositories/payments';
+import PaymentsRepo from '@/backend/repositories/payments';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
@@ -104,7 +104,7 @@ const BookAppointment = () => {
       });
 
       const bookingFee = 10.00;
-      await PaymentsRepo.initiatePaystackBookingPayment(booking.id, bookingFee, profile.email || '');
+      await PaymentsRepo.initiateBookingPayment(booking.id, bookingFee);
 
     } catch (e: any) {
       console.error('Booking error:', e);
