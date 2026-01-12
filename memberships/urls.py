@@ -6,6 +6,7 @@ router = SimpleRouter()
 router.register(r'memberships', MembershipViewSet)
 
 urlpatterns = [
-    path('', MembershipPlansView.as_view(), name='membership-plans'),
+    # serve plans at /api/memberships/plans/ to avoid namespace collisions
+    path('plans/', MembershipPlansView.as_view(), name='membership-plans'),
     path('', include(router.urls)),
 ]

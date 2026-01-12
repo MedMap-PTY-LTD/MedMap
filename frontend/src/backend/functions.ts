@@ -1,6 +1,7 @@
 import { api } from '@/lib/django-api';
 import { BookingsRepo } from './repositories/bookings';
 import { DoctorsRepo } from './repositories/doctors';
+import PaymentsRepo from './repositories/payments';
 
 // Mocking the behavior for migration
 async function invokeMock(name: string, body?: any): Promise<any> {
@@ -34,13 +35,21 @@ export const EdgeFunctions = {
       }
   },
   createBooking: (payload: any) => BookingsRepo.create(payload),
-  createPayfastPayment: (payload: any) => {
-      console.warn("PayFast payment not implemented");
-      return Promise.resolve({ success: true, mock: true, payment_url: '#' });
+  createPaystackPayment: async (payload: any) => {
+      // payload: { booking_id, amount } or { membership_id, amount }
+      if (payload.booking_id) {
+         const res = await PaymentsRepo.initiateBookingPayment(payload.booking_id, payload.amount);
+         return res; // expected { payment_url, reference } or Paystack response
+      }
+      if (payload.membership_id) {
+         const res = await PaymentsRepo.initiateMembershipPayment(payload.membership_id, payload.amount);
+         return res;
+      }
+      throw new Error('Invalid payload for createPaystackPayment');
   },
-  createPayfastMembership: (payload: any) => {
-       console.warn("PayFast membership not implemented");
-       return Promise.resolve({ success: true, mock: true, payment_url: '#' });
+  createPaystackMembership: async (payload: any) => {
+      const res = await PaymentsRepo.initiateMembershipPayment(payload.membership_id || payload.id, payload.amount);
+      return res;
   },
   submitDoctorEnrollment: (payload: any) => DoctorsRepo.create(payload),
   sendEmail: (payload: any) => {
