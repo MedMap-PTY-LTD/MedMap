@@ -106,13 +106,22 @@ const BookAppointment = () => {
       const bookingFee = 10.00;
       const paymentResponse = await PaymentsRepo.initiateBookingPayment(booking.id, bookingFee);
 
-      // Redirect to Paystack payment gateway
-      if (paymentResponse.authorization_url) {
-        window.location.href = paymentResponse.authorization_url;
-      } else if (paymentResponse.payment_url) {
-        window.location.href = paymentResponse.payment_url;
+      // Log the response to see what we're getting
+      console.log('Payment response:', paymentResponse);
+
+      // Try different possible response structures
+      const paymentUrl = 
+        paymentResponse.authorization_url || 
+        paymentResponse.payment_url || 
+        paymentResponse.data?.authorization_url ||
+        paymentResponse.data?.payment_url ||
+        (paymentResponse.data && paymentResponse.data.data && paymentResponse.data.data.authorization_url);
+
+      if (paymentUrl) {
+        window.location.href = paymentUrl;
       } else {
-        throw new Error('No payment URL received from server');
+        console.error('Full payment response:', JSON.stringify(paymentResponse, null, 2));
+        throw new Error('No payment URL received from server. Check console for full response.');
       }
 
     } catch (e: any) {
