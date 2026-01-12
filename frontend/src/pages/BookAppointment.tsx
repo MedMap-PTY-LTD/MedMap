@@ -104,7 +104,16 @@ const BookAppointment = () => {
       });
 
       const bookingFee = 10.00;
-      await PaymentsRepo.initiateBookingPayment(booking.id, bookingFee);
+      const paymentResponse = await PaymentsRepo.initiateBookingPayment(booking.id, bookingFee);
+
+      // Redirect to Paystack payment gateway
+      if (paymentResponse.authorization_url) {
+        window.location.href = paymentResponse.authorization_url;
+      } else if (paymentResponse.payment_url) {
+        window.location.href = paymentResponse.payment_url;
+      } else {
+        throw new Error('No payment URL received from server');
+      }
 
     } catch (e: any) {
       console.error('Booking error:', e);
