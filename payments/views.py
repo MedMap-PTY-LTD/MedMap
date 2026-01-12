@@ -73,7 +73,7 @@ class PaystackInitializeBookingView(APIView):
             return Response({"error": "Booking not found"}, status=404)
             
         service = PaystackService()
-        amount = float(booking.total_amount)
+        amount = float(booking.booking_fee)  # FIXED: Changed from booking.total_amount to booking.booking_fee
         callback_url = f"{settings.FRONTEND_URL}/booking-success?booking_id={booking.id}"
         
         metadata = {
