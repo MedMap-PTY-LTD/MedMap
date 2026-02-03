@@ -39,13 +39,11 @@ const BookingHistory = lazy(() => import("./pages/BookingHistory"));
 const PatientDashboard = lazy(() => import("./pages/PatientDashboard"));
 const EmailVerification = lazy(() => import("./pages/EmailVerification"));
 const Profile = lazy(() => import("./pages/Profile"));
-const DatabaseTest = lazy(() => import("./pages/DatabaseTest"));
-const TestSummary = lazy(() => import("./pages/TestSummary"));
-const CreateAdminAccount = lazy(() => import("./pages/CreateAdminAccount"));
-const AdminSetup = lazy(() => import("./pages/AdminSetup"));
-const RouteTest = lazy(() => import("./pages/RouteTest"));
-const FixAdminAccount = lazy(() => import("./pages/FixAdminAccount"));
-const ManualAdminSetup = lazy(() => import("./pages/ManualAdminSetup"));
+const CreateAdminAccount = lazy(() => import("./pages/CreateAdminAccount").then(module => ({ default: module.default })));
+const AdminSetup = lazy(() => import("./pages/AdminSetup").then(module => ({ default: module.default })));
+const RouteTest = lazy(() => import("./pages/RouteTest").then(module => ({ default: module.default })));
+const FixAdminAccount = lazy(() => import("./pages/FixAdminAccount").then(module => ({ default: module.default })));
+const ManualAdminSetup = lazy(() => import("./pages/ManualAdminSetup").then(module => ({ default: module.default })));
 
 // Lazy load notification center
 const NotificationCenter = lazy(() => 
@@ -65,7 +63,7 @@ const queryClient = new QueryClient();
 
 const App = () => {
   const [showLiveChat, setShowLiveChat] = React.useState(false);
-  const [isSpeaking, setIsSpeaking] = React.useState(false);
+  const [, setIsSpeaking] = React.useState(false);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -142,9 +140,7 @@ const App = () => {
                 <FloatingButtons />
 
                 {/* Real-time Enhancements */}
-                <VoiceInterface
-                  onSpeakingChange={setIsSpeaking}
-                />
+                <VoiceInterface />
 
                 <Suspense fallback={null}>
                   <NotificationCenter />
