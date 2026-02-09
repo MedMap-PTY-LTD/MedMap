@@ -42,8 +42,8 @@ const Team = () => {
       funFact: 'Can pull an all-nighter debugging code and still show up energized for a 6 AM workout. Believes the best ideas come during late-night brainstorming sessions fueled by good music.',
       expertise: ['Strategic Vision', 'Business Development', 'Innovation', 'Leadership'],
       vibe: '🎯 Visionary go-getter',
-      linkedin: 'https://linkedin.com/in/ofentse-mashau',
-      email: 'ofentse@medmap.co.za'
+      linkedin: 'https://www.linkedin.com/in/ofentse-mashau-0863751b0',
+      email: 'Omashau@medmap.co.za'
     },
     {
       name: 'Kuhlula Madumo',
@@ -55,8 +55,8 @@ const Team = () => {
       funFact: 'Has a playlist for every mood and swears productivity peaks at 2 AM. Weekend warrior who believes in celebrating wins as hard as working for them.',
       expertise: ['Operations Excellence', 'Team Building', 'Process Optimization', 'Execution'],
       vibe: '⚡ The organized rebel',
-      linkedin: 'https://linkedin.com/in/kuhlula-madumo',
-      email: 'kuhlula@medmap.co.za'
+      linkedin: 'www.linkedin.com/in/kuhlula-madumo-78b670304',
+      email: 'kmadumo@medmap.co.za'
     },
     {
       name: 'Selaelo Langa',
@@ -69,7 +69,7 @@ const Team = () => {
       expertise: ['Full-Stack Development', 'System Architecture', 'Tech Innovation', 'Problem Solving'],
       vibe: '🚀 Code wizard',
       linkedin: 'https://linkedin.com/in/selaelo-langa',
-      email: 'selaelo@medmap.co.za'
+      email: 'Selaelo@medmap.co.za'
     }
   ];
 
