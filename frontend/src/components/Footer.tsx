@@ -1,5 +1,3 @@
-import React from 'react';
-import { MapPin } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const Footer = () => {
@@ -10,9 +8,15 @@ const Footer = () => {
           {/* Logo & Description - Full width on mobile */}
           <div className="col-span-1 sm:col-span-2 lg:col-span-1">
             <div className="flex items-center gap-2 mb-4">
-              <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                <MapPin className="h-5 w-5 text-white" />
-              </div>
+              <div className="relative">
+                <div className="w-8 h-8 lg:w-10 lg:h-10 bg-white rounded-lg flex items-center justify-center overflow-hidden shadow-sm border border-slate-200">
+                  <img
+                    src="https://cdn.builder.io/api/v1/image/assets%2Faf68e484decf46379ccbfc0f4be45e74%2F35b00f08674a45308869d5f3a08c0ee7?format=webp&width=200"
+                    alt="MedMap"
+                    className="h-full w-full object-contain"
+                  />
+                </div>
+              </div> {/* ✅ Fixed: Added closing div for the relative container */}
               <span className="text-xl font-bold text-white">MedMap</span>
             </div>
             <p className="text-sm sm:text-base text-slate-400 leading-relaxed mb-4 max-w-md">
