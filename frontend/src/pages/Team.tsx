@@ -65,7 +65,7 @@ const Team = () => {
       gradient: 'from-blue-500 via-cyan-500 to-teal-500',
       professionalFact: 'Masters the art of turning chaos into order. Scales operations seamlessly while maintaining quality.',
       funFact: 'Has a playlist for every mood and swears productivity peaks at 2 AM.',
-      funFactShort: '2 AM productivity queen. 🎧',
+      funFactShort: '2 AM productivity king. 🎧',
       expertise: ['Operations Excellence', 'Team Building', 'Process Optimization', 'Execution'],
       linkedin: 'www.linkedin.com/in/kuhlula-madumo-78b670304',
       email: 'kmadumo@medmap.co.za'
