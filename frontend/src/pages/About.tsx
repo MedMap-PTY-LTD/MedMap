@@ -2,6 +2,7 @@ import React from 'react';
 import { Heart, Shield, Users, Zap, MapPin, Award } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import Header from '@/components/Header';
+import Footer from '@/components/Footer'; // ✅ Footer import
 
 const About = () => {
   const solutions = [
@@ -181,6 +182,9 @@ const About = () => {
           </CardContent>
         </Card>
       </main>
+
+      {/* ✅ FOOTER COMPONENT - At the bottom of the page */}
+      <Footer />
     </div>
   );
 };
