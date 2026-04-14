@@ -42,6 +42,7 @@ const AdminSetup = lazy(() => import("./pages/AdminSetup"));
 const RouteTest = lazy(() => import("./pages/RouteTest"));
 const FixAdminAccount = lazy(() => import("./pages/FixAdminAccount"));
 const ManualAdminSetup = lazy(() => import("./pages/ManualAdminSetup"));
+const AmbassadorProgramme = lazy(() => import("./pages/AmbassadorProgramme"));
 
 // Lazy load notification center
 const NotificationCenter = lazy(() => 
@@ -223,6 +224,13 @@ const App = () => {
                       <Route path="/support" element={<Support />} />
                       <Route path="/careers" element={<Careers />} />
                       <Route path="/contact" element={<Contact />} />
+                      
+                      {/* Ambassador Programme Route */}
+                      <Route path="/ambassador-programme" element={<AmbassadorProgramme />} />
+                      <Route path="/ambassadorProgramme" element={<Navigate to="/ambassador-programme" replace />} />
+                      <Route path="/AmbassadorProgramme" element={<Navigate to="/ambassador-programme" replace />} />
+                      <Route path="/become-an-ambassador" element={<Navigate to="/ambassador-programme" replace />} />
+                      
                       <Route path="/admin" element={<AdminDashboard />} />
                       <Route path="/admin-mashau-permits" element={<AdminMashauPermits />} />
                       <Route path="/search" element={<DoctorSearch />} />
