@@ -16,7 +16,7 @@ const Footer = () => {
                     className="h-full w-full object-contain"
                   />
                 </div>
-              </div> {/* ✅ Fixed: Added closing div for the relative container */}
+              </div>
               <span className="text-xl font-bold text-white">MedMap</span>
             </div>
             <p className="text-sm sm:text-base text-slate-400 leading-relaxed mb-4 max-w-md">
@@ -109,6 +109,12 @@ const Footer = () => {
               <li>
                 <Link to="/careers" className="text-slate-400 hover:text-white transition-colors">
                   Careers
+                </Link>
+              </li>
+              {/* New Ambassador link added here */}
+              <li>
+                <Link to="/ambassador-programme" className="text-slate-400 hover:text-white transition-colors">
+                  Become an Ambassador
                 </Link>
               </li>
               <li>
