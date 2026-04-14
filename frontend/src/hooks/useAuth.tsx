@@ -3,6 +3,7 @@ import { api, User as DjangoUser } from '@/lib/django-api';
 
 // Adapt types to match what the app expects (Supabase-like)
 interface Profile {
+  full_name: any;
   id: string;
   email: string;
   first_name?: string;
