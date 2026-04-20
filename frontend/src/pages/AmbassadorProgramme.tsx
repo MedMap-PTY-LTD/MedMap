@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { CheckCircle, TrendingUp, Users, Calendar, Shield, Award, Clock } from 'lucide-react';
 import Footer from '@/components/Footer';
 
@@ -474,9 +475,12 @@ const AmbassadorProgramme = () => {
           <p className="text-base sm:text-lg md:text-xl text-blue-100 mb-6 sm:mb-8 px-2">
             Join our growing network and earn monthly commission while helping expand healthcare access across South Africa.
           </p>
-          <button className="bg-white text-blue-600 px-6 sm:px-8 py-3 sm:py-4 rounded-full text-base sm:text-lg font-semibold hover:bg-blue-50 transition-colors duration-200 shadow-lg">
+          <Link 
+            to="/signup/ambassador"
+            className="bg-white text-blue-600 px-6 sm:px-8 py-3 sm:py-4 rounded-full text-base sm:text-lg font-semibold hover:bg-blue-50 transition-colors duration-200 shadow-lg inline-block"
+          >
             Apply Now
-          </button>
+          </Link>
         </div>
       </section>
       <Footer />

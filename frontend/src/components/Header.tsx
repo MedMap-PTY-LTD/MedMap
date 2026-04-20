@@ -1,8 +1,8 @@
+// components/Header.tsx
 import React, { useState, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Menu, X, User, LogOut, LayoutDashboard, Calendar } from 'lucide-react';
-import { AuthModal } from './auth/AuthModal';
+import { Menu, X, User, LogOut, LayoutDashboard, Calendar, ChevronDown } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import {
   DropdownMenu,
@@ -15,9 +15,9 @@ import {
 const Header = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
-  const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [authTab, setAuthTab] = useState<'login' | 'signup'>('login');
+  const [showSignupDropdown, setShowSignupDropdown] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, profile, signOut } = useAuth();
 
   useEffect(() => {
@@ -28,20 +28,10 @@ const Header = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  useEffect(() => {
-    const handleOpenAuthModal = (e: any) => {
-      const requestedTab = e?.detail?.tab as 'login' | 'signup' | undefined;
-      setAuthTab(requestedTab || 'login');
-      setAuthModalOpen(true);
-    };
-
-    window.addEventListener('openAuthModal', handleOpenAuthModal as EventListener);
-    return () => window.removeEventListener('openAuthModal', handleOpenAuthModal as EventListener);
-  }, []);
-
   // Close mobile menu on route change
   useEffect(() => {
     setIsMobileMenuOpen(false);
+    setShowSignupDropdown(false);
   }, [location]);
 
   const isActive = (path: string) => location.pathname === path;
@@ -69,6 +59,12 @@ const Header = () => {
         return '/dashboard';
     }
   };
+
+  const signupOptions = [
+    { name: 'As a Patient', path: '/signup/patient', description: 'Book appointments & manage healthcare' },
+    { name: 'As a Doctor', path: '/signup/doctor', description: 'Grow your practice with us' },
+    { name: 'As an Ambassador', path: '/signup/ambassador', description: 'Earn by referring doctors' },
+  ];
 
   return (
     <>
@@ -200,21 +196,62 @@ const Header = () => {
                   <Button
                     variant="ghost"
                     className="px-4 py-2 h-9 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg"
-                    onClick={() => { setAuthTab('login'); setAuthModalOpen(true); }}
+                    onClick={() => navigate('/signin')}
                   >
                     Sign in
                   </Button>
-                  <Button
-                    className="px-4 py-2 h-9 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-lg shadow-sm transition-all hover:shadow-md"
-                    onClick={() => { setAuthTab('signup'); setAuthModalOpen(true); }}
-                  >
-                    Get started
-                  </Button>
+                  
+                  {/* Signup Dropdown */}
+                  <div className="relative">
+                    <Button
+                      className="px-4 py-2 h-9 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-lg shadow-sm transition-all hover:shadow-md flex items-center gap-1"
+                      onClick={() => setShowSignupDropdown(!showSignupDropdown)}
+                    >
+                      Get started
+                      <ChevronDown className={`w-4 h-4 transition-transform ${showSignupDropdown ? 'rotate-180' : ''}`} />
+                    </Button>
+                    
+                    {showSignupDropdown && (
+                      <>
+                        <div 
+                          className="fixed inset-0 z-40" 
+                          onClick={() => setShowSignupDropdown(false)}
+                        />
+                        <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border border-slate-200 overflow-hidden z-50">
+                          <div className="p-1">
+                            {signupOptions.map((option) => (
+                              <Link
+                                key={option.path}
+                                to={option.path}
+                                className="block px-4 py-3 hover:bg-slate-50 rounded-lg transition-colors"
+                                onClick={() => setShowSignupDropdown(false)}
+                              >
+                                <div className="font-medium text-sm text-slate-900">{option.name}</div>
+                                <div className="text-xs text-slate-500 mt-0.5">{option.description}</div>
+                              </Link>
+                            ))}
+                          </div>
+                          <div className="border-t border-slate-100 px-4 py-2 bg-slate-50">
+                            <p className="text-xs text-slate-500">
+                              Already have an account?{' '}
+                              <Link 
+                                to="/signin" 
+                                className="text-blue-600 hover:text-blue-700 font-medium"
+                                onClick={() => setShowSignupDropdown(false)}
+                              >
+                                Sign in
+                              </Link>
+                            </p>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* Mobile Menu Button - Properly visible now */}
+            {/* Mobile Menu Button */}
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               className="md:hidden flex items-center justify-center w-9 h-9 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors"
@@ -229,14 +266,14 @@ const Header = () => {
           </div>
         </div>
 
-        {/* Mobile Menu - Full width, no overlap */}
+        {/* Mobile Menu */}
         <div 
           className={`
             md:hidden fixed left-0 right-0 bg-white border-b border-slate-200 shadow-lg
-            transition-all duration-300 ease-in-out overflow-hidden
-            ${isMobileMenuOpen ? 'max-h-[32rem] opacity-100' : 'max-h-0 opacity-0 border-none shadow-none'}
+            transition-all duration-300 ease-in-out overflow-hidden overflow-y-auto
+            ${isMobileMenuOpen ? 'max-h-[calc(100vh-3.5rem)] opacity-100' : 'max-h-0 opacity-0 border-none shadow-none'}
           `}
-          style={{ top: '3.5rem' }} // Matches h-14 exactly
+          style={{ top: '3.5rem' }}
         >
           <div className="px-4 py-4 space-y-4">
             {/* User Section - Mobile First */}
@@ -259,20 +296,37 @@ const Header = () => {
                 </div>
               </div>
             ) : (
-              <div className="flex gap-2 px-3">
+              <div className="space-y-3 px-3">
                 <Button
-                  variant="outline"
-                  className="flex-1 h-9 border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg text-xs"
-                  onClick={() => { setAuthTab('login'); setAuthModalOpen(true); }}
+                  className="w-full h-10 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm"
+                  onClick={() => navigate('/signin')}
                 >
                   Sign in
                 </Button>
-                <Button
-                  className="flex-1 h-9 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs"
-                  onClick={() => { setAuthTab('signup'); setAuthModalOpen(true); }}
-                >
-                  Sign up
-                </Button>
+                
+                <div className="space-y-1">
+                  <p className="text-xs text-slate-500 px-1">Create an account:</p>
+                  <div className="grid gap-1">
+                    <Link
+                      to="/signup/patient"
+                      className="block px-4 py-2.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-sm font-medium text-slate-900"
+                    >
+                      As a Patient
+                    </Link>
+                    <Link
+                      to="/signup/doctor"
+                      className="block px-4 py-2.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-sm font-medium text-slate-900"
+                    >
+                      As a Doctor
+                    </Link>
+                    <Link
+                      to="/signup/ambassador"
+                      className="block px-4 py-2.5 bg-slate-50 hover:bg-slate-100 rounded-lg text-sm font-medium text-slate-900"
+                    >
+                      As an Ambassador
+                    </Link>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -311,13 +365,29 @@ const Header = () => {
 
             {/* Mobile Sign Out */}
             {user && profile && (
-              <div className="px-2 pt-2 border-t border-slate-200">
+              <div className="px-2 pt-2 border-t border-slate-200 space-y-1">
                 <Link
                   to={getUserDashboardLink()}
                   className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 >
                   <LayoutDashboard className="h-4 w-4" />
                   Dashboard
+                </Link>
+                {profile.role === 'patient' && (
+                  <Link
+                    to="/bookings"
+                    className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                  >
+                    <Calendar className="h-4 w-4" />
+                    Bookings
+                  </Link>
+                )}
+                <Link
+                  to="/profile"
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                >
+                  <User className="h-4 w-4" />
+                  Profile
                 </Link>
                 <button
                   onClick={signOut}
@@ -334,8 +404,6 @@ const Header = () => {
 
       {/* Spacer - Matches header height exactly */}
       <div className="h-14 lg:h-20"></div>
-
-      <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} initialTab={authTab} />
     </>
   );
 };

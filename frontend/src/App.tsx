@@ -44,6 +44,13 @@ const FixAdminAccount = lazy(() => import("./pages/FixAdminAccount"));
 const ManualAdminSetup = lazy(() => import("./pages/ManualAdminSetup"));
 const AmbassadorProgramme = lazy(() => import("./pages/AmbassadorProgramme"));
 
+// Auth Pages
+const SignIn = lazy(() => import("./pages/auth/SignIn"));
+const SignUpSelection = lazy(() => import("./pages/auth/SignUpSelection"));
+const PatientSignUp = lazy(() => import("./pages/auth/PatientSignUp"));
+const DoctorSignUp = lazy(() => import("./pages/auth/DoctorSignUp"));
+const AmbassadorSignUp = lazy(() => import("./pages/auth/AmbassadorSignUp"));
+
 // Lazy load notification center
 const NotificationCenter = lazy(() => 
   import("@/components/notifications/NotificationCenter").then(module => ({
@@ -224,6 +231,14 @@ const App = () => {
                       <Route path="/support" element={<Support />} />
                       <Route path="/careers" element={<Careers />} />
                       <Route path="/contact" element={<Contact />} />
+                      
+                      {/* Auth Routes */}
+                      <Route path="/signin" element={<SignIn />} />
+                      <Route path="/login" element={<Navigate to="/signin" replace />} />
+                      <Route path="/signup" element={<SignUpSelection />} />
+                      <Route path="/signup/patient" element={<PatientSignUp />} />
+                      <Route path="/signup/doctor" element={<DoctorSignUp />} />
+                      <Route path="/signup/ambassador" element={<AmbassadorSignUp />} />
                       
                       {/* Ambassador Programme Route */}
                       <Route path="/ambassador-programme" element={<AmbassadorProgramme />} />
