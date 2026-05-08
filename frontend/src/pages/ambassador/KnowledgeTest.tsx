@@ -11,11 +11,11 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { doc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { db } from '/lib/firebase';
 import { 
   Clock, AlertTriangle, CheckCircle, XCircle, Loader2, 
   Flag, Timer, Award, Target, Brain, BookOpen, GraduationCap
-} from 'lucide-react'; b
+} from 'lucide-react';
 
 // 50 Knowledge Test Questions (based on training modules)
 const knowledgeQuestions = [
