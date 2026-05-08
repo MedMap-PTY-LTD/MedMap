@@ -15,7 +15,7 @@ import { db } from '../../lib/firebase';
 import { 
   Clock, AlertTriangle, CheckCircle, XCircle, Loader2, 
   Flag, Timer, Award, Target, Brain, BookOpen, GraduationCap
-} from 'lucide-react';
+} from 'lucide-react'; b
 
 // 50 Knowledge Test Questions (based on training modules)
 const knowledgeQuestions = [
