@@ -9,7 +9,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db } from '../../lib/firebase';
 import { Brain, AlertTriangle, CheckCircle, XCircle, Loader2, Clock, Heart, Users, Shield } from 'lucide-react';
 
 // 15 Psychometric Questions - Personality & Character Assessment

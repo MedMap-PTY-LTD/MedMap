@@ -1,7 +1,7 @@
 // hooks/useAuth.tsx
 import { createContext, useContext, useEffect, useState } from 'react';
 import { User } from 'firebase/auth';
-import { auth, authService, UserProfile, db } from '../../lib/firebase';
+import { auth, authService, UserProfile, db } from '../lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { useToast } from './use-toast';
 

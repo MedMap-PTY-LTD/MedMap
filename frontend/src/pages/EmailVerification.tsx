@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
-import { auth } from '../../lib/firebase';
+import { auth } from '../lib/firebase';
 import { sendEmailVerification, onAuthStateChanged, signOut } from 'firebase/auth';
 import { Mail, CheckCircle, RefreshCw, AlertCircle, ArrowRight, LogIn } from 'lucide-react';
 

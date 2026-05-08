@@ -48,7 +48,7 @@ import { BookingsRepo, Booking } from '@/backend/repositories/bookings';
 import { MembershipsRepo } from '@/backend/repositories/memberships';
 import { DoctorsRepo, Doctor } from '@/backend/repositories/doctors';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { db } from '../lib/firebase';
 import { serverTimestamp } from 'firebase/firestore';
 
 interface DashboardStats {
