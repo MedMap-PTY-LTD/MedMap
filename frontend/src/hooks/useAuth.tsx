@@ -1,124 +1,139 @@
-import { useState, useEffect, createContext, useContext } from 'react';
-import { api, User as DjangoUser } from '@/lib/django-api';
-
-// Adapt types to match what the app expects (Supabase-like)
-interface Profile {
-  full_name: any;
-  id: string;
-  email: string;
-  first_name?: string;
-  last_name?: string;
-  phone?: string;
-  role: 'patient' | 'doctor' | 'admin';
-  created_at?: string;
-  updated_at?: string;
-}
-
-// Minimal mock of Supabase User
-interface User {
-  id: string;
-  email?: string;
-  user_metadata?: any;
-}
+// hooks/useAuth.tsx
+import { createContext, useContext, useEffect, useState } from 'react';
+import { User } from 'firebase/auth';
+import { auth, authService, UserProfile, db } from '../../lib/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { useToast } from './use-toast';
 
 interface AuthContextType {
   user: User | null;
-  session: any | null; // We might not need a real session object
-  profile: Profile | null;
+  profile: UserProfile | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: any }>;
+  signUp: (email: string, password: string, profileData: any) => Promise<any>;
+  signIn: (email: string, password: string) => Promise<any>;
   signOut: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
+  updateProfile: (data: Partial<UserProfile>) => Promise<any>;
+  resendVerification: () => Promise<any>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-
-  const mapUserToState = (djangoUser: DjangoUser) => {
-    const userIdStr = djangoUser.id.toString();
-    
-    const mappedUser: User = {
-        id: userIdStr,
-        email: djangoUser.email,
-        user_metadata: {
-            first_name: djangoUser.first_name,
-            last_name: djangoUser.last_name,
-        }
-    };
-
-    const mappedProfile: Profile = {
-        id: userIdStr,
-        email: djangoUser.email,
-        role: djangoUser.role,
-        first_name: djangoUser.first_name,
-        last_name: djangoUser.last_name,
-        phone: djangoUser.phone_number
-    };
-
-    setUser(mappedUser);
-    setProfile(mappedProfile);
-  };
-
-  const fetchProfile = async () => {
-    try {
-        const token = localStorage.getItem('access_token');
-        if (!token) {
-            setUser(null);
-            setProfile(null);
-            return;
-        }
-        const userData = await api.getProfile(token);
-        mapUserToState(userData);
-    } catch (error) {
-        console.error('Error fetching profile:', error);
-        setUser(null);
-        setProfile(null);
-        localStorage.removeItem('access_token');
-    } finally {
-        setLoading(false);
-    }
-  };
+  const { toast } = useToast();
 
   useEffect(() => {
-    fetchProfile();
+    const unsubscribe = authService.onAuthStateChange(async (firebaseUser) => {
+      setUser(firebaseUser);
+      
+      if (firebaseUser) {
+        // Subscribe to user profile
+        const profileUnsubscribe = onSnapshot(
+          doc(db, 'users', firebaseUser.uid),
+          (snapshot) => {
+            if (snapshot.exists()) {
+              const profileData = snapshot.data() as UserProfile;
+              setProfile(profileData);
+            } else {
+              // If profile doesn't exist in Firestore but user is authenticated
+              console.log('User authenticated but no profile found in Firestore');
+            }
+            setLoading(false);
+          },
+          (error) => {
+            console.error('Profile subscription error:', error);
+            setLoading(false);
+          }
+        );
+        
+        return () => profileUnsubscribe();
+      } else {
+        setProfile(null);
+        setLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  const signIn = async (email: string, password: string) => {
-    const { user: djangoUser, error } = await api.login(email, password);
-    if (djangoUser) {
-        mapUserToState(djangoUser);
-        return { error: null };
+  const signUp = async (email: string, password: string, profileData: any) => {
+    const result = await authService.signUp(email, password, profileData);
+    
+    if (result.error) {
+      toast({
+        title: 'Sign Up Failed',
+        description: result.error,
+        variant: 'destructive',
+      });
+    } else {
+      toast({
+        title: 'Verification Email Sent',
+        description: 'Please check your inbox and verify your email address.',
+      });
     }
-    return { error };
+    
+    return result;
+  };
+
+  const signIn = async (email: string, password: string) => {
+    const result = await authService.signIn(email, password);
+    
+    if (result.error) {
+      toast({
+        title: 'Sign In Failed',
+        description: result.error,
+        variant: 'destructive',
+      });
+    } else if (result.user && result.profile) {
+      toast({
+        title: 'Welcome Back',
+        description: `Signed in as ${result.profile.fullName || email}`,
+      });
+    }
+    
+    return result;
   };
 
   const signOut = async () => {
-    api.logout();
-    setUser(null);
-    setProfile(null);
+    const result = await authService.signOut();
+    
+    if (result.error) {
+      toast({
+        title: 'Sign Out Failed',
+        description: result.error,
+        variant: 'destructive',
+      });
+    } else {
+      toast({
+        title: 'Signed Out',
+        description: 'You have been signed out successfully.',
+      });
+    }
   };
 
-  const refreshProfile = async () => {
-      await fetchProfile();
+  const updateProfile = async (data: Partial<UserProfile>) => {
+    if (!user) return { error: 'No user logged in' };
+    return await authService.updateProfile(user.uid, data);
   };
 
-  return (
-    <AuthContext.Provider value={{
-      user,
-      session: user ? { user } : null, // Mock session
-      profile,
-      loading,
-      signIn,
-      signOut,
-      refreshProfile
-    }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  const resendVerification = async () => {
+    return await authService.resendVerificationEmail();
+  };
+
+  const value = {
+    user,
+    profile,
+    loading,
+    signUp,
+    signIn,
+    signOut,
+    updateProfile,
+    resendVerification,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

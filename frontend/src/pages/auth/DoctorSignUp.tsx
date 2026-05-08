@@ -6,16 +6,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
-import { api } from '@/lib/django-api';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Stethoscope, Building2, MapPin, Phone, Mail, User, Lock, Award, Users } from 'lucide-react';
-import { Calendar } from '@/components/ui/calendar';
+import { Stethoscope, Building2, MapPin, Phone, Mail, User, Lock, Award, Users, Calendar } from 'lucide-react';
 
 const DoctorSignUp = () => {
   const navigate = useNavigate();
-  const { signIn } = useAuth();
+  const { signUp } = useAuth();
   const { toast } = useToast();
   
   const [formData, setFormData] = useState({
@@ -124,49 +122,40 @@ const DoctorSignUp = () => {
 
     try {
       setLoading(true);
-      const { error } = await api.signup({
-        email: formData.email,
-        password: formData.password,
-        username: formData.email,
-        first_name: formData.firstName,
-        last_name: formData.lastName,
-        is_doctor: true,
-        phone: formData.phone,
-        // Additional doctor fields
-        practice_name: formData.practiceName,
+      
+      // Sign up with Firebase
+      const { user, profile, error } = await signUp(formData.email, formData.password, {
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        phone: formData.phone || null,
+        role: 'doctor',
         specialization: formData.specialization,
-        hpcsa_number: formData.hpcsaNumber,
-        practice_address: formData.practiceAddress,
-        consultation_fee: formData.consultationFee,
+        hpcsaNumber: formData.hpcsaNumber || null,
+        practiceName: formData.practiceName || null,
+        practiceAddress: formData.practiceAddress || null,
+        consultationFee: formData.consultationFee ? parseFloat(formData.consultationFee) : null,
       });
 
       if (error) {
-        let errorMsg = 'Signup failed';
-        if (error.username) errorMsg = error.username[0];
-        else if (error.email) errorMsg = error.email[0];
-        else if (error.password) errorMsg = error.password[0];
-        
-        toast({ title: 'Sign up failed', description: errorMsg, variant: 'destructive' });
+        toast({ 
+          title: 'Sign up failed', 
+          description: error, 
+          variant: 'destructive' 
+        });
         return;
       }
 
-      // Auto sign-in after signup
-      const { error: loginError } = await signIn(formData.email, formData.password);
+      toast({
+        title: 'Account Created!',
+        description: 'We\'ve sent a verification link to your email. Please verify your email before signing in.',
+        duration: 8000,
+      });
       
-      if (loginError) {
-        toast({ 
-          title: 'Account Created', 
-          description: 'Your account has been created. Please complete your profile setup.',
-        });
-        navigate('/doctor-enrollment');
-      } else {
-        toast({ 
-          title: 'Welcome to MedMap', 
-          description: 'Your doctor account has been created successfully. Please complete your profile.',
-        });
-        navigate('/doctor-enrollment');
-      }
+      // Redirect to verification page
+      navigate(`/verify-email?email=${encodeURIComponent(formData.email)}`);
+      
     } catch (err: any) {
+      console.error('Signup error:', err);
       toast({ 
         title: 'Unexpected error', 
         description: err?.message || 'Please try again.', 
@@ -218,7 +207,7 @@ const DoctorSignUp = () => {
           <CardHeader className="space-y-1 px-4 sm:px-6">
             <CardTitle className="text-xl sm:text-2xl">Doctor Registration</CardTitle>
             <CardDescription className="text-sm">
-              Fill out the form below to create your doctor account. You'll be able to complete your full profile after registration.
+              Fill out the form below to create your doctor account. You'll receive a verification email to activate your account.
             </CardDescription>
           </CardHeader>
           
@@ -479,7 +468,7 @@ const DoctorSignUp = () => {
               </p>
               
               <p className="text-xs text-center text-gray-500">
-                After registration, you'll be directed to complete your full profile including practice details, availability, and verification documents.
+                By signing up, you'll receive a verification email. After verification, you'll be directed to complete your full profile.
               </p>
             </CardFooter>
           </form>

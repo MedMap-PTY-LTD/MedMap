@@ -1,300 +1,264 @@
-import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+// pages/EmailVerification.tsx
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { CheckCircle, Mail, RefreshCw, Home, AlertCircle } from 'lucide-react';
-import { api } from '@/lib/django-api';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import Header from '@/components/Header';
+import { auth } from '../../lib/firebase';
+import { sendEmailVerification, onAuthStateChanged, signOut } from 'firebase/auth';
+import { Mail, CheckCircle, RefreshCw, AlertCircle, ArrowRight, LogIn } from 'lucide-react';
 
 const EmailVerification = () => {
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [isResending, setIsResending] = useState(false);
-  const [isVerified, setIsVerified] = useState(false);
-  const [verificationError, setVerificationError] = useState<string | null>(null);
   const [searchParams] = useSearchParams();
-  const { user, refreshProfile } = useAuth();
-  const { toast } = useToast();
   const navigate = useNavigate();
+  const { toast } = useToast();
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [resendDisabled, setResendDisabled] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [isVerified, setIsVerified] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(true);
+  
+  const email = searchParams.get('email') || user?.email || 'your email';
 
   useEffect(() => {
-    // Check if there are verification tokens in the URL
-    const token = searchParams.get('token');
-    const type = searchParams.get('type');
-    
-    if (token && type === 'email_confirmation') {
-      handleEmailConfirmation(token);
-    }
-    
-    // Check if user is already verified
-    if (user?.email_confirmed_at) {
-      setIsVerified(true);
-    }
-  }, [searchParams, user]);
-
-  const handleEmailConfirmation = async (token: string) => {
-    setIsVerifying(true);
-    setVerificationError(null);
-    
-    try {
-      // Call Django API to verify email
-      const response = await api.request('/users/verify_email/', {
-        method: 'POST',
-        body: JSON.stringify({ token })
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to verify email');
+    // Check verification status
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser?.emailVerified) {
+        setIsVerified(true);
+        setCheckingStatus(false);
+        toast({
+          title: 'Email Verified!',
+          description: 'Your email has been verified successfully. You can now sign in.',
+        });
+      } else {
+        setCheckingStatus(false);
       }
-      
-      const data = await response.json();
+    });
+    
+    return () => unsubscribe();
+  }, [toast]);
 
-      // Assume success if we are here
-      setIsVerified(true);
-      await refreshProfile();
-      
-      toast({
-        title: "Email Verified!",
-        description: "Your email has been successfully verified. Welcome to IronLedgerMedMap!",
-      });
-
-      // Redirect to appropriate dashboard after a delay
-      setTimeout(() => {
-        // Use data.role if available, otherwise fallback to user state
-        const role = data.role || user?.role;
-        if (role === 'doctor') {
-            navigate('/doctor');
-        } else if (role === 'admin') {
-            navigate('/admin');
-        } else {
-            navigate('/dashboard');
-        }
-      }, 2000);
-      
-    } catch (error: any) {
-      setVerificationError(error.message || 'Failed to verify email');
-      toast({
-        title: "Verification Failed",
-        description: error.message || 'Failed to verify your email. Please try again.',
-        variant: "destructive",
-      });
-    } finally {
-      setIsVerifying(false);
+  useEffect(() => {
+    // Countdown timer for resend button
+    if (countdown > 0) {
+      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+      return () => clearTimeout(timer);
+    } else {
+      setResendDisabled(false);
     }
-  };
+  }, [countdown]);
 
   const handleResendVerification = async () => {
-    if (!user?.email) {
+    const currentUser = auth.currentUser;
+    
+    if (!currentUser) {
       toast({
-        title: "Error",
-        description: "No email address found. Please sign in again.",
-        variant: "destructive",
+        title: 'No User Found',
+        description: 'Please sign up first.',
+        variant: 'destructive',
+      });
+      navigate('/signup');
+      return;
+    }
+    
+    if (currentUser.emailVerified) {
+      setIsVerified(true);
+      toast({
+        title: 'Already Verified',
+        description: 'Your email is already verified!',
       });
       return;
     }
-
-    setIsResending(true);
+    
+    setLoading(true);
     
     try {
-      const response = await api.request('/users/resend_verification/', {
-        method: 'POST',
-        body: JSON.stringify({ email: user.email })
+      await sendEmailVerification(currentUser);
+      
+      toast({
+        title: 'Verification Email Sent',
+        description: `We've sent a new verification link to ${currentUser.email}`,
       });
       
-      if (!response.ok) {
-        throw new Error('Failed to resend verification email');
+      // Disable resend for 60 seconds
+      setResendDisabled(true);
+      setCountdown(60);
+      
+    } catch (error: any) {
+      console.error('Resend error:', error);
+      
+      let errorMessage = 'Failed to send verification email.';
+      if (error.code === 'auth/too-many-requests') {
+        errorMessage = 'Too many requests. Please try again later.';
       }
       
       toast({
-        title: "Verification Email Sent",
-        description: "Please check your inbox (and spam folder) for the verification link.",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to resend verification email",
-        variant: "destructive",
+        title: 'Error',
+        description: errorMessage,
+        variant: 'destructive',
       });
     } finally {
-      setIsResending(false);
+      setLoading(false);
     }
   };
 
-  const handleGoHome = () => {
-    navigate('/');
+  const handleGoToSignIn = async () => {
+    // Sign out the current user so they can sign in fresh
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error('Sign out error:', error);
+    }
+    navigate('/signin');
   };
 
-  const handleGoToDashboard = () => {
-    if (user?.user_metadata?.role === 'doctor') {
-      navigate('/doctor');
-    } else if (user?.user_metadata?.role === 'admin') {
-      navigate('/admin');
-    } else {
-      navigate('/dashboard');
+  const handleCheckVerification = async () => {
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      await currentUser.reload();
+      if (currentUser.emailVerified) {
+        setIsVerified(true);
+        toast({
+          title: 'Email Verified!',
+          description: 'Your email has been verified. You can now sign in.',
+        });
+      } else {
+        toast({
+          title: 'Not Verified Yet',
+          description: 'Please check your inbox and click the verification link.',
+        });
+      }
     }
   };
 
-  return (
-    <div className="min-h-screen bg-background">
-      <Header />
-      
-      <div className="container mx-auto px-4 py-16">
-        <div className="max-w-md mx-auto">
-          <Card className="medical-card">
-            <CardHeader className="text-center">
-              <div className="w-16 h-16 mx-auto mb-4 bg-primary/10 rounded-full flex items-center justify-center">
-                {isVerifying ? (
-                  <RefreshCw className="h-8 w-8 text-primary animate-spin" />
-                ) : isVerified ? (
-                  <CheckCircle className="h-8 w-8 text-success" />
-                ) : verificationError ? (
-                  <AlertCircle className="h-8 w-8 text-destructive" />
-                ) : (
-                  <Mail className="h-8 w-8 text-primary" />
-                )}
-              </div>
-              
-              <CardTitle className="text-2xl text-medical-gradient">
-                {isVerifying 
-                  ? 'Verifying Email...' 
-                  : isVerified 
-                    ? 'Email Verified!' 
-                    : verificationError
-                      ? 'Verification Failed'
-                      : 'Verify Your Email'
-                }
-              </CardTitle>
-            </CardHeader>
-            
-            <CardContent className="space-y-6">
-              {isVerifying && (
-                <div className="text-center">
-                  <p className="text-muted-foreground">
-                    Please wait while we verify your email address...
-                  </p>
-                </div>
-              )}
-
-              {isVerified && (
-                <>
-                  <Alert className="border-success/20 bg-success/10">
-                    <CheckCircle className="h-4 w-4 text-success" />
-                    <AlertDescription className="text-success">
-                      Your email has been successfully verified! You now have full access to IronLedgerMedMap.
-                    </AlertDescription>
-                  </Alert>
-                  
-                  <div className="text-center space-y-3">
-                    <p className="text-muted-foreground">
-                      Welcome to South Africa's leading medical booking platform!
-                    </p>
-                    <Button 
-                      className="btn-medical-primary w-full"
-                      onClick={handleGoToDashboard}
-                    >
-                      Go to Dashboard
-                    </Button>
-                  </div>
-                </>
-              )}
-
-              {verificationError && (
-                <>
-                  <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription>
-                      {verificationError}
-                    </AlertDescription>
-                  </Alert>
-                  
-                  <div className="space-y-3">
-                    <p className="text-center text-muted-foreground">
-                      Don't worry! You can request a new verification email.
-                    </p>
-                    
-                    <Button 
-                      className="btn-medical-primary w-full"
-                      onClick={handleResendVerification}
-                      disabled={isResending}
-                    >
-                      {isResending ? (
-                        <>
-                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                          Sending...
-                        </>
-                      ) : (
-                        <>
-                          <Mail className="h-4 w-4 mr-2" />
-                          Resend Verification Email
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </>
-              )}
-
-              {!isVerifying && !isVerified && !verificationError && (
-                <>
-                  <div className="text-center space-y-4">
-                    <p className="text-muted-foreground">
-                      We've sent a verification email to <strong>{user?.email}</strong>
-                    </p>
-                    
-                    <p className="text-sm text-muted-foreground">
-                      Please check your email and click the verification link to activate your account.
-                    </p>
-
-                    <Alert>
-                      <Mail className="h-4 w-4" />
-                      <AlertDescription>
-                        Don't forget to check your spam/junk folder if you don't see the email in your inbox.
-                      </AlertDescription>
-                    </Alert>
-                  </div>
-
-                  <div className="space-y-3">
-                    <Button 
-                      className="btn-medical-primary w-full"
-                      onClick={handleResendVerification}
-                      disabled={isResending}
-                    >
-                      {isResending ? (
-                        <>
-                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                          Sending...
-                        </>
-                      ) : (
-                        <>
-                          <Mail className="h-4 w-4 mr-2" />
-                          Resend Verification Email
-                        </>
-                      )}
-                    </Button>
-                    
-                    <Button 
-                      variant="outline" 
-                      className="btn-medical-secondary w-full"
-                      onClick={handleGoHome}
-                    >
-                      <Home className="h-4 w-4 mr-2" />
-                      Back to Home
-                    </Button>
-                  </div>
-                </>
-              )}
-
-              <div className="text-center">
-                <p className="text-xs text-muted-foreground">
-                  Having trouble? Contact our support team for assistance.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+  if (checkingStatus) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-cyan-50 flex items-center justify-center">
+        <div className="text-center">
+          <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-600" />
+          <p className="text-gray-600">Checking verification status...</p>
         </div>
       </div>
+    );
+  }
+
+  if (isVerified) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-green-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <div className="mx-auto w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-4">
+              <CheckCircle className="w-12 h-12 text-green-600" />
+            </div>
+            <CardTitle className="text-3xl text-green-700">Email Verified!</CardTitle>
+            <CardDescription className="text-lg">
+              Thank you for verifying your email address.
+            </CardDescription>
+          </CardHeader>
+          
+          <CardContent className="text-center space-y-6">
+            <p className="text-gray-600">
+              Your account is now fully activated. You can now sign in and access all features of MedMap.
+            </p>
+            
+            <div className="bg-green-50 rounded-lg p-4">
+              <p className="text-sm text-green-800">
+                Click below to sign in to your account.
+              </p>
+            </div>
+            
+            <Button onClick={handleGoToSignIn} className="w-full" size="lg">
+              <LogIn className="w-4 h-4 mr-2" />
+              Go to Sign In
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-cyan-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+      <Card className="w-full max-w-md">
+        <CardHeader className="text-center">
+          <div className="mx-auto w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mb-4">
+            <Mail className="w-12 h-12 text-blue-600" />
+          </div>
+          <CardTitle className="text-2xl">Verify Your Email</CardTitle>
+          <CardDescription className="text-base">
+            We sent a verification link to
+          </CardDescription>
+          <p className="text-lg font-semibold text-gray-900 mt-1">{email}</p>
+        </CardHeader>
+        
+        <CardContent className="space-y-6">
+          <div className="bg-blue-50 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+              <div className="text-sm text-blue-800">
+                <p className="font-medium mb-1">Check your inbox</p>
+                <p>Click the verification link in the email to activate your account. 
+                   If you don't see it, check your spam folder.</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="space-y-3">
+            <Button
+              onClick={handleCheckVerification}
+              variant="outline"
+              className="w-full"
+            >
+              <CheckCircle className="w-4 h-4 mr-2" />
+              I've Verified My Email
+            </Button>
+            
+            <Button
+              onClick={handleResendVerification}
+              disabled={loading || resendDisabled}
+              variant="outline"
+              className="w-full"
+            >
+              {loading ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Sending...
+                </>
+              ) : resendDisabled ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Resend available in {countdown}s
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Resend Verification Email
+                </>
+              )}
+            </Button>
+            
+            <Button
+              onClick={handleGoToSignIn}
+              variant="ghost"
+              className="w-full"
+            >
+              Back to Sign In
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </Button>
+          </div>
+          
+          <div className="border-t pt-4">
+            <p className="text-xs text-center text-gray-500">
+              Wrong email?{' '}
+              <Link to="/signup" className="text-blue-600 hover:text-blue-700 font-medium">
+                Sign up again
+              </Link>
+            </p>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };

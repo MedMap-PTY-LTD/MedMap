@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./hooks/useAuth";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { HelpCircle, MessageCircle, Phone, AlertTriangle, Heart, Ambulance, Shield } from 'lucide-react';
+import InitialAdminSetup from './pages/InitialAdminSetup';
 
 // Lazy load pages for better performance
 const Index = lazy(() => import("./pages/Index"));
@@ -18,7 +19,6 @@ const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
 const PAIAManual = lazy(() => import("./pages/PAIAManual"));
 const DoctorEnrollment = lazy(() => import("./pages/DoctorEnrollment"));
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
-const AdminMashauPermits = lazy(() => import("./pages/admin/AdminMashauPermits"));
 const DoctorDashboard = lazy(() => import("./pages/doctor/DoctorDashboard"));
 const DoctorSearch = lazy(() => import("./pages/DoctorSearch"));
 const DoctorProfile = lazy(() => import("./pages/DoctorProfile"));
@@ -38,7 +38,6 @@ const PatientDashboard = lazy(() => import("./pages/PatientDashboard"));
 const EmailVerification = lazy(() => import("./pages/EmailVerification"));
 const Profile = lazy(() => import("./pages/Profile"));
 const CreateAdminAccount = lazy(() => import("./pages/CreateAdminAccount"));
-const AdminSetup = lazy(() => import("./pages/AdminSetup"));
 const RouteTest = lazy(() => import("./pages/RouteTest"));
 const FixAdminAccount = lazy(() => import("./pages/FixAdminAccount"));
 const ManualAdminSetup = lazy(() => import("./pages/ManualAdminSetup"));
@@ -50,6 +49,9 @@ const SignUpSelection = lazy(() => import("./pages/auth/SignUpSelection"));
 const PatientSignUp = lazy(() => import("./pages/auth/PatientSignUp"));
 const DoctorSignUp = lazy(() => import("./pages/auth/DoctorSignUp"));
 const AmbassadorSignUp = lazy(() => import("./pages/auth/AmbassadorSignUp"));
+const AmbassadorPortal = lazy(() => import("./pages/ambassador/AmbassadorPortal"));
+const PsychometricTest = lazy(() => import("./pages/ambassador/PsychometricTest"));
+
 
 // Lazy load notification center
 const NotificationCenter = lazy(() => 
@@ -239,15 +241,18 @@ const App = () => {
                       <Route path="/signup/patient" element={<PatientSignUp />} />
                       <Route path="/signup/doctor" element={<DoctorSignUp />} />
                       <Route path="/signup/ambassador" element={<AmbassadorSignUp />} />
+                      <Route path="/admin-setup" element={<InitialAdminSetup />} />
+                      <Route path="/verify-email" element={<EmailVerification />} />
                       
                       {/* Ambassador Programme Route */}
                       <Route path="/ambassador-programme" element={<AmbassadorProgramme />} />
                       <Route path="/ambassadorProgramme" element={<Navigate to="/ambassador-programme" replace />} />
                       <Route path="/AmbassadorProgramme" element={<Navigate to="/ambassador-programme" replace />} />
                       <Route path="/become-an-ambassador" element={<Navigate to="/ambassador-programme" replace />} />
+                      <Route path="/ambassador/portal" element={<AmbassadorPortal />} />
+                      <Route path="/ambassador/psychometric-test" element={<PsychometricTest />} />
                       
                       <Route path="/admin" element={<AdminDashboard />} />
-                      <Route path="/admin-mashau-permits" element={<AdminMashauPermits />} />
                       <Route path="/search" element={<DoctorSearch />} />
                       <Route path="/doctor/:doctorId" element={<DoctorProfile />} />
                       <Route path="/book/:doctorId" element={<BookAppointment />} />
@@ -260,7 +265,7 @@ const App = () => {
                       <Route path="/create-admin-account" element={<CreateAdminAccount />} />
                       <Route path="/CreateAdminAccount" element={<Navigate to="/create-admin-account" replace />} />
                       <Route path="/createAdminAccount" element={<Navigate to="/create-admin-account" replace />} />
-                      <Route path="/admin-setup" element={<AdminSetup />} />
+                      <Route path="/admin-setup" element={<InitialAdminSetup />} />
                       <Route path="/AdminSetup" element={<Navigate to="/admin-setup" replace />} />
                       <Route path="/adminSetup" element={<Navigate to="/admin-setup" replace />} />
                       <Route path="/admin_setup" element={<Navigate to="/admin-setup" replace />} />
