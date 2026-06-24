@@ -1,279 +1,503 @@
-import React, { useEffect, useState } from 'react';
-import { Storage } from '@/backend/storage';
-import { MapPin, Clock, Star, Shield, Calendar, ChevronRight, User } from 'lucide-react';
+// pages/DoctorProfile.tsx
+import React, { useState, useEffect } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import { useAuth } from '@/hooks/useAuth';
+import { db } from '@/lib/firebase';
+import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { useNavigate } from 'react-router-dom';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Separator } from '@/components/ui/separator';
+import { useToast } from '@/hooks/use-toast';
+import {
+  Star,
+  MapPin,
+  Phone,
+  Mail,
+  Clock,
+  Calendar,
+  DollarSign,
+  Award,
+  Stethoscope,
+  Building2,
+  Users,
+  Heart,
+  Shield,
+  AlertCircle,
+  Loader2,
+  CheckCircle,
+  MessageCircle,
+  Video,
+  ExternalLink
+} from 'lucide-react';
 
-interface DoctorCardProps {
-  doctor: {
-    id?: string;
-    name: string;
-    specialty: string;
-    location: string;
-    province: string;
-    rating: number;
-    reviews: number;
-    price: string;
-    availability: string;
-    image?: string;
-    verified: boolean;
-    languages: string[];
-    experience: string;
+interface DoctorProfileData {
+  uid: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  email: string;
+  phone?: string;
+  specialization: string;
+  hpcsaNumber?: string;
+  practiceName?: string;
+  practiceAddress?: string;
+  practicePhone?: string;
+  practiceEmail?: string;
+  consultationFee?: number;
+  consultationDuration?: number;
+  bio?: string;
+  experience?: string;
+  qualifications?: string[];
+  operatingHours?: {
+    monday?: { isOpen: boolean; start: string; end: string };
+    tuesday?: { isOpen: boolean; start: string; end: string };
+    wednesday?: { isOpen: boolean; start: string; end: string };
+    thursday?: { isOpen: boolean; start: string; end: string };
+    friday?: { isOpen: boolean; start: string; end: string };
+    saturday?: { isOpen: boolean; start: string; end: string };
+    sunday?: { isOpen: boolean; start: string; end: string };
   };
+  verificationStatus: 'pending' | 'verified' | 'rejected';
+  rating?: number;
+  reviewCount?: number;
+  profileImage?: string;
+  createdAt?: any;
+  updatedAt?: any;
 }
 
-const DoctorCard = ({ doctor }: DoctorCardProps) => {
-  const navigate = useNavigate();
-  const [imageUrl, setImageUrl] = useState<string | undefined>(doctor.image && doctor.image.startsWith('http') ? doctor.image : undefined);
+const DoctorProfile = () => {
+  const { doctorId } = useParams<{ doctorId: string }>();
+  const { user, profile } = useAuth();
+  const { toast } = useToast();
+  const [doctor, setDoctor] = useState<DoctorProfileData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isBooked, setIsBooked] = useState(false);
 
   useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      if (!doctor.image) return;
-      if (doctor.image.startsWith('http')) {
-        setImageUrl(doctor.image);
+    if (doctorId) {
+      fetchDoctorProfile();
+    }
+  }, [doctorId]);
+
+  const fetchDoctorProfile = async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      // First, get the doctor's data from the doctors collection
+      const doctorRef = doc(db, 'doctors', doctorId!);
+      const doctorSnap = await getDoc(doctorRef);
+
+      if (!doctorSnap.exists()) {
+        setError('Doctor not found');
+        setLoading(false);
         return;
       }
-      try {
-        const url = await Storage.createSignedUrl(doctor.image);
-        if (mounted && url) setImageUrl(url);
-      } catch (e) {
-        console.error('Failed to create signed URL', e);
+
+      const doctorData = doctorSnap.data();
+
+      // Get the user profile data
+      const userRef = doc(db, 'users', doctorId!);
+      const userSnap = await getDoc(userRef);
+      const userData = userSnap.exists() ? userSnap.data() : {};
+
+      // Combine the data
+      const combinedData: DoctorProfileData = {
+        uid: doctorId!,
+        firstName: userData.firstName || doctorData.firstName || '',
+        lastName: userData.lastName || doctorData.lastName || '',
+        fullName: userData.fullName || doctorData.fullName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
+        email: userData.email || doctorData.email || '',
+        phone: userData.phone || doctorData.phone || '',
+        specialization: doctorData.specialization || '',
+        hpcsaNumber: doctorData.hpcsaNumber || '',
+        practiceName: doctorData.practiceName || '',
+        practiceAddress: doctorData.practiceAddress || '',
+        practicePhone: doctorData.practicePhone || '',
+        practiceEmail: doctorData.practiceEmail || '',
+        consultationFee: doctorData.consultationFee || 0,
+        consultationDuration: doctorData.consultationDuration || 30,
+        bio: doctorData.bio || '',
+        experience: doctorData.experience || '',
+        qualifications: doctorData.qualifications || [],
+        operatingHours: doctorData.operatingHours || {},
+        verificationStatus: doctorData.verificationStatus || 'pending',
+        rating: doctorData.rating || 0,
+        reviewCount: doctorData.reviewCount || 0,
+        profileImage: doctorData.profileImage || userData.photoURL || '',
+        createdAt: doctorData.createdAt || userData.createdAt,
+        updatedAt: doctorData.updatedAt || userData.updatedAt,
+      };
+
+      setDoctor(combinedData);
+
+      // Check if current user has booked this doctor
+      if (user) {
+        const bookingsRef = collection(db, 'bookings');
+        const q = query(
+          bookingsRef,
+          where('doctorId', '==', doctorId),
+          where('patientId', '==', user.uid),
+          where('status', 'in', ['pending', 'confirmed'])
+        );
+        const bookingsSnap = await getDocs(q);
+        setIsBooked(!bookingsSnap.empty);
       }
+    } catch (err: any) {
+      console.error('Error fetching doctor profile:', err);
+      setError(err.message || 'Failed to load doctor profile');
+      toast({
+        title: 'Error',
+        description: 'Failed to load doctor profile. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-ZA', {
+      style: 'currency',
+      currency: 'ZAR',
+    }).format(amount);
+  };
+
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(word => word[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  const getStatusBadge = (status: string) => {
+    const variants: Record<string, string> = {
+      pending: 'bg-yellow-100 text-yellow-800',
+      verified: 'bg-green-100 text-green-800',
+      rejected: 'bg-red-100 text-red-800',
     };
-    load();
-    return () => { mounted = false; };
-  }, [doctor.image]);
-
-  const handleBookNow = () => {
-    if (doctor.id) {
-      navigate(`/book/${doctor.id}`);
-    } else {
-      navigate('/search');
-    }
+    return variants[status] || 'bg-gray-100 text-gray-800';
   };
 
-  const handleViewProfile = () => {
-    if (doctor.id) {
-      navigate(`/doctor/${doctor.id}`);
-    } else {
-      navigate('/search');
-    }
+  const getDayName = (day: string) => {
+    const days: Record<string, string> = {
+      monday: 'Monday',
+      tuesday: 'Tuesday',
+      wednesday: 'Wednesday',
+      thursday: 'Thursday',
+      friday: 'Friday',
+      saturday: 'Saturday',
+      sunday: 'Sunday',
+    };
+    return days[day] || day;
   };
 
-  // Get initials for avatar fallback
-  const getInitials = () => {
-    return doctor.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
-  };
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+          <p className="text-gray-600">Loading doctor profile...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !doctor) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <Card className="max-w-md w-full">
+          <CardContent className="pt-6 text-center">
+            <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Doctor Not Found</h2>
+            <p className="text-gray-600 mb-4">{error || 'The doctor you are looking for does not exist.'}</p>
+            <Button asChild>
+              <Link to="/search">Find Another Doctor</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <Card className="group border border-slate-200/80 hover:border-slate-300/80 transition-all duration-300 hover:shadow-lg bg-white rounded-xl sm:rounded-2xl overflow-hidden">
-      <CardContent className="p-0">
-        {/* Mobile Layout - ICONS ONLY */}
-        <div className="block sm:hidden">
-          {/* Top Section - Doctor Info */}
-          <div className="p-4 pb-2">
-            <div className="flex items-start gap-3">
-              {/* Avatar */}
-              <div className="w-14 h-14 rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0 bg-slate-100">
-                {doctor.image ? (
-                  <img 
-                    src={imageUrl || doctor.image} 
-                    alt={`Dr. ${doctor.name}`} 
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
+    <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-4xl mx-auto">
+        {/* Header */}
+        <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+          <div className="bg-gradient-to-r from-blue-600 to-blue-800 h-32 sm:h-48"></div>
+          <div className="px-4 sm:px-6 pb-6">
+            <div className="flex flex-col sm:flex-row sm:items-end -mt-16 sm:-mt-12 gap-4">
+              <Avatar className="w-24 h-24 sm:w-32 sm:h-32 border-4 border-white shadow-lg">
+                <AvatarImage src={doctor.profileImage || undefined} />
+                <AvatarFallback className="bg-blue-100 text-blue-800 text-2xl sm:text-4xl font-bold">
+                  {getInitials(doctor.fullName)}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
+                      Dr. {doctor.fullName}
+                    </h1>
+                    <div className="flex flex-wrap items-center gap-2 mt-1">
+                      <Badge className="bg-blue-100 text-blue-800">
+                        <Stethoscope className="w-3 h-3 mr-1" />
+                        {doctor.specialization}
+                      </Badge>
+                      <Badge className={getStatusBadge(doctor.verificationStatus)}>
+                        {doctor.verificationStatus === 'verified' ? (
+                          <CheckCircle className="w-3 h-3 mr-1" />
+                        ) : null}
+                        {doctor.verificationStatus.charAt(0).toUpperCase() + doctor.verificationStatus.slice(1)}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center">
+                      <Star className="w-5 h-5 text-yellow-400 fill-yellow-400" />
+                      <span className="ml-1 text-lg font-semibold text-gray-900">
+                        {doctor.rating?.toFixed(1) || 'New'}
+                      </span>
+                    </div>
+                    <span className="text-sm text-gray-500">
+                      ({doctor.reviewCount || 0} reviews)
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column - Details */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* About */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">About Dr. {doctor.fullName}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {doctor.bio ? (
+                  <p className="text-gray-700 whitespace-pre-wrap">{doctor.bio}</p>
                 ) : (
-                  <div className="w-full h-full bg-gradient-to-br from-blue-600 to-blue-500 flex items-center justify-center text-white text-lg font-semibold">
-                    {getInitials()}
-                  </div>
+                  <p className="text-gray-500">No bio provided yet.</p>
                 )}
-              </div>
-              
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 mb-0.5">
-                  <h3 className="text-base font-semibold text-slate-900 truncate">
-                    Dr. {doctor.name}
-                  </h3>
-                  {doctor.verified && (
-                    <Shield className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
-                  )}
-                </div>
-                <p className="text-sm text-blue-600 font-medium mb-1">{doctor.specialty}</p>
                 
-                {/* Location & Rating - Compact */}
-                <div className="flex items-center gap-2 text-xs">
-                  <div className="flex items-center gap-1 text-slate-600">
-                    <MapPin className="h-3 w-3 text-slate-400" />
-                    <span className="truncate max-w-[120px]">{doctor.location}</span>
+                {doctor.experience && (
+                  <div className="mt-4">
+                    <h4 className="text-sm font-semibold text-gray-700">Experience</h4>
+                    <p className="text-gray-600">{doctor.experience}</p>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
-                    <span className="font-medium text-slate-900">{doctor.rating}</span>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Price - Vertical on mobile */}
-              <div className="text-right flex-shrink-0">
-                <div className="text-lg font-bold text-slate-900">{doctor.price}</div>
-                <p className="text-[10px] text-slate-500">consult</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Bottom Bar - Experience, Languages, Actions ALL IN ONE ROW */}
-          <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100">
-            {/* Left: Experience & Availability */}
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1 text-xs text-slate-600">
-                <Clock className="h-3.5 w-3.5 text-slate-400" />
-                <span className="text-xs">{doctor.experience}</span>
-              </div>
-              <Badge variant="secondary" className="text-[10px] px-2 py-0.5 bg-slate-100 text-slate-700">
-                {doctor.availability}
-              </Badge>
-            </div>
-
-            {/* Right: Languages & Actions */}
-            <div className="flex items-center gap-2">
-              {/* Languages - Show first 2 on mobile */}
-              <div className="flex gap-1">
-                {doctor.languages.slice(0, 2).map((language) => (
-                  <Badge key={language} variant="outline" className="text-[10px] px-1.5 py-0.5 border-slate-200 text-slate-600">
-                    {language}
-                  </Badge>
-                ))}
-                {doctor.languages.length > 2 && (
-                  <span className="text-[10px] text-slate-500">+{doctor.languages.length - 2}</span>
                 )}
-              </div>
-              
-              {/* ICONS ONLY - Clean AF */}
-              <div className="flex items-center gap-1.5">
-                <Button 
-                  size="sm"
-                  className="h-8 w-8 bg-blue-600 hover:bg-blue-700 text-white rounded-lg p-0 transition-all active:scale-[0.95]"
-                  onClick={handleBookNow}
-                  title="Book appointment"
-                >
-                  <Calendar className="h-4 w-4" />
-                </Button>
-                <Button 
-                  size="sm"
-                  variant="outline" 
-                  className="h-8 w-8 border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg p-0 transition-all active:scale-[0.95]"
-                  onClick={handleViewProfile}
-                  title="View profile"
-                >
-                  <User className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
 
-        {/* Desktop Layout - Hidden on mobile */}
-        <div className="hidden sm:block p-5 lg:p-6">
-          <div className="flex items-start gap-4 lg:gap-6">
-            {/* Doctor Avatar - Desktop size */}
-            <div className="w-20 h-20 lg:w-24 lg:h-24 rounded-xl lg:rounded-2xl flex items-center justify-center overflow-hidden flex-shrink-0 bg-slate-100">
-              {doctor.image ? (
-                <img 
-                  src={imageUrl || doctor.image} 
-                  alt={`Dr. ${doctor.name}`} 
-                  className="w-full h-full object-cover"
-                  loading="lazy"
-                />
-              ) : (
-                <div className="w-full h-full bg-gradient-to-br from-blue-600 to-blue-500 flex items-center justify-center text-white text-xl lg:text-2xl font-semibold">
-                  {getInitials()}
-                </div>
-              )}
-            </div>
-
-            <div className="flex-1 min-w-0">
-              {/* Header Row */}
-              <div className="flex items-start justify-between mb-2">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="text-lg lg:text-xl font-semibold text-slate-900 truncate">
-                      Dr. {doctor.name}
-                    </h3>
-                    {doctor.verified && (
-                      <Shield className="h-4 w-4 lg:h-5 lg:w-5 text-emerald-600 flex-shrink-0" />
-                    )}
+                {doctor.qualifications && doctor.qualifications.length > 0 && (
+                  <div className="mt-4">
+                    <h4 className="text-sm font-semibold text-gray-700">Qualifications</h4>
+                    <ul className="list-disc list-inside text-gray-600 mt-1">
+                      {doctor.qualifications.map((qual, index) => (
+                        <li key={index}>{qual}</li>
+                      ))}
+                    </ul>
                   </div>
-                  <p className="text-sm lg:text-base text-blue-600 font-medium">{doctor.specialty}</p>
-                </div>
-                <div className="text-right flex-shrink-0 ml-4">
-                  <div className="text-xl lg:text-2xl font-bold text-slate-900">{doctor.price}</div>
-                  <p className="text-xs text-slate-500">per consultation</p>
-                </div>
-              </div>
+                )}
 
-              {/* Location & Rating */}
-              <div className="flex items-center gap-3 lg:gap-4 mb-3">
-                <div className="flex items-center gap-1 text-xs lg:text-sm text-slate-600">
-                  <MapPin className="h-3.5 w-3.5 lg:h-4 lg:w-4 text-slate-400" />
-                  <span>{doctor.location}, {doctor.province}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Star className="h-3.5 w-3.5 lg:h-4 lg:w-4 fill-amber-400 text-amber-400" />
-                  <span className="text-xs lg:text-sm font-medium text-slate-900">{doctor.rating}</span>
-                  <span className="text-xs text-slate-500">({doctor.reviews})</span>
-                </div>
-              </div>
+                {doctor.hpcsaNumber && (
+                  <div className="mt-4">
+                    <h4 className="text-sm font-semibold text-gray-700">HPCSA Number</h4>
+                    <p className="text-gray-600">{doctor.hpcsaNumber}</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
-              {/* Experience & Availability */}
-              <div className="flex items-center gap-3 lg:gap-4 mb-3">
-                <div className="flex items-center gap-1 text-xs lg:text-sm text-slate-600">
-                  <Clock className="h-3.5 w-3.5 lg:h-4 lg:w-4 text-slate-400" />
-                  <span>{doctor.experience} experience</span>
+            {/* Operating Hours */}
+            {doctor.operatingHours && Object.keys(doctor.operatingHours).length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Clock className="w-5 h-5 text-blue-600" />
+                    Operating Hours
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map((day) => {
+                      const hours = doctor.operatingHours?.[day as keyof typeof doctor.operatingHours];
+                      if (!hours) return null;
+                      return (
+                        <div key={day} className="flex justify-between items-center py-1 border-b border-gray-100 last:border-0">
+                          <span className="font-medium text-gray-700">{getDayName(day)}</span>
+                          {hours.isOpen ? (
+                            <span className="text-gray-600">
+                              {hours.start} - {hours.end}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">Closed</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Right Column - Contact & Actions */}
+          <div className="space-y-6">
+            {/* Contact Information */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Contact Information</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {doctor.practiceName && (
+                  <div className="flex items-start gap-3">
+                    <Building2 className="w-4 h-4 text-gray-500 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">{doctor.practiceName}</p>
+                      {doctor.practiceAddress && (
+                        <p className="text-sm text-gray-600">{doctor.practiceAddress}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {doctor.phone && (
+                  <div className="flex items-center gap-3">
+                    <Phone className="w-4 h-4 text-gray-500" />
+                    <a href={`tel:${doctor.phone}`} className="text-sm text-blue-600 hover:underline">
+                      {doctor.phone}
+                    </a>
+                  </div>
+                )}
+
+                {doctor.email && (
+                  <div className="flex items-center gap-3">
+                    <Mail className="w-4 h-4 text-gray-500" />
+                    <a href={`mailto:${doctor.email}`} className="text-sm text-blue-600 hover:underline">
+                      {doctor.email}
+                    </a>
+                  </div>
+                )}
+
+                {doctor.practicePhone && (
+                  <div className="flex items-center gap-3">
+                    <Phone className="w-4 h-4 text-gray-500" />
+                    <a href={`tel:${doctor.practicePhone}`} className="text-sm text-blue-600 hover:underline">
+                      {doctor.practicePhone} (Practice)
+                    </a>
+                  </div>
+                )}
+
+                {doctor.practiceEmail && (
+                  <div className="flex items-center gap-3">
+                    <Mail className="w-4 h-4 text-gray-500" />
+                    <a href={`mailto:${doctor.practiceEmail}`} className="text-sm text-blue-600 hover:underline">
+                      {doctor.practiceEmail} (Practice)
+                    </a>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Consultation Fee */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Consultation</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">Fee</span>
+                  <span className="text-xl font-bold text-blue-600">
+                    {formatCurrency(doctor.consultationFee || 0)}
+                  </span>
                 </div>
-                <Badge variant="secondary" className="text-xs px-2.5 py-0.5 bg-slate-100 text-slate-700">
-                  {doctor.availability}
-                </Badge>
-              </div>
-
-              {/* Languages - All on desktop */}
-              <div className="flex flex-wrap gap-1.5 mb-4">
-                {doctor.languages.map((language) => (
-                  <Badge 
-                    key={language} 
-                    variant="outline" 
-                    className="text-xs px-2.5 py-0.5 border-slate-200 text-slate-600"
-                  >
-                    {language}
-                  </Badge>
-                ))}
-              </div>
-
-              {/* Actions - Desktop with text */}
-              <div className="flex gap-2">
-                <Button 
-                  className="bg-blue-600 hover:bg-blue-700 text-white text-sm lg:text-base font-medium px-5 lg:px-6 py-2 lg:py-2.5 h-auto rounded-lg shadow-sm hover:shadow-md transition-all"
-                  onClick={handleBookNow}
-                >
-                  <Calendar className="h-4 w-4 mr-2" />
-                  Book Now
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">Duration</span>
+                  <span className="font-medium text-gray-900">
+                    {doctor.consultationDuration || 30} minutes
+                  </span>
+                </div>
+                <Separator />
+                <Button asChild className="w-full bg-blue-600 hover:bg-blue-700">
+                  <Link to={`/book/${doctor.uid}`}>
+                    <Calendar className="w-4 h-4 mr-2" />
+                    Book Appointment
+                  </Link>
                 </Button>
-                <Button 
-                  variant="outline" 
-                  className="border-slate-300 hover:bg-slate-50 text-slate-700 text-sm lg:text-base font-medium px-5 lg:px-6 py-2 lg:py-2.5 h-auto rounded-lg"
-                  onClick={handleViewProfile}
-                >
-                  View Profile
+                <Button variant="outline" className="w-full">
+                  <MessageCircle className="w-4 h-4 mr-2" />
+                  Send Message
                 </Button>
-              </div>
-            </div>
+                {doctor.verificationStatus === 'verified' && (
+                  <Button variant="outline" className="w-full border-green-600 text-green-600 hover:bg-green-50">
+                    <Video className="w-4 h-4 mr-2" />
+                    Telemedicine
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Quick Stats */}
+            <Card>
+              <CardContent className="pt-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-gray-900">{doctor.reviewCount || 0}</p>
+                    <p className="text-xs text-gray-500">Reviews</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-gray-900">
+                      {doctor.rating ? doctor.rating.toFixed(1) : 'New'}
+                    </p>
+                    <p className="text-xs text-gray-500">Rating</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Verification Badge */}
+            {doctor.verificationStatus === 'verified' && (
+              <Card className="border-green-200 bg-green-50">
+                <CardContent className="pt-4">
+                  <div className="flex items-center gap-2 text-green-700">
+                    <Shield className="w-5 h-5" />
+                    <span className="text-sm font-medium">Verified Healthcare Provider</span>
+                  </div>
+                  <p className="text-xs text-green-600 mt-1">
+                    This doctor's credentials have been verified by MedMap.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
+            {isBooked && (
+              <Card className="border-blue-200 bg-blue-50">
+                <CardContent className="pt-4">
+                  <div className="flex items-center gap-2 text-blue-700">
+                    <CheckCircle className="w-5 h-5" />
+                    <span className="text-sm font-medium">You have an appointment</span>
+                  </div>
+                  <p className="text-xs text-blue-600 mt-1">
+                    You have a pending or confirmed appointment with this doctor.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 };
 
-export default DoctorCard;
+export default DoctorProfile;
