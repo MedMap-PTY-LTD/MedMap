@@ -17,7 +17,10 @@ const Team = lazy(() => import("./pages/Team"));
 const Legal = lazy(() => import("./pages/Legal"));
 const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
 const PAIAManual = lazy(() => import("./pages/PAIAManual"));
-const DoctorEnrollment = lazy(() => import("./pages/DoctorEnrollment"));
+
+// FIXED: Use the form component directly instead of non-existent DoctorEnrollment
+const DoctorEnrollment = lazy(() => import("./pages/doctor/DoctorEnrollmentForm"));
+
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
 const DoctorDashboard = lazy(() => import("./pages/doctor/DoctorDashboard"));
 const DoctorSearch = lazy(() => import("./pages/DoctorSearch"));
@@ -51,7 +54,6 @@ const DoctorSignUp = lazy(() => import("./pages/auth/DoctorSignUp"));
 const AmbassadorSignUp = lazy(() => import("./pages/auth/AmbassadorSignUp"));
 const AmbassadorPortal = lazy(() => import("./pages/ambassador/AmbassadorPortal"));
 const PsychometricTest = lazy(() => import("./pages/ambassador/PsychometricTest"));
-
 
 // Lazy load notification center
 const NotificationCenter = lazy(() => 
@@ -224,9 +226,12 @@ const App = () => {
                       <Route path="/legal" element={<Legal />} />
                       <Route path="/privacy-policy" element={<PrivacyPolicy />} />
                       <Route path="/paia-manual" element={<PAIAManual />} />
+                      
+                      {/* Doctor Enrollment Routes - Now using the form component */}
                       <Route path="/doctor-enrollment" element={<DoctorEnrollment />} />
-                      <Route path="/DoctorEnrollment" element={<Navigate to="/doctor-enrollment" replace />} />
-                      <Route path="/doctorEnrollment" element={<Navigate to="/doctor-enrollment" replace />} />
+                      <Route path="/doctor/enrollment" element={<DoctorEnrollment />} />
+                      <Route path="/doctor-enrollment-form" element={<DoctorEnrollment />} />
+                      
                       <Route path="/telemedicine" element={<Telemedicine />} />
                       <Route path="/doctor-portal" element={<DoctorPortal />} />
                       <Route path="/practice-management" element={<PracticeManagement />} />
@@ -244,7 +249,7 @@ const App = () => {
                       <Route path="/admin-setup" element={<InitialAdminSetup />} />
                       <Route path="/verify-email" element={<EmailVerification />} />
                       
-                      {/* Ambassador Programme Route */}
+                      {/* Ambassador Programme Routes */}
                       <Route path="/ambassador-programme" element={<AmbassadorProgramme />} />
                       <Route path="/ambassadorProgramme" element={<Navigate to="/ambassador-programme" replace />} />
                       <Route path="/AmbassadorProgramme" element={<Navigate to="/ambassador-programme" replace />} />
@@ -252,6 +257,7 @@ const App = () => {
                       <Route path="/ambassador/portal" element={<AmbassadorPortal />} />
                       <Route path="/ambassador/psychometric-test" element={<PsychometricTest />} />
                       
+                      {/* Admin & Dashboard Routes */}
                       <Route path="/admin" element={<AdminDashboard />} />
                       <Route path="/search" element={<DoctorSearch />} />
                       <Route path="/doctor/:doctorId" element={<DoctorProfile />} />
@@ -274,7 +280,6 @@ const App = () => {
                       <Route path="/BookingHistory" element={<BookingHistory />} />
                       <Route path="/booking-history" element={<BookingHistory />} />
                       <Route path="/dashboard" element={<PatientDashboard />} />
-                      <Route path="/verify-email" element={<EmailVerification />} />
                       <Route path="/profile" element={<Profile />} />
                       <Route path="/route-test" element={<RouteTest />} />
                       <Route path="/fix-admin-account" element={<FixAdminAccount />} />
