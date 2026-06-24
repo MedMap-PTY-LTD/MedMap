@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, memo } from 'react';
+// pages/doctor/DoctorDashboard.tsx
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -11,17 +12,26 @@ import {
   Settings,
   TrendingUp,
   Eye,
-  Edit
+  Edit,
+  Shield,
+  AlertCircle,
+  CheckCircle,
+  Loader2,
+  User,
+  Building2,
+  Stethoscope,
+  Save,
+  X
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { DoctorsRepo, Doctor, DoctorSchedule } from '@/backend/repositories/doctors';
-import { BookingsRepo } from '@/backend/repositories/bookings';
+import { db } from '@/lib/firebase';
+import { doc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import {
   BarChart,
   Bar,
@@ -31,970 +41,1071 @@ import {
   Tooltip as RechartsTooltip,
   Legend,
   ResponsiveContainer,
-  LineChart,
-  Line,
   PieChart,
   Pie,
   Cell
 } from 'recharts';
 
-interface DoctorStats {
-  totalBookings: number;
-  pendingBookings: number;
-  monthlyRevenue: number;
+interface DoctorProfile {
+  uid: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  practiceName: string;
+  practiceAddress: string;
+  practicePhone: string;
+  practiceEmail: string;
+  specialization: string;
+  hpcsaNumber: string;
+  qualifications: string[];
+  experience: string;
+  bio: string;
+  consultationFee: number;
+  consultationDuration: number;
+  operatingHours: any;
+  verificationStatus: 'pending' | 'verified' | 'rejected';
+  enrollmentCompleted: boolean;
   rating: number;
+  reviewCount: number;
+  profileImage?: string;
+  createdAt: any;
+  updatedAt: any;
+  rejectionReason?: string;
 }
 
 const DoctorDashboard = () => {
-  const [stats, setStats] = useState<DoctorStats>({
-    totalBookings: 0,
-    pendingBookings: 0,
-    monthlyRevenue: 0,
-    rating: 0
-  });
-  const [doctorInfo, setDoctorInfo] = useState<Doctor | null>(null);
-  // Tee-time style slots per day
-  type DayState = { open: string; close: string; selected: Set<string> };
-  const [dayStates, setDayStates] = useState<Record<number, DayState>>(() => {
-    const base: Record<number, DayState> = {} as any;
-    for (let i = 0; i < 7; i++) base[i] = { open: '08:00', close: '17:00', selected: new Set() };
-    return base;
-  });
-  const [activeDay, setActiveDay] = useState<number>(1); // default Monday
+  const { user, profile } = useAuth();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  
+  const [doctor, setDoctor] = useState<DoctorProfile | null>(null);
+  const [loading, setLoading] = useState(true);
   const [pendingBookings, setPendingBookings] = useState<any[]>([]);
   const [upcomingBookings, setUpcomingBookings] = useState<any[]>([]);
-  const [savingSchedule, setSavingSchedule] = useState(false);
-  const [loadingBookings, setLoadingBookings] = useState(false);
-  const [loadingUpcoming, setLoadingUpcoming] = useState(false);
-  const { user, profile } = useAuth();
-  const { toast } = useToast();
-
+  const [editOpen, setEditOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState<any>({});
+  const [stats, setStats] = useState({
+    totalBookings: 0,
+    pendingBookings: 0,
+    completedBookings: 0,
+    monthlyRevenue: 0,
+    rating: 0,
+    totalPatients: 0,
+  });
   const [analyticsData, setAnalyticsData] = useState({
     bookingStatus: [] as any[],
     revenueTrend: [] as any[],
-    summary: {
-      totalPatients: 0,
-      newPatients: 0,
-      returningPatients: 0,
-      totalReviews: 0,
-      averageRating: 0,
-      estimatedRevenue: 0
-    }
   });
 
-  // Edit profile state
-  const [editOpen, setEditOpen] = useState(false);
-  const [editForm, setEditForm] = useState<any>({
-    practice_name: '',
-    speciality: '',
-    consultation_fee: '',
-    years_experience: '',
-    address: '', // still not in model, maybe map to bio or ignore
-    city: '',
-    province: '',
-    postal_code: '',
-    bio: '',
-    accepted_insurances: '',
-    profile_image: null as File | null,
-    profile_image_url: ''
-  });
-  const [uploading, setUploading] = useState(false);
-  const [savingEdit, setSavingEdit] = useState(false);
-
   useEffect(() => {
-    if (doctorInfo) {
-      setEditForm({
-        practice_name: doctorInfo.practice_name || '',
-        speciality: doctorInfo.speciality || '',
-        qualification: doctorInfo.qualification || '',
-        license_number: doctorInfo.license_number || '',
-        consultation_fee: doctorInfo.price ? String(doctorInfo.price) : '',
-        years_experience: doctorInfo.years_experience ? String(doctorInfo.years_experience) : '',
-        address: doctorInfo.address || '',
-        city: doctorInfo.city || '',
-        province: doctorInfo.province || '',
-        postal_code: doctorInfo.postal_code || '',
-        bio: doctorInfo.bio || '',
-        accepted_insurances: Array.isArray(doctorInfo.accepted_insurances) ? doctorInfo.accepted_insurances.join(', ') : '',
-        profile_image_url: (doctorInfo as any).image_url || ''
-      });
-    }
-  }, [doctorInfo]);
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files && e.target.files[0];
-    if (!file || !user) return;
-    
-    // We'll upload on save
-    setEditForm((prev: any) => ({ ...prev, profile_image: file, profile_image_url: URL.createObjectURL(file) }));
-  };
-
-  const handleEditSubmit = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!doctorInfo?.id) {
-      toast({ title: 'No doctor profile', description: 'Create your practice profile first.', variant: 'destructive' });
-      return;
-    }
-    setSavingEdit(true);
-    try {
-      const payload: any = {
-        practice_name: editForm.practice_name,
-        speciality: editForm.speciality,
-        qualification: editForm.qualification,
-        license_number: editForm.license_number,
-        price: parseFloat(editForm.consultation_fee || '0'),
-        years_experience: editForm.years_experience ? parseInt(editForm.years_experience, 10) : null,
-    address: editForm.address,
-    city: editForm.city,
-    province: editForm.province,
-        postal_code: editForm.postal_code,
-        bio: editForm.bio,
-        accepted_insurances: editForm.accepted_insurances.split(',').map((s: string) => s.trim()).filter(Boolean)
-      };
-      
-      if (editForm.profile_image) {
-          // If using a repository that supports file upload, or we handle upload separately
-          // DoctorsRepo.update handles FormData if a File object is present in values
-          payload.image = editForm.profile_image;
-      }
-
-      const updated = await DoctorsRepo.update(String(doctorInfo.id), payload);
-      
-      toast({ title: 'Profile updated', description: 'Your practice profile has been updated.' });
-      setDoctorInfo(updated);
-      setEditOpen(false);
-    } catch (err: any) {
-      console.error('Save failed', err?.message || err);
-      toast({ title: 'Save failed', description: err?.message || 'Unable to save profile', variant: 'destructive' });
-    } finally {
-      setSavingEdit(false);
-    }
-  };
-
-  useEffect(() => {
-    if (user && profile?.role === 'doctor') {
-      fetchDoctorInfo();
+    if (profile?.role === 'doctor') {
+      fetchDoctorData();
+    } else if (profile && profile.role !== 'doctor') {
+      navigate('/dashboard');
     }
   }, [user, profile]);
 
-  // Ensure we have a doctor profile for this user (no restricted-table lookups)
-  const ensureDoctorProfile = async () => {
-    if (!user) return null;
-    try {
-      const existing = await DoctorsRepo.getByUserId(user.id);
-      return existing;
-    } catch (e: any) {
-      console.error('ensureDoctorProfile failed:', e?.message || e);
-      return null;
+  const fetchDoctorData = async () => {
+    if (!user) {
+      setLoading(false);
+      return;
     }
-  };
-
-  const fetchDoctorInfo = async () => {
+    
+    setLoading(true);
     try {
-      if (!user) return;
-      const ensured = await ensureDoctorProfile();
-      setDoctorInfo(ensured);
-      if (!ensured) {
-        console.warn('No doctor record found for current user.');
+      // Get doctor profile
+      const doctorRef = doc(db, 'doctors', user.uid);
+      const doctorSnap = await getDoc(doctorRef);
+      
+      if (doctorSnap.exists()) {
+        const doctorData = doctorSnap.data();
+        
+        // Get user data
+        const userRef = doc(db, 'users', user.uid);
+        const userSnap = await getDoc(userRef);
+        const userData = userSnap.exists() ? userSnap.data() : {};
+        
+        const combinedDoctor: DoctorProfile = {
+          uid: user.uid,
+          firstName: userData.firstName || doctorData.firstName || '',
+          lastName: userData.lastName || doctorData.lastName || '',
+          fullName: userData.fullName || doctorData.fullName || '',
+          email: userData.email || doctorData.email || '',
+          phone: userData.phone || doctorData.phone || '',
+          practiceName: doctorData.practiceName || '',
+          practiceAddress: doctorData.practiceAddress || '',
+          practicePhone: doctorData.practicePhone || '',
+          practiceEmail: doctorData.practiceEmail || '',
+          specialization: doctorData.specialization || '',
+          hpcsaNumber: doctorData.hpcsaNumber || '',
+          qualifications: doctorData.qualifications || [],
+          experience: doctorData.experience || '',
+          bio: doctorData.bio || '',
+          consultationFee: doctorData.consultationFee || 0,
+          consultationDuration: doctorData.consultationDuration || 30,
+          operatingHours: doctorData.operatingHours || {},
+          verificationStatus: doctorData.verificationStatus || 'pending',
+          enrollmentCompleted: doctorData.enrollmentCompleted || false,
+          rating: doctorData.rating || 0,
+          reviewCount: doctorData.reviewCount || 0,
+          profileImage: doctorData.profileImage || userData.photoURL || '',
+          createdAt: doctorData.createdAt || userData.createdAt,
+          updatedAt: doctorData.updatedAt || userData.updatedAt,
+          rejectionReason: doctorData.rejectionReason || '',
+        };
+        
+        setDoctor(combinedDoctor);
+        setEditForm(combinedDoctor);
+        
+        // If enrollment is not completed, redirect to enrollment form
+        if (!combinedDoctor.enrollmentCompleted) {
+          navigate('/doctor-enrollment');
+          setLoading(false);
+          return;
+        }
+        
+        // Fetch bookings (with error handling)
+        await fetchBookings(combinedDoctor.uid);
+        
+      } else {
+        // No doctor profile exists - redirect to enrollment
+        toast({
+          title: 'Profile Incomplete',
+          description: 'Please complete your doctor profile first.',
+        });
+        navigate('/doctor-enrollment');
       }
     } catch (error: any) {
-      console.error('Error fetching doctor info:', error?.message || error);
+      console.error('Error fetching doctor data:', error);
+      // Don't show error toast for missing collections, just log it
+      if (!error.message?.includes('collection')) {
+        toast({
+          title: 'Error',
+          description: 'Failed to load doctor profile. Please try again.',
+          variant: 'destructive',
+        });
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-ZA', {
-      style: 'currency',
-      currency: 'ZAR'
-    }).format(amount);
-  };
-
-  const toMinutes = (t: string) => { const [h,m] = t.split(':').map(Number); return h*60+m; };
-  const toHHMM = (mins: number) => {
-    const h = Math.floor(mins / 60).toString().padStart(2, '0');
-    const m = (mins % 60).toString().padStart(2, '0');
-    return `${h}:${m}`;
-  };
-
-  const fetchDoctorStats = async () => {
-    if (!doctorInfo?.id) return;
-
+  const fetchBookings = async (doctorId: string) => {
     try {
-      const bookings = await BookingsRepo.listForDoctor(String(doctorInfo.id));
+      // Try to get bookings - if collection doesn't exist, just use empty array
+      const bookingsRef = collection(db, 'bookings');
+      const q = query(
+        bookingsRef,
+        where('doctorId', '==', doctorId),
+        orderBy('appointmentDate', 'desc'),
+        limit(50)
+      );
+      const bookingsSnap = await getDocs(q);
       
-      // Calculate revenue from completed bookings
-      const completed = bookings.filter(b => b.status === 'completed');
-      const revenue = completed.length * Number(doctorInfo.price || 0);
-
+      const bookings: any[] = [];
+      let totalRevenue = 0;
+      let completedCount = 0;
+      let pendingCount = 0;
+      
+      for (const docSnap of bookingsSnap.docs) {
+        const data = docSnap.data();
+        
+        // Get patient info
+        let patientName = 'Unknown Patient';
+        
+        if (data.patientId) {
+          try {
+            const patientRef = doc(db, 'users', data.patientId);
+            const patientSnap = await getDoc(patientRef);
+            if (patientSnap.exists()) {
+              const patientData = patientSnap.data();
+              patientName = patientData.fullName || `${patientData.firstName || ''} ${patientData.lastName || ''}`.trim() || 'Unknown Patient';
+            }
+          } catch (e) {
+            // Ignore patient fetch errors
+          }
+        }
+        
+        const booking = {
+          id: docSnap.id,
+          patientId: data.patientId || '',
+          patientName,
+          appointmentDate: data.appointmentDate || '',
+          appointmentTime: data.appointmentTime || '',
+          status: data.status || 'pending',
+          notes: data.notes || '',
+          consultationFee: data.consultationFee || doctor?.consultationFee || 0,
+          createdAt: data.createdAt,
+        };
+        
+        bookings.push(booking);
+        
+        if (booking.status === 'completed') {
+          totalRevenue += booking.consultationFee;
+          completedCount++;
+        }
+        if (booking.status === 'pending') {
+          pendingCount++;
+        }
+      }
+      
+      setPendingBookings(bookings.filter(b => b.status === 'pending'));
+      
+      // Upcoming bookings (today and future)
+      const today = new Date().toISOString().split('T')[0];
+      const upcoming = bookings.filter(b => 
+        b.appointmentDate >= today && 
+        b.status !== 'cancelled' &&
+        b.status !== 'completed'
+      );
+      setUpcomingBookings(upcoming);
+      
+      // Calculate stats
+      const uniquePatients = new Set(bookings.map(b => b.patientId)).size;
+      
       setStats({
         totalBookings: bookings.length,
-        pendingBookings: bookings.filter(b => b.status === 'pending').length,
-        monthlyRevenue: revenue,
-        rating: doctorInfo.rating || 0
+        pendingBookings: pendingCount,
+        completedBookings: completedCount,
+        monthlyRevenue: totalRevenue,
+        rating: doctor?.rating || 0,
+        totalPatients: uniquePatients,
       });
-
-      // Analytics Processing
-      // 1. Booking Status Distribution
+      
+      // Prepare analytics data
       const statusCounts = bookings.reduce((acc: any, curr) => {
         acc[curr.status] = (acc[curr.status] || 0) + 1;
         return acc;
       }, {});
       
       const COLORS: Record<string, string> = {
-        pending: '#F59E0B',   // Amber
-        confirmed: '#10B981', // Emerald
-        completed: '#3B82F6', // Blue
-        cancelled: '#EF4444'  // Red
+        pending: '#F59E0B',
+        confirmed: '#10B981',
+        completed: '#3B82F6',
+        cancelled: '#EF4444'
       };
-
+      
       const bookingStatusData = Object.keys(statusCounts).map(status => ({
         name: status.charAt(0).toUpperCase() + status.slice(1),
         value: statusCounts[status],
         color: COLORS[status] || '#888888'
       }));
-
-      // 2. Revenue Trend (Last 6 months)
-      // Since we don't have historical prices, we use current price for all.
-      // Or we should use booking.consultation_fee if available.
-      const today = new Date();
-      const last6Months = Array.from({ length: 6 }, (_, i) => {
-        const d = new Date(today.getFullYear(), today.getMonth() - 5 + i, 1);
-        return { 
-          month: d.toLocaleString('default', { month: 'short' }), 
-          year: d.getFullYear(),
-          revenue: 0,
-          bookings: 0
-        };
-      });
-
-      bookings.forEach(b => {
-        if (b.status === 'completed' || b.status === 'confirmed') {
-          const d = new Date(b.appointment_date);
-          const monthStr = d.toLocaleString('default', { month: 'short' });
-          const year = d.getFullYear();
-          
-          const monthData = last6Months.find(m => m.month === monthStr && m.year === year);
-          if (monthData) {
-            monthData.bookings += 1;
-            // Use booking fee if available, else doctor price
-            const fee = Number(b.consultation_fee) || Number(doctorInfo.price || 0);
-            monthData.revenue += fee;
-          }
-        }
-      });
-
-      // 3. Patient Stats
-      const patientBookings: Record<number, number> = {};
-      bookings.forEach(b => {
-        patientBookings[b.user] = (patientBookings[b.user] || 0) + 1;
-      });
-      const uniquePatients = Object.keys(patientBookings).length;
-      const returningPatients = Object.values(patientBookings).filter(count => count > 1).length;
-      const newPatients = uniquePatients - returningPatients;
-
+      
       setAnalyticsData({
         bookingStatus: bookingStatusData,
-        revenueTrend: last6Months,
-        summary: {
-          totalPatients: uniquePatients,
-          newPatients: newPatients,
-          returningPatients: returningPatients,
-          totalReviews: doctorInfo.review_count || 0,
-          averageRating: Number(doctorInfo.rating || 0),
-          estimatedRevenue: revenue // Revenue from completed only, or use confirmed too? User said "Estimated revenue based on fee set"
-        }
+        revenueTrend: [],
       });
-
-    } catch (error) {
-      console.error('Error fetching doctor stats:', error);
-    }
-  };
-
-  const loadSchedule = async () => {
-    if (!doctorInfo?.id) return;
-    try {
-      const data = await DoctorsRepo.getSchedules(String(doctorInfo.id));
       
-      const next: Record<number, DayState> = {} as any;
-      for (let i = 0; i < 7; i++) next[i] = { open: '08:00', close: '17:00', selected: new Set() };
-
-      (data || []).forEach((row: any) => {
-        if (row.is_available === false) return;
-        const d = row.day_of_week as number;
-        const start = (row.start_time as string).slice(0,5);
-        const end = (row.end_time as string).slice(0,5);
-        if (!next[d]) next[d] = { open: '08:00', close: '17:00', selected: new Set() };
-        // ensure open/close encompass existing rows
-        if (toMinutes(start) < toMinutes(next[d].open)) next[d].open = start;
-        if (toMinutes(end) > toMinutes(next[d].close)) next[d].close = end;
-        for (let m = toMinutes(start); m < toMinutes(end); m += 30) {
-          next[d].selected.add(toHHMM(m));
-        }
+    } catch (error: any) {
+      // If collection doesn't exist, just use empty data
+      console.log('No bookings found or bookings collection not yet created');
+      setPendingBookings([]);
+      setUpcomingBookings([]);
+      setStats({
+        totalBookings: 0,
+        pendingBookings: 0,
+        completedBookings: 0,
+        monthlyRevenue: 0,
+        rating: doctor?.rating || 0,
+        totalPatients: 0,
       });
-      setDayStates(next);
-    } catch (e: any) {
-      console.error('Failed to load schedule', e?.message || e);
-    }
-  };
-
-  const saveSchedule = async () => {
-    let doctorId = doctorInfo?.id;
-    if (!doctorId) {
-        // ... handle error
-        return;
-    }
-    setSavingSchedule(true);
-    try {
-      // Logic to sync schedule
-      // For now, we might need to delete existing and recreate, or diff
-      // Django doesn't support easy 'delete all for doctor' via standard viewset unless we add custom action
-      // OR we just create new ones.
-      
-      // Ideally: BE endpoint to replace schedules.
-      // Current Repo implementation: upsertSchedules calls PATCH one by one if ID exists.
-      // But we don't track IDs in `dayStates`.
-      
-      // Let's assume we can clear schedules first? Or maybe we should improve BE to handle bulk replace.
-      // For this migration, I'll skip complex diffing and assume we need a way to clear.
-      
-      // Workaround: Get existing schedules, delete them, then create new ones.
-      // const existing = await DoctorsRepo.getSchedules(String(doctorId)); // Not used yet
-      
-      // Delete all schedules for this doctor first
-      // Since we don't have a bulk delete endpoint yet, we iterate and delete.
-      // Or we can rely on a custom endpoint if we add one.
-      await DoctorsRepo.clearSchedules(String(doctorId));
-
-      const rows: any[] = [];
-      for (let d = 0; d < 7; d++) {
-        const state = dayStates[d];
-        if (!state) continue;
-        const selectedTimes = Array.from(state.selected.values()).sort();
-        if (selectedTimes.length === 0) continue;
-        
-        let currentStart = selectedTimes[0];
-        let prevTime = selectedTimes[0];
-
-        for (let i = 1; i < selectedTimes.length; i++) {
-            const t = selectedTimes[i];
-            // Check if this time is contiguous (30 mins after prev)
-            if (toMinutes(t) === toMinutes(prevTime) + 30) {
-                prevTime = t;
-            } else {
-                // Gap detected, close current block
-                rows.push({
-                    doctor: doctorId,
-                    day_of_week: d,
-                    start_time: currentStart,
-                    end_time: toHHMM(toMinutes(prevTime) + 30),
-                    is_available: true,
-                });
-                // Start new block
-                currentStart = t;
-                prevTime = t;
-            }
-        }
-        // Push the last block
-        rows.push({
-            doctor: doctorId,
-            day_of_week: d,
-            start_time: currentStart,
-            end_time: toHHMM(toMinutes(prevTime) + 30),
-            is_available: true,
-        });
-      }
-
-      await DoctorsRepo.upsertSchedules(rows);
-      
-      toast({ title: 'Schedule saved', description: 'Your schedule has been updated.' });
-
-    } catch (e: any) {
-      console.error('Failed to save schedule', e?.message || e);
-      toast({ title: 'Failed to save schedule', description: e?.message || String(e), variant: 'destructive' });
-    } finally {
-      setSavingSchedule(false);
-    }
-  };
-
-  const fetchPendingAppointments = async () => {
-    if (!doctorInfo?.id) return;
-    setLoadingBookings(true);
-    try {
-      const data = await BookingsRepo.listForDoctor(String(doctorInfo.id));
-      setPendingBookings(data.filter(b => b.status === 'pending'));
-    } catch (e: any) {
-      console.error('Failed to fetch pending appointments', e?.message || e);
-    } finally {
-      setLoadingBookings(false);
-    }
-  };
-
-  const fetchUpcomingAppointments = async () => {
-    if (!doctorInfo?.id) return;
-    setLoadingUpcoming(true);
-    try {
-      const data = await BookingsRepo.listForDoctor(String(doctorInfo.id));
-      const today = new Date();
-      // Filter for upcoming
-      const upcoming = data.filter(b => {
-          const d = new Date(b.appointment_date + 'T' + b.appointment_time);
-          return d >= today && b.status !== 'cancelled';
+      setAnalyticsData({
+        bookingStatus: [],
+        revenueTrend: [],
       });
-      setUpcomingBookings(upcoming);
-    } catch (e: any) {
-      console.error('Failed to fetch upcoming appointments', e?.message || e);
-    } finally {
-      setLoadingUpcoming(false);
     }
   };
 
-  const approveBooking = async (bookingId: string) => {
+  const handleApproveBooking = async (bookingId: string) => {
     try {
-      await BookingsRepo.update(bookingId, { status: 'confirmed' });
-      fetchPendingAppointments();
-      fetchDoctorStats();
-    } catch (e: any) {
-      console.error('Failed to approve booking', e?.message || e);
-    }
-  };
-
-  const rejectBooking = async (bookingId: string) => {
-    try {
-      await BookingsRepo.update(bookingId, { status: 'cancelled' });
-      fetchPendingAppointments();
-      fetchDoctorStats();
-    } catch (e: any) {
-      console.error('Failed to reject booking', e?.message || e);
-    }
-  };
-
-  useEffect(() => {
-    if (doctorInfo?.id) {
-      loadSchedule();
-      fetchPendingAppointments();
-      fetchUpcomingAppointments();
-      fetchDoctorStats();
+      const bookingRef = doc(db, 'bookings', bookingId);
+      await updateDoc(bookingRef, {
+        status: 'confirmed',
+        updatedAt: serverTimestamp(),
+      });
       
-      // Polling for updates (replacement for realtime)
-      const pollInterval = setInterval(() => {
-          fetchPendingAppointments();
-          fetchUpcomingAppointments();
-          fetchDoctorStats();
-      }, 15000); // 15 seconds
-
-      return () => clearInterval(pollInterval);
+      toast({
+        title: 'Booking Approved',
+        description: 'The appointment has been confirmed.',
+      });
+      
+      await fetchBookings(doctor!.uid);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to approve booking.',
+        variant: 'destructive',
+      });
     }
-  }, [doctorInfo?.id]);
+  };
 
-  if (user && profile?.role === 'doctor' && !doctorInfo) {
-      return (
-          <div className="container mx-auto px-4 py-12">
-              <Card>
-                  <CardHeader>
-                      <CardTitle>Complete Your Profile</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                      <p className="mb-4">You need to set up your practice profile before you can manage bookings.</p>
-                      <Button onClick={() => window.location.href = '/doctor-enrollment'}>
-                          Go to Enrollment
-                      </Button>
-                  </CardContent>
-              </Card>
-          </div>
-      );
+  const handleRejectBooking = async (bookingId: string) => {
+    try {
+      const bookingRef = doc(db, 'bookings', bookingId);
+      await updateDoc(bookingRef, {
+        status: 'cancelled',
+        updatedAt: serverTimestamp(),
+      });
+      
+      toast({
+        title: 'Booking Rejected',
+        description: 'The appointment has been cancelled.',
+      });
+      
+      await fetchBookings(doctor!.uid);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to reject booking.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleEditProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    
+    setEditing(true);
+    try {
+      const doctorRef = doc(db, 'doctors', user.uid);
+      const userRef = doc(db, 'users', user.uid);
+      
+      // Update doctor profile
+      const doctorUpdateData = {
+        practiceName: editForm.practiceName,
+        practiceAddress: editForm.practiceAddress,
+        practicePhone: editForm.practicePhone,
+        practiceEmail: editForm.practiceEmail,
+        specialization: editForm.specialization,
+        hpcsaNumber: editForm.hpcsaNumber,
+        qualifications: editForm.qualifications || [],
+        experience: editForm.experience,
+        bio: editForm.bio,
+        consultationFee: parseFloat(editForm.consultationFee) || 0,
+        consultationDuration: parseInt(editForm.consultationDuration) || 30,
+        operatingHours: editForm.operatingHours,
+        updatedAt: serverTimestamp(),
+      };
+      
+      await updateDoc(doctorRef, doctorUpdateData);
+      
+      // Update user profile
+      await updateDoc(userRef, {
+        firstName: editForm.firstName,
+        lastName: editForm.lastName,
+        phone: editForm.phone,
+        updatedAt: serverTimestamp(),
+      });
+      
+      toast({
+        title: 'Profile Updated',
+        description: 'Your profile has been updated successfully.',
+      });
+      
+      setEditOpen(false);
+      await fetchDoctorData();
+      
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update profile.',
+        variant: 'destructive',
+      });
+    } finally {
+      setEditing(false);
+    }
+  };
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-ZA', {
+      style: 'currency',
+      currency: 'ZAR',
+    }).format(amount);
+  };
+
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return 'N/A';
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('en-ZA', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    const variants: Record<string, string> = {
+      pending: 'bg-yellow-100 text-yellow-800',
+      confirmed: 'bg-blue-100 text-blue-800',
+      completed: 'bg-green-100 text-green-800',
+      cancelled: 'bg-red-100 text-red-800',
+    };
+    return variants[status] || 'bg-gray-100 text-gray-800';
+  };
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+          <p className="text-gray-600">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
   }
 
-  if (profile?.role !== 'doctor') {
+  // No doctor profile
+  if (!doctor) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Card className="w-full max-w-md">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <Card className="max-w-md w-full">
           <CardContent className="pt-6 text-center">
-            <h2 className="text-2xl font-bold mb-2">Doctor Dashboard</h2>
-            <p className="text-muted-foreground">Only approved healthcare providers can access this dashboard.</p>
+            <AlertCircle className="w-12 h-12 text-yellow-600 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Complete Your Profile</h2>
+            <p className="text-gray-600 mb-4">You need to complete your healthcare provider application before accessing the dashboard.</p>
+            <Button onClick={() => navigate('/doctor-enrollment')} className="w-full">
+              Complete Application
+            </Button>
           </CardContent>
         </Card>
       </div>
     );
   }
 
+  // Verification status banner
+  const renderVerificationBanner = () => {
+    if (doctor.verificationStatus === 'verified') {
+      return (
+        <Card className="border-green-200 bg-green-50">
+          <CardContent className="pt-4">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="w-5 h-5 text-green-600" />
+              <div>
+                <p className="font-medium text-green-800">Profile Verified</p>
+                <p className="text-sm text-green-700">Your practice is live and accepting patients.</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      );
+    } else if (doctor.verificationStatus === 'rejected') {
+      return (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="pt-4">
+            <div className="flex items-start gap-3">
+              <X className="w-5 h-5 text-red-600 mt-0.5" />
+              <div>
+                <p className="font-medium text-red-800">Application Rejected</p>
+                <p className="text-sm text-red-700">
+                  Your application was not approved. {doctor.rejectionReason && `Reason: ${doctor.rejectionReason}`}
+                </p>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="mt-2 border-red-300 text-red-700 hover:bg-red-100"
+                  onClick={() => navigate('/doctor-enrollment')}
+                >
+                  Reapply
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      );
+    } else {
+      return (
+        <Card className="border-yellow-200 bg-yellow-50">
+          <CardContent className="pt-4">
+            <div className="flex items-start gap-3">
+              <Clock className="w-5 h-5 text-yellow-600 mt-0.5" />
+              <div>
+                <p className="font-medium text-yellow-800">Awaiting Verification</p>
+                <p className="text-sm text-yellow-700">
+                  Your application is being reviewed by our team. You'll receive a notification once approved.
+                  While waiting, you can continue to edit your profile.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Badge className="bg-yellow-200 text-yellow-800">
+                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                    Under Review
+                  </Badge>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="border-yellow-300 text-yellow-700 hover:bg-yellow-100"
+                    onClick={() => setEditOpen(true)}
+                  >
+                    <Edit className="w-3 h-3 mr-1" />
+                    Edit Profile
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      );
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="mb-8 flex items-center justify-between">
+    <div className="min-h-screen bg-gray-50">
+      <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
           <div>
-            <h1 className="text-4xl font-bold text-medical-gradient mb-2">
-              Welcome back, Dr. {profile?.first_name} {profile?.last_name}
+            <h1 className="text-3xl font-bold text-gray-900">
+              Welcome, Dr. {doctor.firstName} {doctor.lastName}
             </h1>
-            <p className="text-muted-foreground">Manage your practice and patient appointments</p>
+            <p className="text-gray-600 mt-1">
+              {doctor.practiceName || 'Your Practice'} • {doctor.specialization || 'Specialization not set'}
+            </p>
           </div>
-          <div>
-            <Link to="/" className="inline-flex">
-              <Button variant="outline" className="btn-medical-secondary">Home</Button>
-            </Link>
+          <div className="flex gap-2 mt-4 md:mt-0">
+            <Button 
+              variant="outline" 
+              onClick={() => setEditOpen(true)}
+              className="flex items-center gap-2"
+            >
+              <Edit className="w-4 h-4" />
+              Edit Profile
+            </Button>
           </div>
         </div>
+
+        {/* Verification Banner */}
+        {renderVerificationBanner()}
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <Card className="medical-card">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total Bookings</CardTitle>
-            </CardHeader>
-            <CardContent>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
+          <Card>
+            <CardContent className="pt-4">
               <div className="flex items-center justify-between">
-                <div className="text-2xl font-bold text-primary">{stats.totalBookings}</div>
-                <Calendar className="h-5 w-5 text-primary" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="medical-card">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Pending Appointments</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between">
-                <div className="text-2xl font-bold text-amber-600">{stats.pendingBookings}</div>
-                <Clock className="h-5 w-5 text-amber-600" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="medical-card">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Monthly Revenue</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between">
-                <div className="text-2xl font-bold text-green-600">
-                  {formatCurrency(stats.monthlyRevenue)}
+                <div>
+                  <p className="text-sm text-gray-600">Total Bookings</p>
+                  <p className="text-2xl font-bold text-gray-900">{stats.totalBookings}</p>
                 </div>
-                <DollarSign className="h-5 w-5 text-green-600" />
+                <Calendar className="w-8 h-8 text-blue-600" />
               </div>
             </CardContent>
           </Card>
-
-          <Card className="medical-card">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Rating</CardTitle>
-            </CardHeader>
-            <CardContent>
+          
+          <Card>
+            <CardContent className="pt-4">
               <div className="flex items-center justify-between">
-                <div className="text-2xl font-bold text-blue-600">{Number(stats.rating || 0).toFixed(1)}</div>
-                <TrendingUp className="h-5 w-5 text-blue-600" />
+                <div>
+                  <p className="text-sm text-gray-600">Pending</p>
+                  <p className="text-2xl font-bold text-yellow-600">{stats.pendingBookings}</p>
+                </div>
+                <Clock className="w-8 h-8 text-yellow-600" />
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="pt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Revenue</p>
+                  <p className="text-2xl font-bold text-green-600">{formatCurrency(stats.monthlyRevenue)}</p>
+                </div>
+                <DollarSign className="w-8 h-8 text-green-600" />
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardContent className="pt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Rating</p>
+                  <p className="text-2xl font-bold text-purple-600">
+                    {doctor.rating ? doctor.rating.toFixed(1) : 'New'}
+                  </p>
+                </div>
+                <Users className="w-8 h-8 text-purple-600" />
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Tabs */}
-        <Tabs defaultValue="appointments" className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="appointments" className="flex items-center gap-2">
-              <Calendar className="h-4 w-4" />
-              Appointments
-            </TabsTrigger>
-            <TabsTrigger value="schedule" className="flex items-center gap-2">
-              <Clock className="h-4 w-4" />
-              Schedule
-            </TabsTrigger>
-            <TabsTrigger value="profile" className="flex items-center gap-2">
-              <Settings className="h-4 w-4" />
-              Profile
-            </TabsTrigger>
-            <TabsTrigger value="analytics" className="flex items-center gap-2">
-              <TrendingUp className="h-4 w-4" />
-              Analytics
-            </TabsTrigger>
-          </TabsList>
+        {/* Main Content */}
+        <div className="mt-8">
+          <Tabs defaultValue="appointments" className="space-y-6">
+            <TabsList className="flex flex-wrap gap-1">
+              <TabsTrigger value="appointments" className="flex items-center gap-2">
+                <Calendar className="w-4 h-4" />
+                Appointments
+              </TabsTrigger>
+              <TabsTrigger value="profile" className="flex items-center gap-2">
+                <User className="w-4 h-4" />
+                Profile
+              </TabsTrigger>
+              <TabsTrigger value="analytics" className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4" />
+                Analytics
+              </TabsTrigger>
+            </TabsList>
 
-          <TabsContent value="appointments">
-            <div className="grid md:grid-cols-2 gap-6">
-              <Card className="medical-hero-card">
+            {/* Appointments Tab */}
+            <TabsContent value="appointments">
+              <div className="grid md:grid-cols-2 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      <span>Pending Appointments</span>
+                      <Badge className="bg-yellow-100 text-yellow-800">
+                        {pendingBookings.length}
+                      </Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {pendingBookings.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        <Clock className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                        <p>No pending appointments</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 max-h-[400px] overflow-y-auto">
+                        {pendingBookings.map((booking) => (
+                          <div key={booking.id} className="border rounded-lg p-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <div>
+                                <p className="font-medium text-gray-900">{booking.patientName}</p>
+                                <p className="text-sm text-gray-600">
+                                  {formatDate(booking.appointmentDate)} at {booking.appointmentTime}
+                                </p>
+                                {booking.notes && (
+                                  <p className="text-sm text-gray-500 mt-1">{booking.notes}</p>
+                                )}
+                              </div>
+                              <div className="flex gap-2">
+                                <Button 
+                                  size="sm" 
+                                  className="bg-green-600 hover:bg-green-700"
+                                  onClick={() => handleApproveBooking(booking.id)}
+                                >
+                                  <CheckCircle className="w-3 h-3 mr-1" />
+                                  Approve
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="outline" 
+                                  className="text-red-600 border-red-200 hover:bg-red-50"
+                                  onClick={() => handleRejectBooking(booking.id)}
+                                >
+                                  <X className="w-3 h-3 mr-1" />
+                                  Decline
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      <span>Upcoming Appointments</span>
+                      <Badge className="bg-blue-100 text-blue-800">
+                        {upcomingBookings.length}
+                      </Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {upcomingBookings.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                        <p>No upcoming appointments</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 max-h-[400px] overflow-y-auto">
+                        {upcomingBookings.map((booking) => (
+                          <div key={booking.id} className="border rounded-lg p-3">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="font-medium text-gray-900">{booking.patientName}</p>
+                                <p className="text-sm text-gray-600">
+                                  {formatDate(booking.appointmentDate)} at {booking.appointmentTime}
+                                </p>
+                              </div>
+                              <Badge className={getStatusBadge(booking.status)}>
+                                {booking.status}
+                              </Badge>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </TabsContent>
+
+            {/* Profile Tab */}
+            <TabsContent value="profile">
+              <Card>
                 <CardHeader>
-                  <CardTitle>Pending Appointments</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {loadingBookings ? (
-                    <div className="text-center py-8 text-muted-foreground">Loading...</div>
-                  ) : pendingBookings.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p>No pending appointments</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {pendingBookings.map((b) => (
-                        <div key={b.id} className="flex items-center justify-between p-3 border rounded-lg">
-                          <div>
-                            <div className="font-medium">{b.appointment_date} at {b.appointment_time}</div>
-                            {b.notes && (<div className="text-sm text-muted-foreground">{b.notes}</div>)}
-                          </div>
-                          <div className="flex gap-2">
-                            <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => approveBooking(b.id)}>Approve</Button>
-                            <Button size="sm" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => rejectBooking(b.id)}>Reject</Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card className="medical-hero-card">
-                <CardHeader>
-                  <CardTitle>Upcoming Appointments</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {loadingUpcoming ? (
-                    <div className="text-center py-8 text-muted-foreground">Loading...</div>
-                  ) : upcomingBookings.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p>No upcoming appointments</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {upcomingBookings.map((b) => (
-                        <div key={b.id} className="flex items-center justify-between p-3 border rounded-lg">
-                          <div>
-                            <div className="font-medium">{b.appointment_date} at {b.appointment_time}</div>
-                            <div className="text-xs text-muted-foreground">Status: {b.status}</div>
-                          </div>
-                          <Badge variant={b.status === 'confirmed' ? 'default' : 'secondary'}>
-                            {b.status === 'confirmed' ? 'Booked' : b.status}
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="schedule">
-            <Card className="medical-hero-card">
-              <CardHeader>
-                <CardTitle>Manage Schedule</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-6">
-                  {/* Day selector */}
-                  <div className="flex gap-2 flex-wrap">
-                    {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d, i) => (
-                      <Button key={d} variant={activeDay===i?'default':'outline'} className={activeDay===i?'btn-medical-primary':'btn-medical-secondary'} onClick={() => setActiveDay(i)}>
-                        {d}
-                      </Button>
-                    ))}
-                  </div>
-
-                  {/* Open/Close for active day */}
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end">
-                    <div>
-                      <label className="text-sm text-muted-foreground">Open</label>
-                      <input type="time" className="border rounded px-2 py-2 w-full" value={dayStates[activeDay]?.open}
-                        onChange={(e) => setDayStates((prev) => ({ ...prev, [activeDay]: { ...prev[activeDay], open: e.target.value } }))} />
-                    </div>
-                    <div>
-                      <label className="text-sm text-muted-foreground">Close</label>
-                      <input type="time" className="border rounded px-2 py-2 w-full" value={dayStates[activeDay]?.close}
-                        onChange={(e) => setDayStates((prev) => ({ ...prev, [activeDay]: { ...prev[activeDay], close: e.target.value } }))} />
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" onClick={() => {
-                        const state = dayStates[activeDay];
-                        const next = new Set<string>();
-                        for (let m = toMinutes(state.open); m < toMinutes(state.close); m += 30) next.add(toHHMM(m));
-                        setDayStates((prev) => ({ ...prev, [activeDay]: { ...prev[activeDay], selected: next } }));
-                      }}>Select All</Button>
-                      <Button variant="outline" onClick={() => setDayStates((prev) => ({ ...prev, [activeDay]: { ...prev[activeDay], selected: new Set() } }))}>Clear</Button>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" onClick={() => {
-                        const copy = dayStates[activeDay];
-                        setDayStates((prev) => {
-                          const next = { ...prev } as Record<number, DayState>;
-                          for (let i = 0; i < 7; i++) next[i] = i===activeDay ? prev[i] : { open: copy.open, close: copy.close, selected: new Set(copy.selected) };
-                          return next;
-                        });
-                      }}>Copy to all days</Button>
-                    </div>
-                  </div>
-
-                  {/* Slot grid for active day */}
-                  <div className="grid grid-cols-3 md:grid-cols-6 lg:grid-cols-8 gap-2">
-                    {(() => {
-                      const state = dayStates[activeDay];
-                      const items: JSX.Element[] = [];
-                      for (let m = toMinutes(state.open); m < toMinutes(state.close); m += 30) {
-                        const t = toHHMM(m);
-                        const selected = state.selected.has(t);
-                        items.push(
-                          <Button key={t} variant={selected?'default':'outline'} onClick={() => {
-                            setDayStates((prev) => {
-                              const next = new Set(prev[activeDay].selected);
-                              if (next.has(t)) next.delete(t); else next.add(t);
-                              return { ...prev, [activeDay]: { ...prev[activeDay], selected: next } };
-                            });
-                          }} className={`h-10 ${selected?'btn-medical-primary':'btn-medical-secondary'}`}>{t}</Button>
-                        );
-                      }
-                      return items;
-                    })()}
-                  </div>
-
-                  <div className="pt-2">
-                    <Button onClick={saveSchedule} disabled={savingSchedule} className="btn-medical-primary">
-                      {savingSchedule ? 'Saving...' : 'Save Schedule'}
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="profile">
-            <Card className="medical-hero-card">
-              <CardHeader>
-                <CardTitle>Practice Profile</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {doctorInfo ? (
-                  <div className="space-y-6">
-                    <div className="grid md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Practice Name</label>
-                        <p className="text-lg font-semibold">{(doctorInfo as any).practice_name || 'My Practice'}</p>
-                      </div>
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Specialty</label>
-                        <div className="text-lg font-semibold">
-                          <Badge variant="outline" className="text-base">{doctorInfo.speciality}</Badge>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="grid md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Consultation Fee</label>
-                        <p className="text-lg font-semibold">{formatCurrency(doctorInfo.price || 0)}</p>
-                      </div>
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Location</label>
-                        <p className="text-lg font-semibold">{doctorInfo.city}, {doctorInfo.province}</p>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground">Bio</label>
-                      <p className="mt-1">{doctorInfo.bio || 'No bio provided'}</p>
-                    </div>
-
-                    <Button className="btn-medical-primary" onClick={() => setEditOpen(true)}>
-                      <Edit className="h-4 w-4 mr-2" />
+                  <CardTitle className="flex items-center justify-between">
+                    <span>Practice Profile</span>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => setEditOpen(true)}
+                    >
+                      <Edit className="w-4 h-4 mr-2" />
                       Edit Profile
                     </Button>
-
-                    {/* Edit Profile Dialog */}
-                    <Dialog open={editOpen} onOpenChange={(open) => { if (!open) setEditOpen(false); }}>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>Edit Practice Profile</DialogTitle>
-                          <DialogDescription>Update your public profile information shown to patients.</DialogDescription>
-                        </DialogHeader>
-
-                        <form onSubmit={handleEditSubmit} className="space-y-4">
-                          <div className="grid md:grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                              <Label>Practice Name</Label>
-                              <Input value={editForm.practice_name} onChange={(e) => setEditForm({ ...editForm, practice_name: e.target.value })} />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Speciality</Label>
-                              <Input value={editForm.speciality} onChange={(e) => setEditForm({ ...editForm, speciality: e.target.value })} />
-                            </div>
-                          </div>
-
-                          <div className="grid md:grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                              <Label>Qualification</Label>
-                              <Input value={editForm.qualification} onChange={(e) => setEditForm({ ...editForm, qualification: e.target.value })} />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>HPCSA License Number</Label>
-                              <Input value={editForm.license_number} onChange={(e) => setEditForm({ ...editForm, license_number: e.target.value })} />
-                            </div>
-                          </div>
-
-                          <div className="grid md:grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                              <Label>Consultation Fee (ZAR)</Label>
-                              <Input type="number" value={editForm.consultation_fee} onChange={(e) => setEditForm({ ...editForm, consultation_fee: e.target.value })} />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Years of Experience</Label>
-                              <Input type="number" value={editForm.years_experience} onChange={(e) => setEditForm({ ...editForm, years_experience: e.target.value })} />
-                            </div>
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label>Practice Address</Label>
-                            <Input value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} />
-                          </div>
-
-                          <div className="grid md:grid-cols-3 gap-4">
-                            <div className="space-y-2">
-                              <Label>City</Label>
-                              <Input value={editForm.city} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Province</Label>
-                              <Input value={editForm.province} onChange={(e) => setEditForm({ ...editForm, province: e.target.value })} />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Postal Code</Label>
-                              <Input value={editForm.postal_code} onChange={(e) => setEditForm({ ...editForm, postal_code: e.target.value })} />
-                            </div>
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label>Accepted Medical Aids / Insurances (comma-separated)</Label>
-                            <Input value={editForm.accepted_insurances} onChange={(e) => setEditForm({ ...editForm, accepted_insurances: e.target.value })} />
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label>Professional Bio</Label>
-                            <Textarea value={editForm.bio} onChange={(e) => setEditForm({ ...editForm, bio: e.target.value })} rows={4} />
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label>Profile Image</Label>
-                            <input type="file" accept="image/*" onChange={handleFileChange} />
-                            {uploading && <p className="text-sm text-muted-foreground">Uploading...</p>}
-                            {editForm.profile_image_url && (
-                              <img src={editForm.profile_image_url} alt="profile preview" className="w-24 h-24 object-cover rounded-md mt-2" />
-                            )}
-                          </div>
-
-                          <DialogFooter>
-                            <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-                            <Button type="submit" className="btn-medical-primary" disabled={savingEdit}>{savingEdit ? 'Saving…' : 'Save Changes'}</Button>
-                          </DialogFooter>
-                        </form>
-
-                      </DialogContent>
-                    </Dialog>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <div className="space-y-4">
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">Practice Name</h3>
+                        <p className="text-lg font-semibold text-gray-900">{doctor.practiceName || 'Not set'}</p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">Specialization</h3>
+                        <p className="text-lg font-semibold text-gray-900">{doctor.specialization || 'Not set'}</p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">HPCSA Number</h3>
+                        <p className="text-lg font-semibold text-gray-900">{doctor.hpcsaNumber || 'Not set'}</p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">Consultation Fee</h3>
+                        <p className="text-lg font-semibold text-gray-900">{formatCurrency(doctor.consultationFee)}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">Practice Address</h3>
+                        <p className="text-lg font-semibold text-gray-900">{doctor.practiceAddress || 'Not set'}</p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">Practice Phone</h3>
+                        <p className="text-lg font-semibold text-gray-900">{doctor.practicePhone || 'Not set'}</p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">Practice Email</h3>
+                        <p className="text-lg font-semibold text-gray-900">{doctor.practiceEmail || 'Not set'}</p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">Experience</h3>
+                        <p className="text-lg font-semibold text-gray-900">{doctor.experience || 'Not set'}</p>
+                      </div>
+                    </div>
                   </div>
-                ) : (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <p>Loading profile information...</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+                  
+                  {doctor.bio && (
+                    <div className="mt-6">
+                      <h3 className="text-sm font-medium text-gray-500">Bio</h3>
+                      <p className="text-gray-700 mt-1 whitespace-pre-wrap">{doctor.bio}</p>
+                    </div>
+                  )}
 
-          <TabsContent value="analytics" className="space-y-6">
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Bookings</CardTitle>
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{stats.totalBookings}</div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Patients</CardTitle>
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{analyticsData.summary.totalPatients}</div>
-                  <p className="text-xs text-muted-foreground">
-                    {analyticsData.summary.newPatients} new, {analyticsData.summary.returningPatients} returning
-                  </p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Est. Revenue</CardTitle>
-                  <DollarSign className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">R {analyticsData.summary.estimatedRevenue.toFixed(2)}</div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Rating</CardTitle>
-                  <div className="flex items-center">
-                    <span className="text-yellow-500 mr-1">★</span>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{analyticsData.summary.averageRating.toFixed(1)}</div>
-                  <p className="text-xs text-muted-foreground">
-                    Based on {analyticsData.summary.totalReviews} reviews
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Revenue Trend */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Revenue Trend (Last 6 Months)</CardTitle>
-                </CardHeader>
-                <CardContent className="h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={analyticsData.revenueTrend}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
-                      <YAxis />
-                      <RechartsTooltip formatter={(value) => `R ${value}`} />
-                      <Bar dataKey="revenue" fill="#3B82F6" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-
-              {/* Booking Status Distribution */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Booking Status</CardTitle>
-                </CardHeader>
-                <CardContent className="h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={analyticsData.bookingStatus}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={80}
-                        paddingAngle={5}
-                        dataKey="value"
-                      >
-                        {analyticsData.bookingStatus.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
+                  {doctor.qualifications && doctor.qualifications.length > 0 && (
+                    <div className="mt-4">
+                      <h3 className="text-sm font-medium text-gray-500">Qualifications</h3>
+                      <ul className="list-disc list-inside text-gray-700 mt-1">
+                        {doctor.qualifications.map((qual, index) => (
+                          <li key={index}>{qual}</li>
                         ))}
-                      </Pie>
-                      <RechartsTooltip />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="mt-6 pt-6 border-t">
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <Shield className="w-4 h-4" />
+                      <span>Verification Status: </span>
+                      <Badge className={getStatusBadge(doctor.verificationStatus)}>
+                        {doctor.verificationStatus.charAt(0).toUpperCase() + doctor.verificationStatus.slice(1)}
+                      </Badge>
+                    </div>
+                    <div className="text-sm text-gray-500 mt-1">
+                      Profile last updated: {doctor.updatedAt?.toDate?.()?.toLocaleDateString() || 'N/A'}
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
-            </div>
-          </TabsContent>
-        </Tabs>
+            </TabsContent>
+
+            {/* Analytics Tab */}
+            <TabsContent value="analytics">
+              <div className="grid md:grid-cols-2 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Booking Status</CardTitle>
+                  </CardHeader>
+                  <CardContent className="h-[300px]">
+                    {analyticsData.bookingStatus.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={analyticsData.bookingStatus}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={80}
+                            paddingAngle={5}
+                            dataKey="value"
+                          >
+                            {analyticsData.bookingStatus.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <RechartsTooltip />
+                          <Legend />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-gray-500">
+                        No bookings yet
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Quick Stats</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center border-b pb-2">
+                        <span className="text-gray-600">Total Patients</span>
+                        <span className="font-bold text-gray-900">{stats.totalPatients}</span>
+                      </div>
+                      <div className="flex justify-between items-center border-b pb-2">
+                        <span className="text-gray-600">Completed Bookings</span>
+                        <span className="font-bold text-gray-900">{stats.completedBookings}</span>
+                      </div>
+                      <div className="flex justify-between items-center border-b pb-2">
+                        <span className="text-gray-600">Pending Bookings</span>
+                        <span className="font-bold text-yellow-600">{stats.pendingBookings}</span>
+                      </div>
+                      <div className="flex justify-between items-center border-b pb-2">
+                        <span className="text-gray-600">Total Revenue</span>
+                        <span className="font-bold text-green-600">{formatCurrency(stats.monthlyRevenue)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600">Average Rating</span>
+                        <span className="font-bold text-purple-600">
+                          {doctor.rating ? doctor.rating.toFixed(1) : 'No ratings yet'}
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </TabsContent>
+          </Tabs>
+        </div>
       </div>
+
+      {/* Edit Profile Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl">Edit Practice Profile</DialogTitle>
+            <DialogDescription>
+              Update your practice information. Changes will be visible to patients.
+              {doctor.verificationStatus !== 'verified' && (
+                <span className="block text-yellow-600 mt-1">
+                  ⚠️ Your profile is currently under review. You can still edit your information.
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleEditProfile}>
+            <div className="space-y-4 py-4">
+              {/* Personal Information */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <User className="w-4 h-4 text-blue-600" />
+                  Personal Information
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="firstName">First Name</Label>
+                    <Input
+                      id="firstName"
+                      value={editForm.firstName || ''}
+                      onChange={(e) => setEditForm({...editForm, firstName: e.target.value})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="lastName">Last Name</Label>
+                    <Input
+                      id="lastName"
+                      value={editForm.lastName || ''}
+                      onChange={(e) => setEditForm({...editForm, lastName: e.target.value})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Phone</Label>
+                    <Input
+                      id="phone"
+                      value={editForm.phone || ''}
+                      onChange={(e) => setEditForm({...editForm, phone: e.target.value})}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Practice Information */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-blue-600" />
+                  Practice Information
+                </h3>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="practiceName">Practice Name</Label>
+                    <Input
+                      id="practiceName"
+                      value={editForm.practiceName || ''}
+                      onChange={(e) => setEditForm({...editForm, practiceName: e.target.value})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="practiceAddress">Practice Address</Label>
+                    <Input
+                      id="practiceAddress"
+                      value={editForm.practiceAddress || ''}
+                      onChange={(e) => setEditForm({...editForm, practiceAddress: e.target.value})}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="practicePhone">Practice Phone</Label>
+                      <Input
+                        id="practicePhone"
+                        value={editForm.practicePhone || ''}
+                        onChange={(e) => setEditForm({...editForm, practicePhone: e.target.value})}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="practiceEmail">Practice Email</Label>
+                      <Input
+                        id="practiceEmail"
+                        value={editForm.practiceEmail || ''}
+                        onChange={(e) => setEditForm({...editForm, practiceEmail: e.target.value})}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Professional Information */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <Stethoscope className="w-4 h-4 text-blue-600" />
+                  Professional Information
+                </h3>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="specialization">Specialization</Label>
+                    <Input
+                      id="specialization"
+                      value={editForm.specialization || ''}
+                      onChange={(e) => setEditForm({...editForm, specialization: e.target.value})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="hpcsaNumber">HPCSA Number</Label>
+                    <Input
+                      id="hpcsaNumber"
+                      value={editForm.hpcsaNumber || ''}
+                      onChange={(e) => setEditForm({...editForm, hpcsaNumber: e.target.value})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="experience">Experience</Label>
+                    <Input
+                      id="experience"
+                      value={editForm.experience || ''}
+                      onChange={(e) => setEditForm({...editForm, experience: e.target.value})}
+                      placeholder="e.g., 5 years in private practice"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="bio">Bio</Label>
+                    <Textarea
+                      id="bio"
+                      value={editForm.bio || ''}
+                      onChange={(e) => setEditForm({...editForm, bio: e.target.value})}
+                      placeholder="Tell patients about yourself..."
+                      rows={4}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Consultation Settings */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <DollarSign className="w-4 h-4 text-blue-600" />
+                  Consultation Settings
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="consultationFee">Consultation Fee (R)</Label>
+                    <Input
+                      id="consultationFee"
+                      type="number"
+                      value={editForm.consultationFee || ''}
+                      onChange={(e) => setEditForm({...editForm, consultationFee: e.target.value})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="consultationDuration">Consultation Duration (minutes)</Label>
+                    <Input
+                      id="consultationDuration"
+                      type="number"
+                      value={editForm.consultationDuration || 30}
+                      onChange={(e) => setEditForm({...editForm, consultationDuration: e.target.value})}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={editing} className="bg-blue-600 hover:bg-blue-700">
+                {editing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4 mr-2" />
+                    Save Changes
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
