@@ -13,7 +13,7 @@ import { Stethoscope, Building2, MapPin, Phone, Mail, User, Lock, Award, Users, 
 
 const DoctorSignUp = () => {
   const navigate = useNavigate();
-  const { signUp } = useAuth();
+  const { signUp } = useAuth(); // This uses Firebase auth
   const { toast } = useToast();
   
   const [formData, setFormData] = useState({
@@ -28,6 +28,7 @@ const DoctorSignUp = () => {
     hpcsaNumber: '',
     practiceAddress: '',
     consultationFee: '',
+    referralCode: '',
     acceptTerms: false,
   });
   const [loading, setLoading] = useState(false);
@@ -123,18 +124,23 @@ const DoctorSignUp = () => {
     try {
       setLoading(true);
       
-      // Sign up with Firebase
-      const { user, profile, error } = await signUp(formData.email, formData.password, {
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        phone: formData.phone || null,
-        role: 'doctor',
-        specialization: formData.specialization,
-        hpcsaNumber: formData.hpcsaNumber || null,
-        practiceName: formData.practiceName || null,
-        practiceAddress: formData.practiceAddress || null,
-        consultationFee: formData.consultationFee ? parseFloat(formData.consultationFee) : null,
-      });
+      // Sign up with Firebase Auth - this creates user in Firebase Auth AND Firestore
+      const { user, profile, error } = await signUp(
+        formData.email, 
+        formData.password, 
+        {
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          phone: formData.phone || null,
+          role: 'doctor',
+          specialization: formData.specialization,
+          hpcsaNumber: formData.hpcsaNumber || null,
+          practiceName: formData.practiceName || null,
+          practiceAddress: formData.practiceAddress || null,
+          consultationFee: formData.consultationFee ? parseFloat(formData.consultationFee) : null,
+        },
+        formData.referralCode.toUpperCase().trim() // Pass the referral code
+      );
 
       if (error) {
         toast({ 
@@ -146,7 +152,7 @@ const DoctorSignUp = () => {
       }
 
       toast({
-        title: 'Account Created!',
+        title: 'Account Created! 🎉',
         description: 'We\'ve sent a verification link to your email. Please verify your email before signing in.',
         duration: 8000,
       });
@@ -183,7 +189,7 @@ const DoctorSignUp = () => {
           </p>
         </div>
 
-        {/* Benefits Cards - Mobile Responsive */}
+        {/* Benefits Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
           <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-3 sm:p-4 text-center">
             <Users className="w-6 h-6 sm:w-7 sm:h-7 text-blue-600 mx-auto mb-1 sm:mb-2" />
@@ -413,6 +419,34 @@ const DoctorSignUp = () => {
                     disabled={loading}
                     className="h-10 sm:h-11"
                   />
+                </div>
+              </div>
+
+              {/* Referral Code Section */}
+              <div className="space-y-4">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <Award className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+                  Referral Information
+                </h3>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="referralCode" className="text-sm">
+                    Ambassador Referral Code (Optional)
+                  </Label>
+                  <Input 
+                    id="referralCode"
+                    name="referralCode"
+                    value={formData.referralCode}
+                    onChange={handleChange}
+                    placeholder="e.g., JOHNDOEXYZ"
+                    disabled={loading}
+                    className="h-10 sm:h-11 uppercase"
+                    maxLength={10}
+                  />
+                  <p className="text-xs text-gray-500">
+                    If you were referred by a MedMap Ambassador, enter their referral code here.
+                    Using a referral code helps support our ambassador community.
+                  </p>
                 </div>
               </div>
 
