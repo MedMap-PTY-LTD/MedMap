@@ -118,6 +118,8 @@ export interface DoctorProfile extends UserProfile {
   verificationStatus: 'pending' | 'verified' | 'rejected';
   verifiedAt?: Timestamp;
   rejectionReason?: string;
+  referralCodeUsed?: string;
+  referredBy?: string;
 }
 
 export interface AmbassadorProfile extends UserProfile {
@@ -183,6 +185,21 @@ export interface AdminProfile extends UserProfile {
   department?: string;
 }
 
+export interface ReferralData {
+  ambassadorId: string;
+  ambassadorName: string;
+  referralCode: string;
+  referredAt: Timestamp;
+  doctorId: string;
+  doctorName: string;
+  doctorEmail: string;
+  status: 'pending' | 'verified' | 'rejected';
+  commissionEarned: number;
+  commissionPaid: boolean;
+  verifiedAt?: Timestamp;
+  rejectionReason?: string;
+}
+
 // Helper function to generate referral code
 function generateReferralCode(firstName?: string, lastName?: string): string {
   if (firstName && lastName && firstName.length >= 2 && lastName.length >= 2) {
@@ -228,8 +245,8 @@ export const authService = {
     }
   },
 
-  // Sign up with email verification
-  signUp: async (email: string, password: string, profileData: Partial<UserProfile> & { [key: string]: any }) => {
+  // Sign up with email verification and referral code support
+  signUp: async (email: string, password: string, profileData: Partial<UserProfile> & { [key: string]: any }, referralCode?: string) => {
     if (!isFirebaseInitialized()) {
       return { user: null, profile: null, error: 'Firebase is not initialized. Please check your configuration.' };
     }
@@ -276,6 +293,53 @@ export const authService = {
       
       switch (role) {
         case 'doctor':
+          // Store referral code if provided
+          let referralData = null;
+          if (referralCode) {
+            console.log(`🔍 Checking referral code: ${referralCode}`);
+            
+            // Find the ambassador with this referral code
+            const ambassadorsQuery = query(
+              collection(db, 'ambassadors'),
+              where('referralCode', '==', referralCode),
+              where('applicationStatus', '==', 'approved')
+            );
+            const ambassadorSnapshot = await getDocs(ambassadorsQuery);
+            
+            if (!ambassadorSnapshot.empty) {
+              const ambassadorDoc = ambassadorSnapshot.docs[0];
+              const ambassadorData = ambassadorDoc.data();
+              
+              referralData = {
+                ambassadorId: ambassadorDoc.id,
+                ambassadorName: `${ambassadorData.firstName || ''} ${ambassadorData.lastName || ''}`.trim(),
+                referralCode: referralCode,
+                referredAt: serverTimestamp(),
+                doctorId: user.uid,
+                doctorName: userProfile.fullName,
+                doctorEmail: user.email!,
+                status: 'pending',
+                commissionEarned: 0,
+                commissionPaid: false,
+              };
+              
+              console.log(`✅ Referral found from ambassador: ${referralData.ambassadorName}`);
+              
+              // Save referral data
+              await setDoc(doc(db, 'referrals', `doctor_${user.uid}`), referralData);
+              
+              // Update ambassador's referred count
+              await updateDoc(doc(db, 'ambassadors', ambassadorDoc.id), {
+                totalReferredDoctors: (ambassadorData.totalReferredDoctors || 0) + 1,
+                updatedAt: serverTimestamp(),
+              });
+              
+              console.log('✅ Referral data saved');
+            } else {
+              console.log('⚠️ Invalid referral code or ambassador not approved');
+            }
+          }
+          
           const doctorData = {
             ...baseProfile,
             role: 'doctor',
@@ -289,6 +353,8 @@ export const authService = {
             ...(profileData.qualifications ? { qualifications: profileData.qualifications } : {}),
             ...(profileData.operatingHours ? { operatingHours: profileData.operatingHours } : {}),
             ...(profileData.profilePicture ? { profilePicture: profileData.profilePicture } : {}),
+            ...(referralCode ? { referralCodeUsed: referralCode } : {}),
+            ...(referralData ? { referredBy: referralData.ambassadorId } : {}),
           };
           await setDoc(doc(db, 'doctors', user.uid), doctorData);
           console.log('✅ Doctor profile saved');
@@ -925,6 +991,10 @@ export const adminService = {
         where('applicationStatus', '==', 'pending')
       ));
       
+      // Get referral stats
+      const referralsSnapshot = await getDocs(collection(db, 'referrals'));
+      const referrals = referralsSnapshot.docs.map(doc => doc.data());
+      
       return {
         stats: {
           totalUsers: users.length,
@@ -936,6 +1006,11 @@ export const adminService = {
           readyForApproval: readyForApprovalSnapshot.size,
           openTickets: 0,
           urgentTickets: 0,
+          totalReferrals: referrals.length,
+          pendingReferrals: referrals.filter(r => r.status === 'pending').length,
+          totalCommission: referrals
+            .filter(r => r.status === 'verified')
+            .reduce((sum, r) => sum + (r.commissionEarned || 0), 0),
         },
         error: null,
       };
@@ -1020,7 +1095,7 @@ export const adminService = {
     }
   },
   
-  // Approve doctor
+  // Approve doctor with referral handling
   approveDoctor: async (doctorId: string, notes?: string) => {
     if (!isFirebaseInitialized()) {
       return { error: 'Firebase is not initialized.' };
@@ -1043,6 +1118,40 @@ export const adminService = {
         updatedAt: serverTimestamp(),
       });
       
+      // Check if this doctor was referred
+      const referralRef = doc(db, 'referrals', `doctor_${doctorId}`);
+      const referralDoc = await getDoc(referralRef);
+      
+      if (referralDoc.exists()) {
+        // Update referral status to verified
+        const referralData = referralDoc.data();
+        const commissionAmount = 500; // Fixed commission amount
+        
+        batch.update(referralRef, {
+          status: 'verified',
+          verifiedAt: serverTimestamp(),
+          commissionEarned: commissionAmount,
+          updatedAt: serverTimestamp(),
+        });
+        
+        // Update ambassador's earnings
+        const ambassadorRef = doc(db, 'ambassadors', referralData.ambassadorId);
+        const ambassadorDoc = await getDoc(ambassadorRef);
+        if (ambassadorDoc.exists()) {
+          const ambassadorData = ambassadorDoc.data();
+          const currentPending = ambassadorData.pendingEarnings || 0;
+          const currentTotal = ambassadorData.totalEarnings || 0;
+          const activeReferred = ambassadorData.activeReferredDoctors || 0;
+          
+          batch.update(ambassadorRef, {
+            pendingEarnings: currentPending + commissionAmount,
+            totalEarnings: currentTotal + commissionAmount,
+            activeReferredDoctors: activeReferred + 1,
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+      
       await batch.commit();
       return { error: null };
     } catch (error: any) {
@@ -1051,7 +1160,7 @@ export const adminService = {
     }
   },
   
-  // Reject doctor
+  // Reject doctor with referral handling
   rejectDoctor: async (doctorId: string, reason: string) => {
     if (!isFirebaseInitialized()) {
       return { error: 'Firebase is not initialized.' };
@@ -1073,6 +1182,19 @@ export const adminService = {
         isActive: false,
         updatedAt: serverTimestamp(),
       });
+      
+      // Check if this doctor was referred
+      const referralRef = doc(db, 'referrals', `doctor_${doctorId}`);
+      const referralDoc = await getDoc(referralRef);
+      
+      if (referralDoc.exists()) {
+        // Update referral status to rejected
+        batch.update(referralRef, {
+          status: 'rejected',
+          rejectionReason: reason,
+          updatedAt: serverTimestamp(),
+        });
+      }
       
       await batch.commit();
       return { error: null };
@@ -1125,6 +1247,143 @@ export const adminService = {
       };
     } catch (error: any) {
       return { status: null, error: error.message };
+    }
+  },
+
+  // ============== REFERRAL FUNCTIONS ==============
+  
+  // Get all referrals
+  getReferrals: async (filters?: { status?: string; ambassadorId?: string }) => {
+    if (!isFirebaseInitialized()) {
+      return { referrals: [], error: 'Firebase is not initialized.' };
+    }
+    
+    try {
+      let q = query(collection(db, 'referrals'), orderBy('referredAt', 'desc'));
+      
+      if (filters?.status) {
+        q = query(q, where('status', '==', filters.status));
+      }
+      
+      if (filters?.ambassadorId) {
+        q = query(q, where('ambassadorId', '==', filters.ambassadorId));
+      }
+      
+      const snapshot = await getDocs(q);
+      const referrals = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        referredAt: doc.data().referredAt?.toDate().toISOString(),
+        verifiedAt: doc.data().verifiedAt?.toDate().toISOString(),
+      }));
+      
+      return { referrals, error: null };
+    } catch (error: any) {
+      console.error('Error getting referrals:', error);
+      return { referrals: [], error: error.message };
+    }
+  },
+
+  // Get referrals by ambassador
+  getAmbassadorReferrals: async (ambassadorId: string) => {
+    return adminService.getReferrals({ ambassadorId });
+  },
+
+  // Get pending referrals (doctors waiting for verification)
+  getPendingReferrals: async () => {
+    return adminService.getReferrals({ status: 'pending' });
+  },
+
+  // Update referral status when doctor is verified
+  updateReferralStatus: async (doctorId: string, status: 'verified' | 'rejected', rejectionReason?: string) => {
+    if (!isFirebaseInitialized()) {
+      return { error: 'Firebase is not initialized.' };
+    }
+    
+    try {
+      const referralRef = doc(db, 'referrals', `doctor_${doctorId}`);
+      const referralDoc = await getDoc(referralRef);
+      
+      if (!referralDoc.exists()) {
+        return { error: 'Referral not found' };
+      }
+      
+      const referralData = referralDoc.data();
+      const batch = writeBatch(db);
+      
+      // Update referral
+      batch.update(referralRef, {
+        status: status,
+        ...(status === 'verified' ? { verifiedAt: serverTimestamp() } : {}),
+        ...(rejectionReason ? { rejectionReason } : {}),
+        updatedAt: serverTimestamp(),
+      });
+      
+      if (status === 'verified') {
+        // Calculate commission (e.g., R500 for a verified doctor)
+        const commissionAmount = 500;
+        
+        batch.update(referralRef, {
+          commissionEarned: commissionAmount,
+        });
+        
+        // Update ambassador's earnings
+        const ambassadorRef = doc(db, 'ambassadors', referralData.ambassadorId);
+        const ambassadorDoc = await getDoc(ambassadorRef);
+        if (ambassadorDoc.exists()) {
+          const ambassadorData = ambassadorDoc.data();
+          const currentPending = ambassadorData.pendingEarnings || 0;
+          const currentTotal = ambassadorData.totalEarnings || 0;
+          const activeReferred = ambassadorData.activeReferredDoctors || 0;
+          
+          batch.update(ambassadorRef, {
+            pendingEarnings: currentPending + commissionAmount,
+            totalEarnings: currentTotal + commissionAmount,
+            activeReferredDoctors: activeReferred + 1,
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+      
+      await batch.commit();
+      
+      return { error: null };
+    } catch (error: any) {
+      console.error('Error updating referral status:', error);
+      return { error: error.message };
+    }
+  },
+
+  // Get referral stats for dashboard
+  getReferralStats: async () => {
+    if (!isFirebaseInitialized()) {
+      return { stats: null, error: 'Firebase is not initialized.' };
+    }
+    
+    try {
+      const referralsSnapshot = await getDocs(collection(db, 'referrals'));
+      const referrals = referralsSnapshot.docs.map(doc => doc.data());
+      
+      const pendingReferrals = referrals.filter(r => r.status === 'pending').length;
+      const verifiedReferrals = referrals.filter(r => r.status === 'verified').length;
+      const rejectedReferrals = referrals.filter(r => r.status === 'rejected').length;
+      const totalCommission = referrals
+        .filter(r => r.status === 'verified')
+        .reduce((sum, r) => sum + (r.commissionEarned || 0), 0);
+      
+      return {
+        stats: {
+          totalReferrals: referrals.length,
+          pendingReferrals,
+          verifiedReferrals,
+          rejectedReferrals,
+          totalCommission,
+        },
+        error: null,
+      };
+    } catch (error: any) {
+      console.error('Error getting referral stats:', error);
+      return { stats: null, error: error.message };
     }
   },
 };
