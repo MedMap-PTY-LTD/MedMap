@@ -2,8 +2,20 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import { adminService } from '../../lib/firebase';
-import { authService } from '../../lib/firebase';
+import { db } from '@/lib/firebase';
+import { 
+  collection, 
+  doc, 
+  getDoc, 
+  getDocs, 
+  updateDoc, 
+  query, 
+  where, 
+  orderBy, 
+  serverTimestamp,
+  writeBatch
+} from 'firebase/firestore';
+import { authService } from '@/lib/firebase';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -88,6 +100,9 @@ interface DoctorProfile extends UserProfile {
   verificationDocuments?: string[];
   operatingHours?: OperatingHours;
   profilePicture?: string;
+  referralCodeUsed?: string;
+  referredBy?: string;
+  submittedAt?: string;
 }
 
 interface PatientProfile extends UserProfile {
@@ -134,6 +149,11 @@ interface AmbassadorProfile extends UserProfile {
   interviewNotes?: string;
   referralCode: string | null;
   rejectionReason?: string;
+  totalReferredDoctors: number;
+  activeReferredDoctors: number;
+  currentTier: 'bronze' | 'silver' | 'gold' | 'diamond';
+  totalEarnings: number;
+  pendingEarnings: number;
 }
 
 interface EmergencyContact {
@@ -158,6 +178,40 @@ interface DayHours {
   endTime: string;
 }
 
+interface Referral {
+  id: string;
+  ambassadorId: string;
+  ambassadorName: string;
+  referralCode: string;
+  referredAt: string;
+  doctorId: string;
+  doctorName: string;
+  doctorEmail: string;
+  status: 'pending' | 'verified' | 'rejected';
+  commissionEarned: number;
+  commissionPaid: boolean;
+  verifiedAt?: string;
+  rejectionReason?: string;
+}
+
+// Helper to combine user data with role data
+const combineWithUserData = (roleData: any, userData: any): any => {
+  return {
+    ...roleData,
+    ...userData,
+    uid: roleData.uid || userData.uid,
+    // Ensure fullName is set
+    fullName: userData.fullName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || roleData.fullName || 'Unknown User',
+    firstName: userData.firstName || roleData.firstName || '',
+    lastName: userData.lastName || roleData.lastName || '',
+    email: userData.email || roleData.email || '',
+    phone: userData.phone || roleData.phone || '',
+    isActive: userData.isActive !== undefined ? userData.isActive : roleData.isActive,
+    createdAt: userData.createdAt || roleData.createdAt,
+    updatedAt: userData.updatedAt || roleData.updatedAt,
+  };
+};
+
 const AdminDashboard = () => {
   const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
@@ -174,6 +228,9 @@ const AdminDashboard = () => {
     readyForApproval: 0,
     openTickets: 0,
     urgentTickets: 0,
+    totalReferrals: 0,
+    pendingReferrals: 0,
+    totalCommission: 0,
   });
 
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -181,6 +238,7 @@ const AdminDashboard = () => {
   const [patients, setPatients] = useState<PatientProfile[]>([]);
   const [ambassadors, setAmbassadors] = useState<AmbassadorProfile[]>([]);
   const [pendingDoctors, setPendingDoctors] = useState<DoctorProfile[]>([]);
+  const [referrals, setReferrals] = useState<Referral[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [ambassadorSearchTerm, setAmbassadorSearchTerm] = useState('');
@@ -219,32 +277,134 @@ const AdminDashboard = () => {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
+      // Fetch all data from Firestore directly
       const [
-        statsData,
-        usersData,
-        doctorsData,
-        patientsData,
-        ambassadorsData,
-        pendingDoctorsData,
+        usersSnapshot,
+        doctorsSnapshot,
+        patientsSnapshot,
+        ambassadorsSnapshot,
+        pendingDoctorsSnapshot,
+        referralsSnapshot,
       ] = await Promise.all([
-        adminService.getDashboardStats(),
-        adminService.getAllUsers(),
-        adminService.getAllDoctors(),
-        adminService.getAllPatients(),
-        adminService.getAllAmbassadors(),
-        adminService.getPendingDoctors(),
+        getDocs(collection(db, 'users')),
+        getDocs(collection(db, 'doctors')),
+        getDocs(collection(db, 'patients')),
+        getDocs(collection(db, 'ambassadors')),
+        getDocs(query(
+          collection(db, 'doctors'),
+          where('verificationStatus', '==', 'pending')
+        )),
+        getDocs(collection(db, 'referrals')),
       ]);
 
-      if (statsData.stats) setStats(statsData.stats);
-      if (usersData.users) setUsers(usersData.users as UserProfile[]);
-      if (doctorsData.doctors) setDoctors(doctorsData.doctors as DoctorProfile[]);
-      if (patientsData.patients) setPatients(patientsData.patients as PatientProfile[]);
-      if (ambassadorsData.ambassadors) setAmbassadors(ambassadorsData.ambassadors as AmbassadorProfile[]);
-      if (pendingDoctorsData.doctors) setPendingDoctors(pendingDoctorsData.doctors as DoctorProfile[]);
-    } catch (error) {
+      // Build a map of user data by uid for quick lookup
+      const userMap: Record<string, any> = {};
+      usersSnapshot.docs.forEach((docSnap) => {
+        userMap[docSnap.id] = { uid: docSnap.id, ...docSnap.data() };
+      });
+
+      // Process all users (already have full data)
+      const usersData = usersSnapshot.docs.map((docSnap) => ({
+        uid: docSnap.id,
+        ...docSnap.data()
+      })) as UserProfile[];
+      setUsers(usersData);
+
+      // Process all doctors - combine with user data
+      const allDoctors = doctorsSnapshot.docs.map((docSnap) => {
+        const doctorData = docSnap.data();
+        const userData = userMap[docSnap.id] || {};
+        return combineWithUserData(
+          { uid: docSnap.id, ...doctorData },
+          userData
+        ) as DoctorProfile;
+      });
+      setDoctors(allDoctors);
+
+      // Process patients - combine with user data
+      const patientsData = patientsSnapshot.docs.map((docSnap) => {
+        const patientData = docSnap.data();
+        const userData = userMap[docSnap.id] || {};
+        return combineWithUserData(
+          { uid: docSnap.id, ...patientData },
+          userData
+        ) as PatientProfile;
+      });
+      setPatients(patientsData);
+
+      // Process ambassadors - combine with user data
+      const ambassadorsData = ambassadorsSnapshot.docs.map((docSnap) => {
+        const ambassadorData = docSnap.data();
+        const userData = userMap[docSnap.id] || {};
+        return combineWithUserData(
+          { uid: docSnap.id, ...ambassadorData },
+          userData
+        ) as AmbassadorProfile;
+      });
+      setAmbassadors(ambassadorsData);
+
+      // Process pending doctors with user data
+      const pendingDocs = await Promise.all(
+        pendingDoctorsSnapshot.docs.map(async (docSnap) => {
+          const doctorData = docSnap.data();
+          const userData = userMap[docSnap.id] || {};
+          return combineWithUserData(
+            { 
+              uid: docSnap.id, 
+              ...doctorData,
+              submittedAt: doctorData.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+            },
+            userData
+          ) as DoctorProfile;
+        })
+      );
+      setPendingDoctors(pendingDocs);
+
+      // Process referrals
+      const referralsData = referralsSnapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data(),
+        referredAt: docSnap.data().referredAt?.toDate?.()?.toISOString(),
+        verifiedAt: docSnap.data().verifiedAt?.toDate?.()?.toISOString(),
+      })) as Referral[];
+      setReferrals(referralsData);
+
+      // Calculate stats
+      const totalUsers = usersData.length;
+      const totalDoctors = allDoctors.filter(d => d.verificationStatus === 'verified').length;
+      const totalPatients = usersData.filter(u => u.role === 'patient').length;
+      const totalAmbassadors = usersData.filter(u => u.role === 'ambassador').length;
+      const pendingDoctorsCount = pendingDocs.length;
+      const pendingAmbassadorsCount = ambassadorsData.filter(a => a.applicationStatus === 'pending').length;
+      const readyForApproval = ambassadorsData.filter(a => a.interviewStatus === 'passed' && a.applicationStatus === 'pending').length;
+      
+      // Referral stats
+      const totalReferrals = referralsData.length;
+      const pendingReferrals = referralsData.filter(r => r.status === 'pending').length;
+      const totalCommission = referralsData
+        .filter(r => r.status === 'verified')
+        .reduce((sum, r) => sum + (r.commissionEarned || 0), 0);
+
+      setStats({
+        totalUsers,
+        totalDoctors,
+        totalPatients,
+        totalAmbassadors,
+        pendingDoctors: pendingDoctorsCount,
+        pendingAmbassadors: pendingAmbassadorsCount,
+        readyForApproval,
+        openTickets: 0,
+        urgentTickets: 0,
+        totalReferrals,
+        pendingReferrals,
+        totalCommission,
+      });
+
+    } catch (error: any) {
+      console.error('Error fetching dashboard data:', error);
       toast({
         title: 'Error',
-        description: 'Failed to load dashboard data.',
+        description: error.message || 'Failed to load dashboard data. Please try again.',
         variant: 'destructive',
       });
     } finally {
@@ -254,25 +414,121 @@ const AdminDashboard = () => {
 
   const handleApproveDoctor = async (doctorId: string) => {
     try {
-      await adminService.approveDoctor(doctorId);
-      toast({ title: 'Success', description: 'Doctor approved successfully.' });
+      const batch = writeBatch(db);
+      
+      // Update doctor status
+      const doctorRef = doc(db, 'doctors', doctorId);
+      batch.update(doctorRef, {
+        verificationStatus: 'verified',
+        verifiedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      // Update user status
+      const userRef = doc(db, 'users', doctorId);
+      batch.update(userRef, {
+        isActive: true,
+        updatedAt: serverTimestamp(),
+      });
+
+      // Check if this doctor was referred
+      const referralRef = doc(db, 'referrals', `doctor_${doctorId}`);
+      const referralDocSnap = await getDoc(referralRef);
+      
+      if (referralDocSnap.exists()) {
+        const referralData = referralDocSnap.data();
+        const commissionAmount = 500;
+        
+        batch.update(referralRef, {
+          status: 'verified',
+          verifiedAt: serverTimestamp(),
+          commissionEarned: commissionAmount,
+          updatedAt: serverTimestamp(),
+        });
+        
+        // Update ambassador earnings
+        const ambassadorRef = doc(db, 'ambassadors', referralData.ambassadorId);
+        const ambassadorDocSnap = await getDoc(ambassadorRef);
+        if (ambassadorDocSnap.exists()) {
+          const ambassadorData = ambassadorDocSnap.data();
+          batch.update(ambassadorRef, {
+            pendingEarnings: (ambassadorData.pendingEarnings || 0) + commissionAmount,
+            totalEarnings: (ambassadorData.totalEarnings || 0) + commissionAmount,
+            activeReferredDoctors: (ambassadorData.activeReferredDoctors || 0) + 1,
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+
+      await batch.commit();
+
+      toast({ 
+        title: 'Success', 
+        description: 'Doctor approved successfully.' 
+      });
       fetchDashboardData();
-    } catch (error) {
-      toast({ title: 'Error', description: 'Failed to approve doctor.', variant: 'destructive' });
+    } catch (error: any) {
+      console.error('Error approving doctor:', error);
+      toast({ 
+        title: 'Error', 
+        description: error.message || 'Failed to approve doctor.', 
+        variant: 'destructive' 
+      });
     }
   };
 
   const handleRejectDoctor = async () => {
     if (!selectedDoctor || !rejectReason) return;
+    
     try {
-      await adminService.rejectDoctor(selectedDoctor.uid, rejectReason);
-      toast({ title: 'Success', description: 'Doctor application rejected.' });
+      const doctorId = selectedDoctor.uid || (selectedDoctor as any).id;
+      const batch = writeBatch(db);
+      
+      // Update doctor status
+      const doctorRef = doc(db, 'doctors', doctorId);
+      batch.update(doctorRef, {
+        verificationStatus: 'rejected',
+        rejectedAt: serverTimestamp(),
+        rejectionReason: rejectReason,
+        updatedAt: serverTimestamp(),
+      });
+
+      // Update user status
+      const userRef = doc(db, 'users', doctorId);
+      batch.update(userRef, {
+        isActive: false,
+        updatedAt: serverTimestamp(),
+      });
+
+      // Check if this doctor was referred
+      const referralRef = doc(db, 'referrals', `doctor_${doctorId}`);
+      const referralDocSnap = await getDoc(referralRef);
+      
+      if (referralDocSnap.exists()) {
+        batch.update(referralRef, {
+          status: 'rejected',
+          rejectionReason: rejectReason,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
+
+      toast({ 
+        title: 'Success', 
+        description: 'Doctor application rejected.' 
+      });
       setShowRejectDialog(false);
       setSelectedDoctor(null);
       setRejectReason('');
       fetchDashboardData();
-    } catch (error) {
-      toast({ title: 'Error', description: 'Failed to reject doctor.', variant: 'destructive' });
+    } catch (error: any) {
+      console.error('Error rejecting doctor:', error);
+      toast({ 
+        title: 'Error', 
+        description: error.message || 'Failed to reject doctor.', 
+        variant: 'destructive' 
+      });
     }
   };
 
@@ -280,28 +536,98 @@ const AdminDashboard = () => {
     if (!selectedAmbassador) return;
     
     try {
-      await adminService.updateAmbassadorInterviewStatus(selectedAmbassador.uid, interviewStatus, interviewNotes);
-      toast({ title: 'Success', description: `Interview status updated to ${interviewStatus}.` });
+      const ambassadorRef = doc(db, 'ambassadors', selectedAmbassador.uid);
+      const updateData: any = {
+        interviewStatus: interviewStatus,
+        updatedAt: serverTimestamp(),
+      };
+      
+      if (interviewNotes) {
+        updateData.interviewNotes = interviewNotes;
+      }
+      
+      if (interviewStatus === 'passed') {
+        updateData.onboardingStep = 4;
+        updateData.applicationStatus = 'pending';
+      } else if (interviewStatus === 'failed') {
+        updateData.applicationStatus = 'rejected';
+        updateData.rejectedAt = serverTimestamp();
+        updateData.isActive = false;
+        updateData.onboardingStep = 4;
+      }
+      
+      await updateDoc(ambassadorRef, updateData);
+      
+      // Also update the user's isActive status if rejected
+      if (interviewStatus === 'failed') {
+        const userRef = doc(db, 'users', selectedAmbassador.uid);
+        await updateDoc(userRef, {
+          isActive: false,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      toast({ 
+        title: 'Success', 
+        description: `Interview status updated to ${interviewStatus}.` 
+      });
       setShowInterviewDialog(false);
       setInterviewNotes('');
       fetchDashboardData();
-    } catch (error) {
-      toast({ title: 'Error', description: 'Failed to update interview status.', variant: 'destructive' });
+    } catch (error: any) {
+      console.error('Error updating interview status:', error);
+      toast({ 
+        title: 'Error', 
+        description: error.message || 'Failed to update interview status.', 
+        variant: 'destructive' 
+      });
     }
   };
 
   const handleApproveAmbassador = async (ambassadorId: string) => {
     setApprovingAmbassadorId(ambassadorId);
     try {
-      const result = await adminService.approveAmbassador(ambassadorId);
-      if (result.referralCode) {
-        setGeneratedReferralCode(result.referralCode);
-        setShowReferralCodeDialog(true);
-        toast({ title: 'Success', description: 'Ambassador approved and referral code generated.' });
-      }
+      // Get user data for referral code generation
+      const userDocRef = doc(db, 'users', ambassadorId);
+      const userDocSnap = await getDoc(userDocRef);
+      const userData = userDocSnap.data();
+      const firstName = userData?.firstName || '';
+      const lastName = userData?.lastName || '';
+      const referralCode = generateReferralCode(firstName, lastName);
+      
+      const batch = writeBatch(db);
+      
+      const ambassadorRef = doc(db, 'ambassadors', ambassadorId);
+      batch.update(ambassadorRef, {
+        applicationStatus: 'approved',
+        referralCode: referralCode,
+        approvedAt: serverTimestamp(),
+        onboardingStep: 5,
+        updatedAt: serverTimestamp(),
+      });
+      
+      const userRef = doc(db, 'users', ambassadorId);
+      batch.update(userRef, {
+        isActive: true,
+        updatedAt: serverTimestamp(),
+      });
+      
+      await batch.commit();
+      
+      setGeneratedReferralCode(referralCode);
+      setShowReferralCodeDialog(true);
+      toast({ 
+        title: 'Success', 
+        description: 'Ambassador approved and referral code generated.' 
+      });
       fetchDashboardData();
-    } catch (error) {
-      toast({ title: 'Error', description: 'Failed to approve ambassador.', variant: 'destructive' });
+    } catch (error: any) {
+      console.error('Error approving ambassador:', error);
+      toast({ 
+        title: 'Error', 
+        description: error.message || 'Failed to approve ambassador.', 
+        variant: 'destructive' 
+      });
     } finally {
       setApprovingAmbassadorId(null);
     }
@@ -309,32 +635,126 @@ const AdminDashboard = () => {
 
   const handleRejectAmbassador = async (ambassadorId: string, reason: string) => {
     try {
-      await adminService.rejectAmbassador(ambassadorId, reason);
-      toast({ title: 'Success', description: 'Ambassador application rejected.' });
+      const batch = writeBatch(db);
+      
+      const ambassadorRef = doc(db, 'ambassadors', ambassadorId);
+      batch.update(ambassadorRef, {
+        applicationStatus: 'rejected',
+        rejectionReason: reason,
+        rejectedAt: serverTimestamp(),
+        onboardingStep: 4,
+        updatedAt: serverTimestamp(),
+      });
+      
+      const userRef = doc(db, 'users', ambassadorId);
+      batch.update(userRef, {
+        isActive: false,
+        updatedAt: serverTimestamp(),
+      });
+      
+      await batch.commit();
+      
+      toast({ 
+        title: 'Success', 
+        description: 'Ambassador application rejected.' 
+      });
       fetchDashboardData();
-    } catch (error) {
-      toast({ title: 'Error', description: 'Failed to reject ambassador.', variant: 'destructive' });
+    } catch (error: any) {
+      console.error('Error rejecting ambassador:', error);
+      toast({ 
+        title: 'Error', 
+        description: error.message || 'Failed to reject ambassador.', 
+        variant: 'destructive' 
+      });
     }
   };
 
   const handleDeactivateUser = async (userId: string) => {
     try {
-      await adminService.deactivateUser(userId);
-      toast({ title: 'Success', description: 'User status updated.' });
+      const userRef = doc(db, 'users', userId);
+      const userDocSnap = await getDoc(userRef);
+      
+      if (userDocSnap.exists()) {
+        const userData = userDocSnap.data();
+        await updateDoc(userRef, {
+          isActive: !userData.isActive,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      
+      toast({ 
+        title: 'Success', 
+        description: 'User status updated.' 
+      });
       fetchDashboardData();
-    } catch (error) {
-      toast({ title: 'Error', description: 'Failed to update user.', variant: 'destructive' });
+    } catch (error: any) {
+      console.error('Error deactivating user:', error);
+      toast({ 
+        title: 'Error', 
+        description: error.message || 'Failed to update user.', 
+        variant: 'destructive' 
+      });
     }
   };
 
   const handleDeleteInactivePatients = async () => {
     try {
-      const result = await adminService.deleteInactivePatients(365);
-      toast({ title: 'Cleanup Complete', description: `${result.count} inactive patient accounts deleted.` });
+      const thresholdDate = new Date();
+      thresholdDate.setDate(thresholdDate.getDate() - 365);
+      
+      const q = query(
+        collection(db, 'users'),
+        where('role', '==', 'patient'),
+        where('isActive', '==', true)
+      );
+      
+      const snapshot = await getDocs(q);
+      const batch = writeBatch(db);
+      let deleteCount = 0;
+      
+      snapshot.docs.forEach((docSnap) => {
+        const userData = docSnap.data();
+        const lastLogin = userData.lastLogin?.toDate() || userData.createdAt?.toDate();
+        
+        if (lastLogin && lastLogin < thresholdDate) {
+          batch.delete(doc(db, 'users', docSnap.id));
+          batch.delete(doc(db, 'patients', docSnap.id));
+          deleteCount++;
+        }
+      });
+      
+      if (deleteCount > 0) {
+        await batch.commit();
+      }
+      
+      toast({ 
+        title: 'Cleanup Complete', 
+        description: `${deleteCount} inactive patient accounts deleted.` 
+      });
       fetchDashboardData();
-    } catch (error) {
-      toast({ title: 'Error', description: 'Failed to delete inactive patients.', variant: 'destructive' });
+    } catch (error: any) {
+      console.error('Error deleting inactive patients:', error);
+      toast({ 
+        title: 'Error', 
+        description: error.message || 'Failed to delete inactive patients.', 
+        variant: 'destructive' 
+      });
     }
+  };
+
+  const generateReferralCode = (firstName?: string, lastName?: string): string => {
+    if (firstName && lastName && firstName.length >= 2 && lastName.length >= 2) {
+      const prefix = firstName.substring(0, 2).toUpperCase();
+      const suffix = lastName.substring(0, 2).toUpperCase();
+      const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+      return `${prefix}${suffix}${random}`;
+    }
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let code = 'MM';
+    for (let i = 0; i < 6; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
   };
 
   const handleCopyReferralCode = () => {
@@ -426,6 +846,8 @@ const AdminDashboard = () => {
     { title: 'Ambassadors', value: stats.totalAmbassadors, icon: Award, color: 'amber' },
     { title: 'Pending', value: stats.pendingDoctors + stats.pendingAmbassadors, icon: Clock, color: 'yellow' },
     { title: 'Ready to Approve', value: stats.readyForApproval, icon: Trophy, color: 'green' },
+    { title: 'Referrals', value: stats.totalReferrals, icon: Users, color: 'indigo' },
+    { title: 'Commission', value: `R${stats.totalCommission.toLocaleString()}`, icon: CreditCard, color: 'emerald' },
   ];
 
   const getIconColor = (color: string) => {
@@ -435,6 +857,8 @@ const AdminDashboard = () => {
       case 'purple': return 'text-purple-600';
       case 'amber': return 'text-amber-600';
       case 'yellow': return 'text-yellow-600';
+      case 'indigo': return 'text-indigo-600';
+      case 'emerald': return 'text-emerald-600';
       default: return 'text-gray-600';
     }
   };
@@ -511,7 +935,7 @@ const AdminDashboard = () => {
       <div className="pt-16 lg:pt-0">
         {/* Stats Cards - Responsive Grid */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-3 md:gap-4">
             {statsCards.map((stat, index) => {
               const Icon = stat.icon;
               return (
@@ -536,11 +960,12 @@ const AdminDashboard = () => {
           <Tabs defaultValue="doctors" className="space-y-6">
             {/* Responsive Tabs List - Horizontal scroll on mobile */}
             <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
-              <TabsList className="inline-flex w-auto min-w-full sm:min-w-0 sm:w-full max-w-4xl">
+              <TabsList className="inline-flex w-auto min-w-full sm:min-w-0 sm:w-full max-w-5xl">
                 <TabsTrigger value="doctors" className="flex-1 text-xs sm:text-sm">Doctors</TabsTrigger>
                 <TabsTrigger value="patients" className="flex-1 text-xs sm:text-sm">Patients</TabsTrigger>
                 <TabsTrigger value="ambassadors" className="flex-1 text-xs sm:text-sm">Ambassadors</TabsTrigger>
                 <TabsTrigger value="users" className="flex-1 text-xs sm:text-sm">All Users</TabsTrigger>
+                <TabsTrigger value="referrals" className="flex-1 text-xs sm:text-sm">Referrals</TabsTrigger>
                 <TabsTrigger value="settings" className="flex-1 text-xs sm:text-sm">Settings</TabsTrigger>
               </TabsList>
             </div>
@@ -591,6 +1016,14 @@ const AdminDashboard = () => {
                                 <div className="sm:col-span-2">
                                   <p className="text-xs text-gray-500">Practice Address</p>
                                   <p className="text-xs sm:text-sm">{doctor.practiceAddress}</p>
+                                </div>
+                              )}
+                              {doctor.referralCodeUsed && (
+                                <div className="sm:col-span-2">
+                                  <p className="text-xs text-gray-500">Referred By</p>
+                                  <p className="text-xs sm:text-sm font-medium text-purple-600">
+                                    Referral Code: {doctor.referralCodeUsed}
+                                  </p>
                                 </div>
                               )}
                             </div>
@@ -660,6 +1093,12 @@ const AdminDashboard = () => {
                               <p className="font-medium truncate">{doctor.hpcsaNumber || 'N/A'}</p>
                             </div>
                           </div>
+                          {doctor.referralCodeUsed && (
+                            <div className="text-xs mb-2">
+                              <p className="text-gray-500">Referred by</p>
+                              <p className="font-medium text-purple-600">{doctor.referralCodeUsed}</p>
+                            </div>
+                          )}
                           <div className="flex justify-end">
                             <Button variant="ghost" size="sm" onClick={() => { setSelectedDoctor(doctor); setShowDoctorDetailsDialog(true); }}>
                               <Eye className="w-4 h-4" /> View Details
@@ -681,6 +1120,7 @@ const AdminDashboard = () => {
                           <th className="text-left py-3 px-4 text-sm font-semibold">Specialization</th>
                           <th className="text-left py-3 px-4 text-sm font-semibold">HPCSA</th>
                           <th className="text-left py-3 px-4 text-sm font-semibold">Practice</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold">Referred By</th>
                           <th className="text-left py-3 px-4 text-sm font-semibold">Status</th>
                           <th className="text-left py-3 px-4 text-sm font-semibold">Actions</th>
                         </tr>
@@ -709,6 +1149,13 @@ const AdminDashboard = () => {
                               <td className="py-3 px-4 text-sm">{doctor.specialization}</td>
                               <td className="py-3 px-4 text-sm">{doctor.hpcsaNumber || 'N/A'}</td>
                               <td className="py-3 px-4 text-sm">{doctor.practiceName || 'N/A'}</td>
+                              <td className="py-3 px-4 text-sm">
+                                {doctor.referralCodeUsed ? (
+                                  <Badge className="bg-purple-100 text-purple-800">
+                                    {doctor.referralCodeUsed}
+                                  </Badge>
+                                ) : '—'}
+                              </td>
                               <td className="py-3 px-4"><Badge className={getStatusBadge(doctor.verificationStatus)}>{doctor.verificationStatus}</Badge></td>
                               <td className="py-3 px-4">
                                 <Button variant="ghost" size="sm" onClick={() => { setSelectedDoctor(doctor); setShowDoctorDetailsDialog(true); }}>
@@ -724,7 +1171,7 @@ const AdminDashboard = () => {
               </Card>
             </TabsContent>
 
-            {/* Patients Tab - Mobile Responsive */}
+            {/* Patients Tab */}
             <TabsContent value="patients">
               <Card>
                 <CardHeader className="pb-3">
@@ -758,50 +1205,45 @@ const AdminDashboard = () => {
                         p.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                         p.idNumber?.includes(searchTerm)
                       )
-                      .map((patient) => {
-                        const daysSinceLastLogin = patient.lastLogin
-                          ? Math.floor((Date.now() - patient.lastLogin.toDate()) / (1000 * 60 * 60 * 24))
-                          : 999;
-                        return (
-                          <div key={patient.uid} className="border rounded-lg p-3 bg-white">
-                            <div className="mb-2">
-                              <p className="font-medium text-sm truncate">{patient.fullName}</p>
-                              <p className="text-xs text-gray-500 truncate">{patient.email}</p>
+                      .map((patient) => (
+                        <div key={patient.uid} className="border rounded-lg p-3 bg-white">
+                          <div className="mb-2">
+                            <p className="font-medium text-sm truncate">{patient.fullName}</p>
+                            <p className="text-xs text-gray-500 truncate">{patient.email}</p>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-xs mb-2">
+                            <div>
+                              <p className="text-gray-500">ID Number</p>
+                              <p className="font-medium">{patient.idNumber || 'N/A'}</p>
                             </div>
-                            <div className="grid grid-cols-2 gap-2 text-xs mb-2">
-                              <div>
-                                <p className="text-gray-500">ID Number</p>
-                                <p className="font-medium">{patient.idNumber || 'N/A'}</p>
-                              </div>
-                              <div>
-                                <p className="text-gray-500">Phone</p>
-                                <p className="font-medium">{patient.phone || 'N/A'}</p>
-                              </div>
-                              <div>
-                                <p className="text-gray-500">Medical Aid</p>
-                                <p className="font-medium">{patient.medicalAidProvider || 'None'}</p>
-                              </div>
-                              <div>
-                                <p className="text-gray-500">Last Login</p>
-                                <p className="font-medium">{patient.lastLogin ? formatDate(patient.lastLogin) : 'Never'}</p>
-                              </div>
+                            <div>
+                              <p className="text-gray-500">Phone</p>
+                              <p className="font-medium">{patient.phone || 'N/A'}</p>
                             </div>
-                            <div className="flex items-center justify-between mt-2">
-                              <Badge className={patient.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
-                                {patient.isActive ? 'Active' : 'Inactive'}
-                              </Badge>
-                              <div className="flex gap-1">
-                                <Button variant="ghost" size="sm" onClick={() => { setSelectedPatient(patient); setShowPatientDetailsDialog(true); }}>
-                                  <Eye className="w-4 h-4" />
-                                </Button>
-                                <Button variant="ghost" size="sm" onClick={() => handleDeactivateUser(patient.uid)} disabled={!patient.isActive}>
-                                  {patient.isActive ? 'Deactivate' : 'Activate'}
-                                </Button>
-                              </div>
+                            <div>
+                              <p className="text-gray-500">Medical Aid</p>
+                              <p className="font-medium">{patient.medicalAidProvider || 'None'}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Last Login</p>
+                              <p className="font-medium">{patient.lastLogin ? formatDate(patient.lastLogin) : 'Never'}</p>
                             </div>
                           </div>
-                        );
-                      })}
+                          <div className="flex items-center justify-between mt-2">
+                            <Badge className={patient.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
+                              {patient.isActive ? 'Active' : 'Inactive'}
+                            </Badge>
+                            <div className="flex gap-1">
+                              <Button variant="ghost" size="sm" onClick={() => { setSelectedPatient(patient); setShowPatientDetailsDialog(true); }}>
+                                <Eye className="w-4 h-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => handleDeactivateUser(patient.uid)} disabled={!patient.isActive}>
+                                {patient.isActive ? 'Deactivate' : 'Activate'}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                   </div>
 
                   {/* Desktop Table View */}
@@ -825,44 +1267,39 @@ const AdminDashboard = () => {
                             p.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                             p.idNumber?.includes(searchTerm)
                           )
-                          .map((patient) => {
-                            const daysSinceLastLogin = patient.lastLogin
-                              ? Math.floor((Date.now() - patient.lastLogin.toDate()) / (1000 * 60 * 60 * 24))
-                              : 999;
-                            return (
-                              <tr key={patient.uid} className="border-b hover:bg-gray-50">
-                                <td className="py-3 px-4">
-                                  <div>
-                                    <p className="font-medium text-sm">{patient.fullName}</p>
-                                    <p className="text-xs text-gray-600">{patient.email}</p>
-                                  </div>
-                                </td>
-                                <td className="py-3 px-4 text-sm">{patient.idNumber || 'N/A'}</td>
-                                <td className="py-3 px-4 text-sm">{patient.phone || 'N/A'}</td>
-                                <td className="py-3 px-4 text-sm">
-                                  {patient.medicalAidProvider ? (
-                                    <Badge className="bg-green-100 text-green-800">{patient.medicalAidProvider}</Badge>
-                                  ) : 'None'}
-                                </td>
-                                <td className="py-3 px-4 text-sm">{patient.lastLogin ? formatDate(patient.lastLogin) : 'Never'}</td>
-                                <td className="py-3 px-4">
-                                  <Badge className={patient.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
-                                    {patient.isActive ? 'Active' : 'Inactive'}
-                                  </Badge>
-                                 </td>
-                                <td className="py-3 px-4">
-                                  <div className="flex gap-1">
-                                    <Button variant="ghost" size="sm" onClick={() => { setSelectedPatient(patient); setShowPatientDetailsDialog(true); }}>
-                                      <Eye className="w-4 h-4" />
-                                    </Button>
-                                    <Button variant="ghost" size="sm" onClick={() => handleDeactivateUser(patient.uid)} disabled={!patient.isActive}>
-                                      {patient.isActive ? 'Deactivate' : 'Activate'}
-                                    </Button>
-                                  </div>
-                                 </td>
-                               </tr>
-                            );
-                          })}
+                          .map((patient) => (
+                            <tr key={patient.uid} className="border-b hover:bg-gray-50">
+                              <td className="py-3 px-4">
+                                <div>
+                                  <p className="font-medium text-sm">{patient.fullName}</p>
+                                  <p className="text-xs text-gray-600">{patient.email}</p>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-sm">{patient.idNumber || 'N/A'}</td>
+                              <td className="py-3 px-4 text-sm">{patient.phone || 'N/A'}</td>
+                              <td className="py-3 px-4 text-sm">
+                                {patient.medicalAidProvider ? (
+                                  <Badge className="bg-green-100 text-green-800">{patient.medicalAidProvider}</Badge>
+                                ) : 'None'}
+                              </td>
+                              <td className="py-3 px-4 text-sm">{patient.lastLogin ? formatDate(patient.lastLogin) : 'Never'}</td>
+                              <td className="py-3 px-4">
+                                <Badge className={patient.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
+                                  {patient.isActive ? 'Active' : 'Inactive'}
+                                </Badge>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="flex gap-1">
+                                  <Button variant="ghost" size="sm" onClick={() => { setSelectedPatient(patient); setShowPatientDetailsDialog(true); }}>
+                                    <Eye className="w-4 h-4" />
+                                  </Button>
+                                  <Button variant="ghost" size="sm" onClick={() => handleDeactivateUser(patient.uid)} disabled={!patient.isActive}>
+                                    {patient.isActive ? 'Deactivate' : 'Activate'}
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
                       </tbody>
                     </table>
                   </div>
@@ -870,9 +1307,9 @@ const AdminDashboard = () => {
               </Card>
             </TabsContent>
 
-            {/* Ambassadors Tab - Mobile Responsive */}
+            {/* Ambassadors Tab */}
             <TabsContent value="ambassadors" className="space-y-6">
-              {/* Ready for Approval Section - Mobile Responsive */}
+              {/* Ready for Approval Section */}
               {readyForApproval.length > 0 && (
                 <Card className="border-2 border-green-200">
                   <CardHeader className="bg-green-50 pb-3">
@@ -951,7 +1388,7 @@ const AdminDashboard = () => {
                 </Card>
               )}
 
-              {/* Pending Interview Section - Mobile Responsive */}
+              {/* Pending Interview Section */}
               {pendingInterview.length > 0 && (
                 <Card className="border-2 border-blue-200">
                   <CardHeader className="bg-blue-50 pb-3">
@@ -1031,7 +1468,7 @@ const AdminDashboard = () => {
                 </Card>
               )}
 
-              {/* All Ambassadors Table - Mobile Responsive */}
+              {/* All Ambassadors Table */}
               <Card>
                 <CardHeader className="pb-3">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1081,6 +1518,23 @@ const AdminDashboard = () => {
                               <Badge className="bg-green-100 text-green-800">Knowledge: {ambassador.knowledgeTest?.score}%</Badge>
                             )}
                           </div>
+                          {ambassador.referralCode && (
+                            <div className="flex items-center gap-2 mb-2">
+                              <Badge className="bg-purple-100 text-purple-800">
+                                Code: {ambassador.referralCode}
+                              </Badge>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(ambassador.referralCode!);
+                                  toast({ title: 'Copied!', description: 'Referral code copied.' });
+                                }}
+                              >
+                                <Copy className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          )}
                           <div className="flex items-center justify-between">
                             <Badge className={getStatusBadge(ambassador.applicationStatus)}>
                               {ambassador.applicationStatus}
@@ -1132,12 +1586,12 @@ const AdminDashboard = () => {
                                     <p className="text-xs text-gray-600">{ambassador.email}</p>
                                   </div>
                                 </div>
-                               </td>
+                              </td>
                               <td className="py-3 px-4">
                                 <Badge className={getOnboardingStatusBadge(ambassador.onboardingStep).color}>
                                   {getOnboardingStatusBadge(ambassador.onboardingStep).label}
                                 </Badge>
-                               </td>
+                              </td>
                               <td className="py-3 px-4">
                                 {ambassador.psychometricTest?.passed ? (
                                   <Badge className="bg-green-100 text-green-800">
@@ -1150,7 +1604,7 @@ const AdminDashboard = () => {
                                 ) : (
                                   <Badge className="bg-gray-100 text-gray-600">Pending</Badge>
                                 )}
-                               </td>
+                              </td>
                               <td className="py-3 px-4">
                                 {ambassador.knowledgeTest?.passed ? (
                                   <Badge className="bg-green-100 text-green-800">
@@ -1165,17 +1619,17 @@ const AdminDashboard = () => {
                                 ) : (
                                   <Badge className="bg-gray-100 text-gray-600">Pending</Badge>
                                 )}
-                               </td>
+                              </td>
                               <td className="py-3 px-4">
                                 <Badge className={getStatusBadge(ambassador.interviewStatus)}>
                                   {ambassador.interviewStatus}
                                 </Badge>
-                               </td>
+                              </td>
                               <td className="py-3 px-4">
                                 <Badge className={getStatusBadge(ambassador.applicationStatus)}>
                                   {ambassador.applicationStatus}
                                 </Badge>
-                               </td>
+                              </td>
                               <td className="py-3 px-4">
                                 {ambassador.referralCode ? (
                                   <div className="flex items-center gap-2">
@@ -1196,7 +1650,7 @@ const AdminDashboard = () => {
                                 ) : (
                                   <span className="text-gray-400">—</span>
                                 )}
-                               </td>
+                              </td>
                               <td className="py-3 px-4">
                                 <Button 
                                   variant="ghost" 
@@ -1208,8 +1662,8 @@ const AdminDashboard = () => {
                                 >
                                   <Eye className="w-4 h-4" />
                                 </Button>
-                               </td>
-                             </tr>
+                              </td>
+                            </tr>
                           ))}
                       </tbody>
                     </table>
@@ -1218,7 +1672,7 @@ const AdminDashboard = () => {
               </Card>
             </TabsContent>
 
-            {/* All Users Tab - Mobile Responsive */}
+            {/* All Users Tab */}
             <TabsContent value="users">
               <Card>
                 <CardHeader className="pb-3">
@@ -1290,7 +1744,7 @@ const AdminDashboard = () => {
                           <th className="text-left py-3 px-4 text-sm font-semibold">Last Login</th>
                           <th className="text-left py-3 px-4 text-sm font-semibold">Status</th>
                           <th className="text-left py-3 px-4 text-sm font-semibold">Actions</th>
-                         </tr>
+                        </tr>
                       </thead>
                       <tbody>
                         {users
@@ -1305,7 +1759,7 @@ const AdminDashboard = () => {
                                   <p className="font-medium text-sm">{user.fullName}</p>
                                   <p className="text-xs text-gray-600">{user.email}</p>
                                 </div>
-                               </td>
+                              </td>
                               <td className="py-3 px-4">
                                 <Badge className={
                                   user.role === 'admin' ? 'bg-red-100 text-red-800' :
@@ -1313,22 +1767,22 @@ const AdminDashboard = () => {
                                   user.role === 'ambassador' ? 'bg-purple-100 text-purple-800' :
                                   'bg-green-100 text-green-800'
                                 }>{user.role}</Badge>
-                               </td>
+                              </td>
                               <td className="py-3 px-4 text-sm">{formatDate(user.createdAt)}</td>
                               <td className="py-3 px-4 text-sm">{user.lastLogin ? formatDate(user.lastLogin) : 'Never'}</td>
                               <td className="py-3 px-4">
                                 <Badge className={user.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
                                   {user.isActive ? 'Active' : 'Inactive'}
                                 </Badge>
-                               </td>
+                              </td>
                               <td className="py-3 px-4">
                                 {user.role !== 'admin' && (
                                   <Button variant="ghost" size="sm" onClick={() => handleDeactivateUser(user.uid)}>
                                     {user.isActive ? 'Deactivate' : 'Activate'}
                                   </Button>
                                 )}
-                               </td>
-                             </tr>
+                              </td>
+                            </tr>
                           ))}
                       </tbody>
                     </table>
@@ -1337,7 +1791,191 @@ const AdminDashboard = () => {
               </Card>
             </TabsContent>
 
-            {/* Settings Tab - Mobile Responsive */}
+            {/* Referrals Tab */}
+            <TabsContent value="referrals">
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                        <Award className="w-5 h-5 text-purple-600" />
+                        Referrals & Commission
+                      </CardTitle>
+                      <CardDescription className="text-xs sm:text-sm">
+                        Track doctor referrals by ambassadors and commission earned
+                      </CardDescription>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <Input 
+                          placeholder="Search referrals..." 
+                          value={searchTerm} 
+                          onChange={(e) => setSearchTerm(e.target.value)} 
+                          className="pl-9 w-full sm:w-64 text-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {/* Summary Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    <div className="bg-gray-50 rounded-lg p-3 text-center">
+                      <p className="text-xs text-gray-500">Total Referrals</p>
+                      <p className="text-xl font-bold text-gray-900">{referrals.length}</p>
+                    </div>
+                    <div className="bg-yellow-50 rounded-lg p-3 text-center">
+                      <p className="text-xs text-yellow-600">Pending</p>
+                      <p className="text-xl font-bold text-yellow-700">
+                        {referrals.filter(r => r.status === 'pending').length}
+                      </p>
+                    </div>
+                    <div className="bg-green-50 rounded-lg p-3 text-center">
+                      <p className="text-xs text-green-600">Verified</p>
+                      <p className="text-xl font-bold text-green-700">
+                        {referrals.filter(r => r.status === 'verified').length}
+                      </p>
+                    </div>
+                    <div className="bg-purple-50 rounded-lg p-3 text-center">
+                      <p className="text-xs text-purple-600">Total Commission</p>
+                      <p className="text-xl font-bold text-purple-700">
+                        R{referrals
+                          .filter(r => r.status === 'verified')
+                          .reduce((sum, r) => sum + (r.commissionEarned || 0), 0)
+                          .toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Mobile Card View for Referrals */}
+                  <div className="block lg:hidden space-y-3">
+                    {referrals
+                      .filter(r =>
+                        r.doctorName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        r.ambassadorName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        r.referralCode?.toLowerCase().includes(searchTerm.toLowerCase())
+                      )
+                      .map((referral) => (
+                        <div key={referral.id} className="border rounded-lg p-3 bg-white">
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+                              <Award className="w-5 h-5 text-purple-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-sm truncate">{referral.doctorName}</p>
+                              <p className="text-xs text-gray-500 truncate">Referred by: {referral.ambassadorName}</p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <p className="text-gray-500">Referral Code</p>
+                              <code className="bg-purple-50 text-purple-700 px-2 py-0.5 rounded text-xs font-bold">
+                                {referral.referralCode}
+                              </code>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Status</p>
+                              <Badge className={getStatusBadge(referral.status)}>
+                                {referral.status}
+                              </Badge>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Commission</p>
+                              <p className="font-medium text-green-600">R{referral.commissionEarned || 0}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Referred</p>
+                              <p className="text-xs">{referral.referredAt ? new Date(referral.referredAt).toLocaleDateString() : 'N/A'}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    {referrals.length === 0 && (
+                      <div className="text-center py-8 text-gray-500">
+                        <Award className="w-12 h-12 mx-auto text-gray-300 mb-2" />
+                        <p>No referrals found</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Desktop Table View */}
+                  <div className="hidden lg:block overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left py-3 px-4 text-sm font-semibold">Doctor</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold">Ambassador</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold">Referral Code</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold">Date</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold">Status</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold">Commission</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {referrals
+                          .filter(r =>
+                            r.doctorName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            r.ambassadorName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            r.referralCode?.toLowerCase().includes(searchTerm.toLowerCase())
+                          )
+                          .map((referral) => (
+                            <tr key={referral.id} className="border-b hover:bg-gray-50">
+                              <td className="py-3 px-4">
+                                <div>
+                                  <p className="font-medium text-sm">{referral.doctorName}</p>
+                                  <p className="text-xs text-gray-600">{referral.doctorEmail}</p>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-sm">{referral.ambassadorName}</td>
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-2">
+                                  <code className="bg-purple-50 text-purple-700 px-2 py-1 rounded text-xs font-bold">
+                                    {referral.referralCode}
+                                  </code>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(referral.referralCode);
+                                      toast({ title: 'Copied!', description: 'Referral code copied.' });
+                                    }}
+                                  >
+                                    <Copy className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-sm">
+                                {referral.referredAt ? new Date(referral.referredAt).toLocaleDateString() : 'N/A'}
+                              </td>
+                              <td className="py-3 px-4">
+                                <Badge className={getStatusBadge(referral.status)}>
+                                  {referral.status}
+                                </Badge>
+                              </td>
+                              <td className="py-3 px-4">
+                                <span className="font-medium text-green-600">
+                                  R{referral.commissionEarned || 0}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        {referrals.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="py-8 text-center text-gray-500">
+                              <Award className="w-12 h-12 mx-auto text-gray-300 mb-2" />
+                              <p>No referrals found</p>
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* Settings Tab */}
             <TabsContent value="settings">
               <Card>
                 <CardHeader className="pb-3">
@@ -1369,7 +2007,7 @@ const AdminDashboard = () => {
         </div>
       </div>
 
-      {/* All Dialogs remain the same as before - they are already responsive */}
+      {/* All Dialogs remain the same */}
       {/* Patient Details Dialog */}
       <Dialog open={showPatientDetailsDialog} onOpenChange={setShowPatientDetailsDialog}>
         <DialogContent className="max-w-[95vw] sm:max-w-2xl max-h-[85vh] overflow-y-auto">
@@ -1391,7 +2029,31 @@ const AdminDashboard = () => {
                   <div><p className="text-gray-500">Date of Birth</p><p className="font-medium">{selectedPatient.dateOfBirth || 'Not provided'}</p></div>
                 </div>
               </div>
-              {/* Rest of the dialog content remains the same */}
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-2 sm:mb-3 flex items-center gap-2 text-sm sm:text-base">
+                  <Heart className="w-4 h-4" />Medical Information
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 text-xs sm:text-sm">
+                  <div><p className="text-gray-500">Medical Aid Provider</p><p className="font-medium">{selectedPatient.medicalAidProvider || 'None'}</p></div>
+                  <div><p className="text-gray-500">Medical Aid Number</p><p className="font-medium">{selectedPatient.medicalAidNumber || 'None'}</p></div>
+                  <div><p className="text-gray-500">Blood Type</p><p className="font-medium">{selectedPatient.bloodType || 'Unknown'}</p></div>
+                  <div><p className="text-gray-500">Allergies</p><p className="font-medium">{selectedPatient.allergies?.length ? selectedPatient.allergies.join(', ') : 'None'}</p></div>
+                  <div className="sm:col-span-2"><p className="text-gray-500">Chronic Conditions</p><p className="font-medium">{selectedPatient.chronicConditions?.length ? selectedPatient.chronicConditions.join(', ') : 'None'}</p></div>
+                  <div className="sm:col-span-2"><p className="text-gray-500">Current Medications</p><p className="font-medium">{selectedPatient.medications?.length ? selectedPatient.medications.join(', ') : 'None'}</p></div>
+                </div>
+              </div>
+              {selectedPatient.emergencyContact && (
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-2 sm:mb-3 flex items-center gap-2 text-sm sm:text-base">
+                    <Phone className="w-4 h-4" />Emergency Contact
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 text-xs sm:text-sm">
+                    <div><p className="text-gray-500">Name</p><p className="font-medium">{selectedPatient.emergencyContact.name}</p></div>
+                    <div><p className="text-gray-500">Relationship</p><p className="font-medium">{selectedPatient.emergencyContact.relationship}</p></div>
+                    <div><p className="text-gray-500">Phone</p><p className="font-medium">{selectedPatient.emergencyContact.phone}</p></div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
           <DialogFooter>
@@ -1400,7 +2062,7 @@ const AdminDashboard = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Doctor Details Dialog - Mobile Responsive */}
+      {/* Doctor Details Dialog */}
       <Dialog open={showDoctorDetailsDialog} onOpenChange={setShowDoctorDetailsDialog}>
         <DialogContent className="max-w-[95vw] sm:max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
@@ -1415,6 +2077,12 @@ const AdminDashboard = () => {
                   <div><p className="text-gray-500">Full Name</p><p className="font-medium">{selectedDoctor.fullName}</p></div>
                   <div><p className="text-gray-500">Email</p><p className="font-medium break-all">{selectedDoctor.email}</p></div>
                   <div><p className="text-gray-500">Phone</p><p className="font-medium">{selectedDoctor.phone || 'Not provided'}</p></div>
+                  {selectedDoctor.referralCodeUsed && (
+                    <div className="sm:col-span-2">
+                      <p className="text-gray-500">Referred By</p>
+                      <p className="font-medium text-purple-600">Referral Code: {selectedDoctor.referralCodeUsed}</p>
+                    </div>
+                  )}
                 </div>
               </div>
               <div>
@@ -1447,7 +2115,6 @@ const AdminDashboard = () => {
           </DialogHeader>
           {selectedAmbassador && (
             <div className="space-y-4 sm:space-y-6">
-              {/* Content remains the same as before */}
               <div>
                 <h4 className="font-semibold text-gray-900 mb-2 sm:mb-3 flex items-center gap-2 text-sm sm:text-base">
                   <User className="w-4 h-4" />Personal Information
@@ -1459,7 +2126,64 @@ const AdminDashboard = () => {
                   <div><p className="text-gray-500">ID Number</p><p className="font-medium">{selectedAmbassador.idNumber}</p></div>
                 </div>
               </div>
-              {/* Rest of the ambassador details sections */}
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-2 sm:mb-3 flex items-center gap-2 text-sm sm:text-base">
+                  <Award className="w-4 h-4" />Ambassador Information
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 text-xs sm:text-sm">
+                  <div><p className="text-gray-500">Status</p><Badge className={getStatusBadge(selectedAmbassador.applicationStatus)}>{selectedAmbassador.applicationStatus}</Badge></div>
+                  <div><p className="text-gray-500">Onboarding Step</p><Badge className={getOnboardingStatusBadge(selectedAmbassador.onboardingStep).color}>{getOnboardingStatusBadge(selectedAmbassador.onboardingStep).label}</Badge></div>
+                  <div><p className="text-gray-500">Interview Status</p><Badge className={getStatusBadge(selectedAmbassador.interviewStatus)}>{selectedAmbassador.interviewStatus}</Badge></div>
+                  <div><p className="text-gray-500">Referral Code</p>{selectedAmbassador.referralCode ? (
+                    <div className="flex items-center gap-2">
+                      <code className="bg-purple-50 text-purple-700 px-2 py-1 rounded text-xs font-bold">{selectedAmbassador.referralCode}</code>
+                      <Button variant="ghost" size="sm" onClick={() => { navigator.clipboard.writeText(selectedAmbassador.referralCode!); toast({ title: 'Copied!' }); }}>
+                        <Copy className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  ) : 'Not generated yet'}</div>
+                </div>
+              </div>
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-2 sm:mb-3 flex items-center gap-2 text-sm sm:text-base">
+                  <Brain className="w-4 h-4" />Test Results
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 text-xs sm:text-sm">
+                  <div>
+                    <p className="text-gray-500">Psychometric Test</p>
+                    {selectedAmbassador.psychometricTest?.passed ? (
+                      <Badge className="bg-green-100 text-green-800">Passed ({selectedAmbassador.psychometricTest?.score}%)</Badge>
+                    ) : selectedAmbassador.psychometricTest?.passed === false ? (
+                      <Badge className="bg-red-100 text-red-800">Failed</Badge>
+                    ) : <span className="text-gray-400">Not taken</span>}
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Knowledge Test</p>
+                    {selectedAmbassador.knowledgeTest?.passed ? (
+                      <Badge className="bg-green-100 text-green-800">Passed ({selectedAmbassador.knowledgeTest?.score}%)</Badge>
+                    ) : selectedAmbassador.knowledgeTest?.attempts >= 3 ? (
+                      <Badge className="bg-red-100 text-red-800">Failed</Badge>
+                    ) : selectedAmbassador.knowledgeTest?.attempts > 0 ? (
+                      <Badge className="bg-yellow-100 text-yellow-800">{selectedAmbassador.knowledgeTest?.attempts}/3 attempts</Badge>
+                    ) : <span className="text-gray-400">Not taken</span>}
+                  </div>
+                </div>
+              </div>
+              {selectedAmbassador.referralSource && (
+                <div><p className="text-gray-500 text-sm">How did you hear about us?</p><p className="font-medium text-sm">{selectedAmbassador.referralSource}</p></div>
+              )}
+              {selectedAmbassador.experience && (
+                <div><p className="text-gray-500 text-sm">Experience</p><p className="text-sm">{selectedAmbassador.experience}</p></div>
+              )}
+              {selectedAmbassador.motivation && (
+                <div><p className="text-gray-500 text-sm">Motivation</p><p className="text-sm">{selectedAmbassador.motivation}</p></div>
+              )}
+              {selectedAmbassador.rejectionReason && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                  <p className="text-sm font-medium text-red-800">Rejection Reason</p>
+                  <p className="text-sm text-red-700">{selectedAmbassador.rejectionReason}</p>
+                </div>
+              )}
             </div>
           )}
           <DialogFooter className="flex-col sm:flex-row gap-2">
@@ -1494,7 +2218,7 @@ const AdminDashboard = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Admin Profile Dialog - Mobile Responsive */}
+      {/* Admin Profile Dialog */}
       <Dialog open={showProfileDialog} onOpenChange={setShowProfileDialog}>
         <DialogContent className="max-w-[95vw] sm:max-w-md">
           <DialogHeader>
@@ -1539,7 +2263,7 @@ const AdminDashboard = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Reject Doctor Dialog - Mobile Responsive */}
+      {/* Reject Doctor Dialog */}
       <Dialog open={showRejectDialog} onOpenChange={setShowRejectDialog}>
         <DialogContent className="max-w-[95vw] sm:max-w-md">
           <DialogHeader>
@@ -1559,7 +2283,7 @@ const AdminDashboard = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Interview Management Dialog - Mobile Responsive */}
+      {/* Interview Management Dialog */}
       <Dialog open={showInterviewDialog} onOpenChange={setShowInterviewDialog}>
         <DialogContent className="max-w-[95vw] sm:max-w-md">
           <DialogHeader>
@@ -1630,7 +2354,7 @@ const AdminDashboard = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Referral Code Dialog - Mobile Responsive */}
+      {/* Referral Code Dialog */}
       <Dialog open={showReferralCodeDialog} onOpenChange={setShowReferralCodeDialog}>
         <DialogContent className="max-w-[95vw] sm:max-w-md">
           <DialogHeader>
