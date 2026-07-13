@@ -665,6 +665,128 @@ export const adminService = {
     }
   },
 
+  // Get ambassador referrals with doctor details
+  async getAmbassadorReferralsWithDoctors(ambassadorId: string) {
+    if (!isFirebaseInitialized()) {
+      return { referrals: [], error: 'Firebase is not initialized.' };
+    }
+
+    try {
+      // Get all referrals for this ambassador
+      const q = query(
+        collection(db, 'referrals'),
+        where('ambassadorId', '==', ambassadorId),
+        orderBy('referredAt', 'desc')
+      );
+      
+      const snapshot = await getDocs(q);
+      const referrals = await Promise.all(
+        snapshot.docs.map(async (docSnapshot) => {
+          const referralData = docSnapshot.data();
+          const doctorId = referralData.doctorId;
+          
+          // Get doctor profile
+          let doctorProfile = null;
+          let userProfile = null;
+          
+          if (doctorId) {
+            try {
+              const doctorDoc = await getDoc(doc(db, 'doctors', doctorId));
+              if (doctorDoc.exists()) {
+                doctorProfile = doctorDoc.data();
+              }
+              
+              const userDoc = await getDoc(doc(db, 'users', doctorId));
+              if (userDoc.exists()) {
+                userProfile = userDoc.data();
+              }
+            } catch (err) {
+              console.error('Error fetching doctor data:', err);
+            }
+          }
+          
+          return {
+            id: docSnapshot.id,
+            ...referralData,
+            referredAt: referralData.referredAt?.toDate?.()?.toISOString() || null,
+            verifiedAt: referralData.verifiedAt?.toDate?.()?.toISOString() || null,
+            doctorProfile: doctorProfile || null,
+            userProfile: userProfile || null,
+            // Combine doctor and user data for easy access
+            doctorFullName: userProfile?.fullName || referralData.doctorName || 'Unknown Doctor',
+            doctorEmail: userProfile?.email || referralData.doctorEmail || '',
+            doctorSpecialization: doctorProfile?.specialization || 'N/A',
+            doctorVerificationStatus: doctorProfile?.verificationStatus || referralData.status || 'pending',
+            doctorIsActive: userProfile?.isActive || false,
+            doctorJoinedAt: userProfile?.createdAt?.toDate?.()?.toISOString() || null,
+            doctorPracticeName: doctorProfile?.practiceName || '',
+            doctorHpcsaNumber: doctorProfile?.hpcsaNumber || '',
+            doctorEnrollmentCompleted: doctorProfile?.enrollmentCompleted || false,
+          };
+        })
+      );
+      
+      return { referrals, error: null };
+    } catch (error: any) {
+      console.error('Error getting ambassador referrals with doctors:', error);
+      return { referrals: [], error: error.message };
+    }
+  },
+
+  // Get referral stats for ambassador
+  async getAmbassadorReferralStats(ambassadorId: string) {
+    if (!isFirebaseInitialized()) {
+      return { stats: null, error: 'Firebase is not initialized.' };
+    }
+
+    try {
+      const q = query(
+        collection(db, 'referrals'),
+        where('ambassadorId', '==', ambassadorId)
+      );
+      
+      const snapshot = await getDocs(q);
+      const referrals = snapshot.docs.map(doc => doc.data());
+      
+      const totalReferrals = referrals.length;
+      const pendingReferrals = referrals.filter(r => r.status === 'pending').length;
+      const verifiedReferrals = referrals.filter(r => r.status === 'verified').length;
+      const rejectedReferrals = referrals.filter(r => r.status === 'rejected').length;
+      const totalCommission = referrals
+        .filter(r => r.status === 'verified')
+        .reduce((sum, r) => sum + (r.commissionEarned || 0), 0);
+      
+      // Count active doctors (verified and active)
+      const activeDoctors = referrals.filter(r => r.status === 'verified').length;
+      
+      // Calculate pending commission (verified but not paid)
+      const pendingCommission = referrals
+        .filter(r => r.status === 'verified' && !r.commissionPaid)
+        .reduce((sum, r) => sum + (r.commissionEarned || 0), 0);
+      
+      const paidCommission = referrals
+        .filter(r => r.status === 'verified' && r.commissionPaid)
+        .reduce((sum, r) => sum + (r.commissionEarned || 0), 0);
+      
+      return {
+        stats: {
+          totalReferrals,
+          pendingReferrals,
+          verifiedReferrals,
+          rejectedReferrals,
+          totalCommission,
+          activeDoctors,
+          pendingCommission,
+          paidCommission,
+        },
+        error: null,
+      };
+    } catch (error: any) {
+      console.error('Error getting ambassador referral stats:', error);
+      return { stats: null, error: error.message };
+    }
+  },
+
   // Get all ambassadors
   async getAllAmbassadors() {
     if (!isFirebaseInitialized()) {
