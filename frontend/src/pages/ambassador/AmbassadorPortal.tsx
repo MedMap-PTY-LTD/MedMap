@@ -8,8 +8,10 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
 import { db } from '../../lib/firebase';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { adminService } from '@/lib/admin-service';
 import TrainingModule from './TrainingModule';
 import KnowledgeTest from './KnowledgeTest';
 import {
@@ -30,6 +32,16 @@ import {
   Heart,
   Sparkles,
   ChevronRight,
+  Stethoscope,
+  Mail,
+  Phone,
+  Calendar,
+  Search,
+  Filter,
+  Eye,
+  User,
+  Building2,
+  CreditCard,
 } from 'lucide-react';
 
 const AmbassadorPortal = () => {
@@ -37,7 +49,11 @@ const AmbassadorPortal = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [ambassadorData, setAmbassadorData] = useState<any>(null);
+  const [referrals, setReferrals] = useState<any[]>([]);
+  const [referralStats, setReferralStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
 
   useEffect(() => {
     fetchAmbassadorData();
@@ -47,34 +63,36 @@ const AmbassadorPortal = () => {
     if (!user) return;
     
     try {
+      // Get ambassador data
       const ambassadorDoc = await getDoc(doc(db, 'ambassadors', user.uid));
       if (ambassadorDoc.exists()) {
         const data = ambassadorDoc.data();
         setAmbassadorData(data);
         
+        // Fetch referrals if ambassador is approved
+        if (data.applicationStatus === 'approved' && data.referralCode) {
+          await fetchReferrals(user.uid);
+        }
+        
         // Check onboarding step and redirect if needed
         const step = data.onboardingStep || 1;
         
         if (step === 1) {
-          // Check if psychometric test was already taken and failed
           if (data.psychometricTest?.passed === false) {
             const nextAttemptDate = data.psychometricTest?.nextAttemptDate?.toDate();
             if (nextAttemptDate && nextAttemptDate > new Date()) {
-              // In cooldown period - stay on portal
               toast({
                 title: 'Assessment Cooldown',
                 description: `You can retake the psychometric assessment after ${nextAttemptDate.toLocaleDateString()}.`,
                 variant: 'destructive',
               });
             } else if (nextAttemptDate && nextAttemptDate <= new Date()) {
-              // Can retake - update onboarding step to allow retake
               await updateDoc(doc(db, 'ambassadors', user.uid), {
                 onboardingStep: 1,
                 'psychometricTest.passed': null,
               });
             }
           } else if (!data.psychometricTest?.passed && !data.psychometricTest?.attemptDate) {
-            // Need to take psychometric test
             navigate('/ambassador/psychometric-test');
           }
         }
@@ -94,11 +112,82 @@ const AmbassadorPortal = () => {
     }
   };
 
+  const fetchReferrals = async (ambassadorId: string) => {
+    try {
+      // Get referrals with doctor details
+      const result = await adminService.getAmbassadorReferralsWithDoctors(ambassadorId);
+      if (result.error) {
+        console.error('Error fetching referrals:', result.error);
+        toast({ title: 'Error', description: 'Failed to load referrals.', variant: 'destructive' });
+        return;
+      }
+      
+      setReferrals(result.referrals || []);
+      
+      // Get referral stats
+      const statsResult = await adminService.getAmbassadorReferralStats(ambassadorId);
+      if (!statsResult.error) {
+        setReferralStats(statsResult.stats);
+      }
+    } catch (error) {
+      console.error('Error fetching referrals:', error);
+    }
+  };
+
   const handleCopyReferralCode = () => {
     if (ambassadorData?.referralCode) {
       navigator.clipboard.writeText(ambassadorData.referralCode);
       toast({ title: 'Copied!', description: 'Referral code copied to clipboard.' });
     }
+  };
+
+  const getStatusBadge = (status: string) => {
+    const variants: Record<string, string> = {
+      pending: 'bg-yellow-100 text-yellow-800',
+      verified: 'bg-green-100 text-green-800',
+      rejected: 'bg-red-100 text-red-800',
+      approved: 'bg-green-100 text-green-800',
+      active: 'bg-green-100 text-green-800',
+      inactive: 'bg-gray-100 text-gray-800',
+      scheduled: 'bg-blue-100 text-blue-800',
+      completed: 'bg-green-100 text-green-800',
+      passed: 'bg-green-100 text-green-800',
+      failed: 'bg-red-100 text-red-800',
+    };
+    return variants[status] || 'bg-gray-100 text-gray-800';
+  };
+
+  const formatDate = (timestamp: any) => {
+    if (!timestamp) return 'N/A';
+    const date = typeof timestamp === 'string' ? new Date(timestamp) : new Date(timestamp);
+    if (isNaN(date.getTime())) return 'N/A';
+    return date.toLocaleDateString('en-ZA', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+  };
+
+  const getFilteredReferrals = () => {
+    let filtered = referrals;
+    
+    // Apply status filter
+    if (filterStatus !== 'all') {
+      filtered = filtered.filter(r => r.status === filterStatus);
+    }
+    
+    // Apply search filter
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(r => 
+        r.doctorFullName?.toLowerCase().includes(term) ||
+        r.doctorEmail?.toLowerCase().includes(term) ||
+        r.doctorSpecialization?.toLowerCase().includes(term) ||
+        r.referralCode?.toLowerCase().includes(term)
+      );
+    }
+    
+    return filtered;
   };
 
   if (loading) {
@@ -266,8 +355,10 @@ const AmbassadorPortal = () => {
     );
   }
 
-  // Step 5: Approved Ambassador
+  // Step 5: Approved Ambassador - Full Dashboard
   if (step === 5 && applicationStatus === 'approved') {
+    const filteredReferrals = getFilteredReferrals();
+    
     return (
       <div className="min-h-screen bg-gray-50">
         {/* Header */}
@@ -293,60 +384,71 @@ const AmbassadorPortal = () => {
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Stats Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
             <Card>
-              <CardContent className="pt-6">
+              <CardContent className="pt-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-600">Total Referred Doctors</p>
-                    <p className="text-2xl font-bold">{ambassadorData?.totalReferredDoctors || 0}</p>
+                    <p className="text-xs text-gray-600">Total Referrals</p>
+                    <p className="text-xl font-bold">{referralStats?.totalReferrals || 0}</p>
                   </div>
-                  <Users className="w-8 h-8 text-purple-600" />
+                  <Users className="w-6 h-6 text-purple-600" />
                 </div>
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="pt-6">
+              <CardContent className="pt-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-600">Active Doctors</p>
-                    <p className="text-2xl font-bold">{ambassadorData?.activeReferredDoctors || 0}</p>
+                    <p className="text-xs text-gray-600">Active Doctors</p>
+                    <p className="text-xl font-bold">{referralStats?.activeDoctors || 0}</p>
                   </div>
-                  <Heart className="w-8 h-8 text-green-600" />
+                  <Heart className="w-6 h-6 text-green-600" />
                 </div>
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="pt-6">
+              <CardContent className="pt-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-600">Current Tier</p>
+                    <p className="text-xs text-gray-600">Pending</p>
+                    <p className="text-xl font-bold text-yellow-600">{referralStats?.pendingReferrals || 0}</p>
+                  </div>
+                  <Clock className="w-6 h-6 text-yellow-600" />
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-600">Current Tier</p>
                     <div className="flex items-center gap-1">
-                      <Award className="w-5 h-5 text-amber-600" />
-                      <p className="text-2xl font-bold capitalize">{ambassadorData?.currentTier || 'Bronze'}</p>
+                      <Award className="w-4 h-4 text-amber-600" />
+                      <p className="text-xl font-bold capitalize">{ambassadorData?.currentTier || 'Bronze'}</p>
                     </div>
                   </div>
-                  <Star className="w-8 h-8 text-amber-600" />
+                  <Star className="w-6 h-6 text-amber-600" />
                 </div>
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="pt-6">
+              <CardContent className="pt-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-600">Total Earnings</p>
-                    <p className="text-2xl font-bold text-green-600">
-                      R{(ambassadorData?.totalEarnings || 0).toLocaleString()}
+                    <p className="text-xs text-gray-600">Total Earnings</p>
+                    <p className="text-xl font-bold text-green-600">
+                      R{(referralStats?.totalCommission || 0).toLocaleString()}
                     </p>
                   </div>
-                  <TrendingUp className="w-8 h-8 text-green-600" />
+                  <TrendingUp className="w-6 h-6 text-green-600" />
                 </div>
               </CardContent>
             </Card>
           </div>
 
           {/* Tabs */}
-          <Tabs defaultValue="overview" className="space-y-6">
+          <Tabs defaultValue="referrals" className="space-y-6">
             <TabsList className="grid w-full max-w-md grid-cols-3">
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="referrals">Referrals</TabsTrigger>
@@ -379,6 +481,26 @@ const AmbassadorPortal = () => {
                         Share this code with doctors when they sign up for MedMap. Each doctor you refer is permanently linked to you.
                       </p>
                     </div>
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      <div className="bg-gray-50 p-3 rounded-lg text-center">
+                        <p className="text-xs text-gray-500">Referral Link</p>
+                        <p className="text-xs font-mono text-purple-600 truncate">
+                          {window.location.origin}/doctor-enrollment?ref={ambassadorData?.referralCode}
+                        </p>
+                      </div>
+                      <Button 
+                        variant="outline" 
+                        className="w-full"
+                        onClick={() => {
+                          const link = `${window.location.origin}/doctor-enrollment?ref=${ambassadorData?.referralCode}`;
+                          navigator.clipboard.writeText(link);
+                          toast({ title: 'Copied!', description: 'Referral link copied to clipboard.' });
+                        }}
+                      >
+                        <Copy className="w-4 h-4 mr-2" />
+                        Copy Link
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
 
@@ -388,40 +510,41 @@ const AmbassadorPortal = () => {
                       <Target className="w-5 h-5 text-purple-600" />
                       Tier Progress
                     </CardTitle>
+                    <CardDescription>Refer more doctors to unlock higher tiers</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
                       <div className="flex justify-between text-sm">
                         <span>Bronze (1-10 doctors)</span>
-                        <span className="font-semibold">{ambassadorData?.activeReferredDoctors || 0} active</span>
+                        <span className="font-semibold">{referralStats?.activeDoctors || 0} active</span>
                       </div>
-                      <Progress value={Math.min(((ambassadorData?.activeReferredDoctors || 0) / 10) * 100, 100)} className="h-2" />
+                      <Progress value={Math.min(((referralStats?.activeDoctors || 0) / 10) * 100, 100)} className="h-2" />
                       
-                      {ambassadorData?.activeReferredDoctors >= 10 && (
+                      {referralStats?.activeDoctors >= 10 && (
                         <>
                           <div className="flex justify-between text-sm mt-4">
                             <span>Silver (11-50 doctors)</span>
-                            <span className="font-semibold">{ambassadorData?.activeReferredDoctors || 0} active</span>
+                            <span className="font-semibold">{referralStats?.activeDoctors || 0} active</span>
                           </div>
-                          <Progress value={Math.min(((ambassadorData?.activeReferredDoctors - 10) / 40) * 100, 100)} className="h-2" />
+                          <Progress value={Math.min(((referralStats?.activeDoctors - 10) / 40) * 100, 100)} className="h-2" />
                         </>
                       )}
                       
-                      {ambassadorData?.activeReferredDoctors >= 50 && (
+                      {referralStats?.activeDoctors >= 50 && (
                         <>
                           <div className="flex justify-between text-sm mt-4">
                             <span>Gold (51-99 doctors)</span>
-                            <span className="font-semibold">{ambassadorData?.activeReferredDoctors || 0} active</span>
+                            <span className="font-semibold">{referralStats?.activeDoctors || 0} active</span>
                           </div>
-                          <Progress value={Math.min(((ambassadorData?.activeReferredDoctors - 50) / 49) * 100, 100)} className="h-2" />
+                          <Progress value={Math.min(((referralStats?.activeDoctors - 50) / 49) * 100, 100)} className="h-2" />
                         </>
                       )}
                       
-                      {ambassadorData?.activeReferredDoctors >= 99 && (
+                      {referralStats?.activeDoctors >= 99 && (
                         <>
                           <div className="flex justify-between text-sm mt-4">
                             <span>Diamond (100+ doctors)</span>
-                            <span className="font-semibold">{ambassadorData?.activeReferredDoctors || 0} active</span>
+                            <span className="font-semibold">{referralStats?.activeDoctors || 0} active</span>
                           </div>
                           <Progress value={100} className="h-2" />
                         </>
@@ -435,15 +558,198 @@ const AmbassadorPortal = () => {
             <TabsContent value="referrals">
               <Card>
                 <CardHeader>
-                  <CardTitle>Your Referred Doctors</CardTitle>
-                  <CardDescription>Track the doctors you've brought to MedMap</CardDescription>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        <Stethoscope className="w-5 h-5 text-purple-600" />
+                        Doctors You've Referred
+                      </CardTitle>
+                      <CardDescription>
+                        Track the doctors who signed up using your referral code
+                      </CardDescription>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge className="bg-purple-100 text-purple-800">
+                        Total: {referrals.length}
+                      </Badge>
+                      <Badge className="bg-green-100 text-green-800">
+                        Verified: {referrals.filter(r => r.status === 'verified').length}
+                      </Badge>
+                    </div>
+                  </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-center py-8 text-gray-500">
-                    <Users className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                    <p>No referrals yet</p>
-                    <p className="text-sm">Start sharing your referral code with doctors today!</p>
+                  {/* Filters */}
+                  <div className="flex flex-col sm:flex-row gap-3 mb-6">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <Input
+                        placeholder="Search by name, email, or specialization..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="pl-9"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <select
+                        className="px-3 py-2 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        value={filterStatus}
+                        onChange={(e) => setFilterStatus(e.target.value)}
+                      >
+                        <option value="all">All Status</option>
+                        <option value="pending">Pending</option>
+                        <option value="verified">Verified</option>
+                        <option value="rejected">Rejected</option>
+                      </select>
+                    </div>
                   </div>
+
+                  {referrals.length === 0 ? (
+                    <div className="text-center py-12 text-gray-500">
+                      <Users className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                      <p className="text-lg font-medium">No referrals yet</p>
+                      <p className="text-sm">Start sharing your referral code with doctors today!</p>
+                      <Button 
+                        variant="outline" 
+                        className="mt-4"
+                        onClick={handleCopyReferralCode}
+                      >
+                        <Copy className="w-4 h-4 mr-2" />
+                        Copy Your Referral Code
+                      </Button>
+                    </div>
+                  ) : filteredReferrals.length === 0 ? (
+                    <div className="text-center py-12 text-gray-500">
+                      <Search className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                      <p className="text-lg font-medium">No matching referrals</p>
+                      <p className="text-sm">Try adjusting your search or filters</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {/* Mobile Card View */}
+                      <div className="block lg:hidden space-y-4">
+                        {filteredReferrals.map((referral) => (
+                          <div key={referral.id} className="border rounded-lg p-4 bg-white">
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                                    <Stethoscope className="w-5 h-5 text-blue-600" />
+                                  </div>
+                                  <div>
+                                    <p className="font-semibold">{referral.doctorFullName}</p>
+                                    <p className="text-sm text-gray-500">{referral.doctorEmail}</p>
+                                  </div>
+                                </div>
+                                <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                                  <div>
+                                    <p className="text-gray-500">Specialization</p>
+                                    <p className="font-medium">{referral.doctorSpecialization || 'N/A'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-gray-500">Referred</p>
+                                    <p className="font-medium">{formatDate(referral.referredAt)}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-gray-500">Status</p>
+                                    <Badge className={getStatusBadge(referral.status)}>
+                                      {referral.status}
+                                    </Badge>
+                                  </div>
+                                  <div>
+                                    <p className="text-gray-500">Commission</p>
+                                    <p className="font-medium text-green-600">
+                                      R{referral.commissionEarned || 0}
+                                    </p>
+                                  </div>
+                                </div>
+                                {referral.verifiedAt && (
+                                  <p className="text-xs text-gray-400 mt-2">
+                                    Verified: {formatDate(referral.verifiedAt)}
+                                  </p>
+                                )}
+                                {referral.rejectionReason && (
+                                  <p className="text-xs text-red-600 mt-2">
+                                    Reason: {referral.rejectionReason}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Desktop Table View */}
+                      <div className="hidden lg:block overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b">
+                              <th className="text-left py-3 px-4 text-sm font-semibold">Doctor</th>
+                              <th className="text-left py-3 px-4 text-sm font-semibold">Specialization</th>
+                              <th className="text-left py-3 px-4 text-sm font-semibold">Referred</th>
+                              <th className="text-left py-3 px-4 text-sm font-semibold">Status</th>
+                              <th className="text-left py-3 px-4 text-sm font-semibold">Commission</th>
+                              <th className="text-left py-3 px-4 text-sm font-semibold">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredReferrals.map((referral) => (
+                              <tr key={referral.id} className="border-b hover:bg-gray-50">
+                                <td className="py-3 px-4">
+                                  <div>
+                                    <p className="font-medium text-sm">{referral.doctorFullName}</p>
+                                    <p className="text-xs text-gray-600">{referral.doctorEmail}</p>
+                                  </div>
+                                </td>
+                                <td className="py-3 px-4 text-sm">
+                                  {referral.doctorSpecialization || 'N/A'}
+                                </td>
+                                <td className="py-3 px-4 text-sm">
+                                  {formatDate(referral.referredAt)}
+                                </td>
+                                <td className="py-3 px-4">
+                                  <Badge className={getStatusBadge(referral.status)}>
+                                    {referral.status}
+                                  </Badge>
+                                  {referral.verifiedAt && (
+                                    <p className="text-xs text-gray-400 mt-1">
+                                      Verified: {formatDate(referral.verifiedAt)}
+                                    </p>
+                                  )}
+                                </td>
+                                <td className="py-3 px-4">
+                                  <span className="font-medium text-green-600">
+                                    R{referral.commissionEarned || 0}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm"
+                                    onClick={() => {
+                                      // Show doctor details in a dialog or navigate
+                                      toast({
+                                        title: 'Doctor Details',
+                                        description: `${referral.doctorFullName} - ${referral.doctorSpecialization || 'N/A'}`,
+                                      });
+                                    }}
+                                  >
+                                    <Eye className="w-4 h-4" />
+                                  </Button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {filteredReferrals.length > 0 && (
+                        <div className="text-sm text-gray-500 text-center pt-4">
+                          Showing {filteredReferrals.length} of {referrals.length} referrals
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -452,14 +758,71 @@ const AmbassadorPortal = () => {
               <Card>
                 <CardHeader>
                   <CardTitle>Commission History</CardTitle>
-                  <CardDescription>Track your monthly earnings</CardDescription>
+                  <CardDescription>Track your monthly earnings from referrals</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-center py-8 text-gray-500">
-                    <TrendingUp className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                    <p>No earnings yet</p>
-                    <p className="text-sm">Start referring doctors to earn commission!</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                    <div className="bg-green-50 p-4 rounded-lg text-center">
+                      <p className="text-sm text-gray-600">Total Earned</p>
+                      <p className="text-2xl font-bold text-green-700">
+                        R{(referralStats?.totalCommission || 0).toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="bg-yellow-50 p-4 rounded-lg text-center">
+                      <p className="text-sm text-gray-600">Pending Commission</p>
+                      <p className="text-2xl font-bold text-yellow-700">
+                        R{referrals
+                          .filter(r => r.status === 'verified' && !r.commissionPaid)
+                          .reduce((sum, r) => sum + (r.commissionEarned || 0), 0)
+                          .toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="bg-blue-50 p-4 rounded-lg text-center">
+                      <p className="text-sm text-gray-600">Paid Commission</p>
+                      <p className="text-2xl font-bold text-blue-700">
+                        R{referrals
+                          .filter(r => r.status === 'verified' && r.commissionPaid)
+                          .reduce((sum, r) => sum + (r.commissionEarned || 0), 0)
+                          .toLocaleString()}
+                      </p>
+                    </div>
                   </div>
+
+                  {referrals.filter(r => r.status === 'verified').length === 0 ? (
+                    <div className="text-center py-12 text-gray-500">
+                      <TrendingUp className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                      <p className="text-lg font-medium">No earnings yet</p>
+                      <p className="text-sm">Commission is earned when referred doctors get verified</p>
+                      <Button 
+                        variant="outline" 
+                        className="mt-4"
+                        onClick={handleCopyReferralCode}
+                      >
+                        <Copy className="w-4 h-4 mr-2" />
+                        Share Your Referral Code
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {referrals
+                        .filter(r => r.status === 'verified')
+                        .map((referral) => (
+                          <div key={referral.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <div>
+                              <p className="font-medium">{referral.doctorFullName}</p>
+                              <p className="text-sm text-gray-500">{referral.doctorSpecialization || 'General Practice'}</p>
+                              <p className="text-xs text-gray-400">Verified: {formatDate(referral.verifiedAt)}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-bold text-green-600">R{referral.commissionEarned || 0}</p>
+                              <Badge className={referral.commissionPaid ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}>
+                                {referral.commissionPaid ? 'Paid' : 'Pending'}
+                              </Badge>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
