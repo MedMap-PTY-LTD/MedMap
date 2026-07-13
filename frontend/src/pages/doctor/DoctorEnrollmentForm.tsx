@@ -1,9 +1,9 @@
 // pages/doctor/DoctorEnrollmentForm.tsx
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { db } from '@/lib/firebase';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, getDoc, getDocs, collection, query, where } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -26,7 +26,9 @@ import {
   Upload,
   Loader2,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Award,
+  XCircle
 } from 'lucide-react';
 
 interface DoctorEnrollmentData {
@@ -70,6 +72,9 @@ interface DoctorEnrollmentData {
   hpcsaDocument: File | null;
   profilePicture: File | null;
   
+  // Referral
+  referralCode: string;
+  
   // Terms
   acceptTerms: boolean;
   acceptDataProcessing: boolean;
@@ -78,9 +83,15 @@ interface DoctorEnrollmentData {
 const DoctorEnrollmentForm = () => {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [referralValid, setReferralValid] = useState<boolean | null>(null);
+  const [referralAmbassador, setReferralAmbassador] = useState<string | null>(null);
+  const [referralCodeInput, setReferralCodeInput] = useState('');
+  
+  const referralCodeFromUrl = searchParams.get('ref') || '';
   
   const [formData, setFormData] = useState<DoctorEnrollmentData>({
     firstName: '',
@@ -111,6 +122,7 @@ const DoctorEnrollmentForm = () => {
     qualificationDocument: null,
     hpcsaDocument: null,
     profilePicture: null,
+    referralCode: referralCodeFromUrl,
     acceptTerms: false,
     acceptDataProcessing: false,
   });
@@ -136,6 +148,14 @@ const DoctorEnrollmentForm = () => {
     'Other',
   ];
 
+  // Validate referral code from URL
+  useEffect(() => {
+    if (referralCodeFromUrl) {
+      setReferralCodeInput(referralCodeFromUrl);
+      validateReferralCode(referralCodeFromUrl);
+    }
+  }, [referralCodeFromUrl]);
+
   // Load existing profile data
   useEffect(() => {
     if (profile) {
@@ -148,6 +168,61 @@ const DoctorEnrollmentForm = () => {
       }));
     }
   }, [profile]);
+
+  const validateReferralCode = async (code: string) => {
+    if (!code || code.length < 4) {
+      setReferralValid(null);
+      setReferralAmbassador(null);
+      return;
+    }
+
+    try {
+      const upperCode = code.toUpperCase().trim();
+      const ambassadorsQuery = query(
+        collection(db, 'ambassadors'),
+        where('referralCode', '==', upperCode),
+        where('applicationStatus', '==', 'approved')
+      );
+      const snapshot = await getDocs(ambassadorsQuery);
+      
+      if (!snapshot.empty) {
+        const ambassadorDoc = snapshot.docs[0];
+        const ambassadorData = ambassadorDoc.data();
+        setReferralValid(true);
+        const name = `${ambassadorData.firstName || ''} ${ambassadorData.lastName || ''}`.trim();
+        setReferralAmbassador(name || 'an ambassador');
+        toast({
+          title: 'Valid Referral Code ✅',
+          description: `You've been referred by ${name || 'an ambassador'}`,
+        });
+        setFormData(prev => ({ ...prev, referralCode: upperCode }));
+      } else {
+        setReferralValid(false);
+        setReferralAmbassador(null);
+        toast({
+          title: 'Invalid Referral Code',
+          description: 'The referral code you entered is not valid.',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('Error validating referral code:', error);
+      setReferralValid(false);
+    }
+  };
+
+  const handleReferralCodeChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const code = e.target.value.toUpperCase().trim();
+    setReferralCodeInput(code);
+    setFormData(prev => ({ ...prev, referralCode: code }));
+    
+    if (code.length >= 4) {
+      await validateReferralCode(code);
+    } else {
+      setReferralValid(null);
+      setReferralAmbassador(null);
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -213,6 +288,29 @@ const DoctorEnrollmentForm = () => {
       return;
     }
 
+    // Validate referral code if provided
+    if (formData.referralCode) {
+      // If referral code was provided but not validated yet, validate it
+      if (referralValid === null) {
+        await validateReferralCode(formData.referralCode);
+        if (referralValid === false) {
+          toast({ 
+            title: 'Invalid Referral Code', 
+            description: 'Please check the referral code and try again.', 
+            variant: 'destructive' 
+          });
+          return;
+        }
+      } else if (referralValid === false) {
+        toast({ 
+          title: 'Invalid Referral Code', 
+          description: 'Please check the referral code and try again.', 
+          variant: 'destructive' 
+        });
+        return;
+      }
+    }
+
     try {
       setLoading(true);
 
@@ -222,7 +320,7 @@ const DoctorEnrollmentForm = () => {
       }
 
       // Prepare the data for Firestore
-      const doctorData = {
+      const doctorData: any = {
         firstName: formData.firstName,
         lastName: formData.lastName,
         fullName: `${formData.firstName} ${formData.lastName}`.trim(),
@@ -246,6 +344,12 @@ const DoctorEnrollmentForm = () => {
         updatedAt: serverTimestamp(),
       };
 
+      // Add referral code if provided and valid
+      if (formData.referralCode && referralValid) {
+        doctorData.referralCodeUsed = formData.referralCode.toUpperCase();
+        // We'll add referredBy when we find the ambassador
+      }
+
       // Update the doctor document in Firestore
       const doctorRef = doc(db, 'doctors', user.uid);
       await updateDoc(doctorRef, doctorData);
@@ -260,6 +364,56 @@ const DoctorEnrollmentForm = () => {
         updatedAt: serverTimestamp(),
         enrollmentCompleted: true,
       });
+
+      // If referral code was provided, create referral record
+      if (formData.referralCode && referralValid) {
+        // Find the ambassador with this referral code
+        const ambassadorsQuery = query(
+          collection(db, 'ambassadors'),
+          where('referralCode', '==', formData.referralCode.toUpperCase()),
+          where('applicationStatus', '==', 'approved')
+        );
+        const ambassadorSnapshot = await getDocs(ambassadorsQuery);
+        
+        if (!ambassadorSnapshot.empty) {
+          const ambassadorDoc = ambassadorSnapshot.docs[0];
+          const ambassadorData = ambassadorDoc.data();
+          
+          // Create referral record
+          const referralRef = doc(db, 'referrals', `doctor_${user.uid}`);
+          const referralData = {
+            ambassadorId: ambassadorDoc.id,
+            ambassadorName: `${ambassadorData.firstName || ''} ${ambassadorData.lastName || ''}`.trim(),
+            referralCode: formData.referralCode.toUpperCase(),
+            referredAt: serverTimestamp(),
+            doctorId: user.uid,
+            doctorName: `${formData.firstName} ${formData.lastName}`.trim(),
+            doctorEmail: formData.email,
+            status: 'pending',
+            commissionEarned: 0,
+            commissionPaid: false,
+          };
+          
+          await updateDoc(referralRef, referralData);
+          
+          // Update ambassador's referral count
+          const ambassadorRef = doc(db, 'ambassadors', ambassadorDoc.id);
+          await updateDoc(ambassadorRef, {
+            totalReferredDoctors: (ambassadorData.totalReferredDoctors || 0) + 1,
+            updatedAt: serverTimestamp(),
+          });
+          
+          // Update doctor with referredBy
+          await updateDoc(doctorRef, {
+            referredBy: ambassadorDoc.id,
+          });
+          
+          toast({
+            title: 'Referral Linked!',
+            description: `Your application has been linked to ${referralData.ambassadorName}'s referral.`,
+          });
+        }
+      }
 
       toast({
         title: 'Application Submitted! 🎉',
@@ -296,6 +450,14 @@ const DoctorEnrollmentForm = () => {
             <p className="text-gray-600 mb-4">
               Your healthcare provider application has been successfully submitted for review.
             </p>
+            {formData.referralCode && referralValid && (
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
+                <Award className="w-5 h-5 text-purple-600 mx-auto mb-1" />
+                <p className="text-sm text-purple-800">
+                  Referral code <strong>{formData.referralCode}</strong> applied successfully!
+                </p>
+              </div>
+            )}
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-left mb-6">
               <div className="flex items-start gap-2">
                 <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
@@ -331,6 +493,27 @@ const DoctorEnrollmentForm = () => {
             Complete your profile to start practicing on MedMap
           </p>
         </div>
+
+        {/* Referral Banner */}
+        {referralCodeFromUrl && referralValid === true && (
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-6 text-center">
+            <Award className="w-6 h-6 text-purple-600 mx-auto mb-1" />
+            <p className="text-sm text-purple-800">
+              You were referred by <strong>{referralAmbassador || 'an ambassador'}</strong>!
+              Welcome to the MedMap network. 🎉
+            </p>
+          </div>
+        )}
+
+        {referralCodeFromUrl && referralValid === false && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 text-center">
+            <AlertCircle className="w-6 h-6 text-red-600 mx-auto mb-1" />
+            <p className="text-sm text-red-800">
+              The referral code <strong>{referralCodeFromUrl}</strong> is invalid.
+              You can still apply without a referral.
+            </p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           <Card className="w-full shadow-xl border-0">
@@ -613,6 +796,48 @@ const DoctorEnrollmentForm = () => {
                     </div>
                   </div>
                 ))}
+              </div>
+
+              {/* Referral Code (Optional) */}
+              <div className="space-y-4 border-t pt-4">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <Award className="w-5 h-5 text-purple-600" />
+                  Referral Code (Optional)
+                </h3>
+                <p className="text-sm text-gray-500">
+                  If an ambassador referred you, enter their referral code below to link your application.
+                </p>
+                <div className="space-y-2">
+                  <Label htmlFor="referralCode">Ambassador Referral Code</Label>
+                  <div className="flex gap-2">
+                    <Input 
+                      id="referralCode"
+                      name="referralCode"
+                      value={referralCodeInput}
+                      onChange={handleReferralCodeChange}
+                      placeholder="e.g., ABXY12"
+                      disabled={loading}
+                      className="uppercase flex-1"
+                    />
+                  </div>
+                  {referralValid === true && (
+                    <p className="text-sm text-green-600 flex items-center gap-1">
+                      <CheckCircle className="w-4 h-4" />
+                      Valid referral code from {referralAmbassador || 'an ambassador'} ✅
+                    </p>
+                  )}
+                  {referralValid === false && (
+                    <p className="text-sm text-red-600 flex items-center gap-1">
+                      <XCircle className="w-4 h-4" />
+                      Invalid referral code. Please check and try again.
+                    </p>
+                  )}
+                  {referralValid === null && referralCodeInput.length > 0 && (
+                    <p className="text-sm text-gray-500">
+                      Checking referral code...
+                    </p>
+                  )}
+                </div>
               </div>
 
               {/* Documents */}
