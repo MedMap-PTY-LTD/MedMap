@@ -16,6 +16,7 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { authService } from '@/lib/firebase';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -71,6 +72,7 @@ import {
   ArrowUpDown,
 } from 'lucide-react';
 
+// Types remain the same
 interface UserProfile {
   uid: string;
   email: string;
@@ -200,7 +202,6 @@ const combineWithUserData = (roleData: any, userData: any): any => {
     ...roleData,
     ...userData,
     uid: roleData.uid || userData.uid,
-    // Ensure fullName is set
     fullName: userData.fullName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || roleData.fullName || 'Unknown User',
     firstName: userData.firstName || roleData.firstName || '',
     lastName: userData.lastName || roleData.lastName || '',
@@ -212,36 +213,157 @@ const combineWithUserData = (roleData: any, userData: any): any => {
   };
 };
 
+// ==================== QUERY KEYS ====================
+const QUERY_KEYS = {
+  dashboard: 'dashboard',
+  users: 'users',
+  doctors: 'doctors',
+  patients: 'patients',
+  ambassadors: 'ambassadors',
+  pendingDoctors: 'pendingDoctors',
+  referrals: 'referrals',
+  stats: 'stats',
+};
+
+// ==================== DATA FETCHING FUNCTIONS ====================
+const fetchDashboardData = async () => {
+  try {
+    const [
+      usersSnapshot,
+      doctorsSnapshot,
+      patientsSnapshot,
+      ambassadorsSnapshot,
+      pendingDoctorsSnapshot,
+      referralsSnapshot,
+    ] = await Promise.all([
+      getDocs(collection(db, 'users')),
+      getDocs(collection(db, 'doctors')),
+      getDocs(collection(db, 'patients')),
+      getDocs(collection(db, 'ambassadors')),
+      getDocs(query(
+        collection(db, 'doctors'),
+        where('verificationStatus', '==', 'pending')
+      )),
+      getDocs(collection(db, 'referrals')),
+    ]);
+
+    // Build a map of user data by uid for quick lookup
+    const userMap: Record<string, any> = {};
+    usersSnapshot.docs.forEach((docSnap) => {
+      userMap[docSnap.id] = { uid: docSnap.id, ...docSnap.data() };
+    });
+
+    // Process all users
+    const usersData = usersSnapshot.docs.map((docSnap) => ({
+      uid: docSnap.id,
+      ...docSnap.data()
+    })) as UserProfile[];
+
+    // Process all doctors
+    const allDoctors = doctorsSnapshot.docs.map((docSnap) => {
+      const doctorData = docSnap.data();
+      const userData = userMap[docSnap.id] || {};
+      return combineWithUserData(
+        { uid: docSnap.id, ...doctorData },
+        userData
+      ) as DoctorProfile;
+    });
+
+    // Process patients
+    const patientsData = patientsSnapshot.docs.map((docSnap) => {
+      const patientData = docSnap.data();
+      const userData = userMap[docSnap.id] || {};
+      return combineWithUserData(
+        { uid: docSnap.id, ...patientData },
+        userData
+      ) as PatientProfile;
+    });
+
+    // Process ambassadors
+    const ambassadorsData = ambassadorsSnapshot.docs.map((docSnap) => {
+      const ambassadorData = docSnap.data();
+      const userData = userMap[docSnap.id] || {};
+      return combineWithUserData(
+        { uid: docSnap.id, ...ambassadorData },
+        userData
+      ) as AmbassadorProfile;
+    });
+
+    // Process pending doctors
+    const pendingDocs = await Promise.all(
+      pendingDoctorsSnapshot.docs.map(async (docSnap) => {
+        const doctorData = docSnap.data();
+        const userData = userMap[docSnap.id] || {};
+        return combineWithUserData(
+          { 
+            uid: docSnap.id, 
+            ...doctorData,
+            submittedAt: doctorData.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+          },
+          userData
+        ) as DoctorProfile;
+      })
+    );
+
+    // Process referrals
+    const referralsData = referralsSnapshot.docs.map((docSnap) => ({
+      id: docSnap.id,
+      ...docSnap.data(),
+      referredAt: docSnap.data().referredAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+      verifiedAt: docSnap.data().verifiedAt?.toDate?.()?.toISOString(),
+    })) as Referral[];
+
+    // Calculate stats
+    const totalUsers = usersData.length;
+    const totalDoctors = allDoctors.filter(d => d.verificationStatus === 'verified').length;
+    const totalPatients = usersData.filter(u => u.role === 'patient').length;
+    const totalAmbassadors = usersData.filter(u => u.role === 'ambassador').length;
+    const pendingDoctorsCount = pendingDocs.length;
+    const pendingAmbassadorsCount = ambassadorsData.filter(a => a.applicationStatus === 'pending').length;
+    const readyForApproval = ambassadorsData.filter(a => a.interviewStatus === 'passed' && a.applicationStatus === 'pending').length;
+    
+    const totalReferrals = referralsData.length;
+    const pendingReferrals = referralsData.filter(r => r.status === 'pending').length;
+    const totalCommission = referralsData
+      .filter(r => r.status === 'verified')
+      .reduce((sum, r) => sum + (r.commissionEarned || 0), 0);
+
+    return {
+      users: usersData,
+      doctors: allDoctors,
+      patients: patientsData,
+      ambassadors: ambassadorsData,
+      pendingDoctors: pendingDocs,
+      referrals: referralsData,
+      stats: {
+        totalUsers,
+        totalDoctors,
+        totalPatients,
+        totalAmbassadors,
+        pendingDoctors: pendingDoctorsCount,
+        pendingAmbassadors: pendingAmbassadorsCount,
+        readyForApproval,
+        openTickets: 0,
+        urgentTickets: 0,
+        totalReferrals,
+        pendingReferrals,
+        totalCommission,
+      },
+    };
+  } catch (error: any) {
+    console.error('Error fetching dashboard data:', error);
+    throw new Error(error.message || 'Failed to load dashboard data');
+  }
+};
+
 const AdminDashboard = () => {
   const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  const [stats, setStats] = useState({
-    totalUsers: 0,
-    totalDoctors: 0,
-    totalPatients: 0,
-    totalAmbassadors: 0,
-    pendingDoctors: 0,
-    pendingAmbassadors: 0,
-    readyForApproval: 0,
-    openTickets: 0,
-    urgentTickets: 0,
-    totalReferrals: 0,
-    pendingReferrals: 0,
-    totalCommission: 0,
-  });
-
-  const [users, setUsers] = useState<UserProfile[]>([]);
-  const [doctors, setDoctors] = useState<DoctorProfile[]>([]);
-  const [patients, setPatients] = useState<PatientProfile[]>([]);
-  const [ambassadors, setAmbassadors] = useState<AmbassadorProfile[]>([]);
-  const [pendingDoctors, setPendingDoctors] = useState<DoctorProfile[]>([]);
-  const [referrals, setReferrals] = useState<Referral[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [ambassadorSearchTerm, setAmbassadorSearchTerm] = useState('');
+  
+  // Dialog states
   const [showProfileDialog, setShowProfileDialog] = useState(false);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [showPatientDetailsDialog, setShowPatientDetailsDialog] = useState(false);
@@ -257,6 +379,9 @@ const AdminDashboard = () => {
   const [approvingAmbassadorId, setApprovingAmbassadorId] = useState<string | null>(null);
   const [interviewStatus, setInterviewStatus] = useState<'pending' | 'scheduled' | 'completed' | 'passed' | 'failed'>('pending');
   const [interviewNotes, setInterviewNotes] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [ambassadorSearchTerm, setAmbassadorSearchTerm] = useState('');
+  
   const [adminProfileData, setAdminProfileData] = useState({
     firstName: profile?.firstName || '',
     lastName: profile?.lastName || '',
@@ -266,157 +391,62 @@ const AdminDashboard = () => {
     confirmPassword: '',
   });
 
-  useEffect(() => {
-    if (profile && profile.role !== 'admin') {
-      navigate('/dashboard');
-      return;
-    }
-    fetchDashboardData();
-  }, [profile]);
+  // ==================== QUERY: Fetch all dashboard data ====================
+  const { 
+    data, 
+    isLoading, 
+    error, 
+    refetch,
+    isRefetching
+  } = useQuery({
+    queryKey: [QUERY_KEYS.dashboard],
+    queryFn: fetchDashboardData,
+    // Enable background refetching
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
+    refetchOnReconnect: true,
+    // Cache data for 5 minutes
+    staleTime: 5 * 60 * 1000,
+    // Keep cache for 10 minutes
+    gcTime: 10 * 60 * 1000,
+    // Refetch every 30 seconds for fresh data
+    refetchInterval: 30 * 1000,
+    // Don't refetch on error
+    retry: 2,
+    retryDelay: 1000,
+  });
 
-  const fetchDashboardData = async () => {
-    setLoading(true);
-    try {
-      // Fetch all data from Firestore directly
-      const [
-        usersSnapshot,
-        doctorsSnapshot,
-        patientsSnapshot,
-        ambassadorsSnapshot,
-        pendingDoctorsSnapshot,
-        referralsSnapshot,
-      ] = await Promise.all([
-        getDocs(collection(db, 'users')),
-        getDocs(collection(db, 'doctors')),
-        getDocs(collection(db, 'patients')),
-        getDocs(collection(db, 'ambassadors')),
-        getDocs(query(
-          collection(db, 'doctors'),
-          where('verificationStatus', '==', 'pending')
-        )),
-        getDocs(collection(db, 'referrals')),
-      ]);
+  // Extract data from query result
+  const {
+    users = [],
+    doctors = [],
+    patients = [],
+    ambassadors = [],
+    pendingDoctors = [],
+    referrals = [],
+    stats = {
+      totalUsers: 0,
+      totalDoctors: 0,
+      totalPatients: 0,
+      totalAmbassadors: 0,
+      pendingDoctors: 0,
+      pendingAmbassadors: 0,
+      readyForApproval: 0,
+      openTickets: 0,
+      urgentTickets: 0,
+      totalReferrals: 0,
+      pendingReferrals: 0,
+      totalCommission: 0,
+    },
+  } = data || {};
 
-      // Build a map of user data by uid for quick lookup
-      const userMap: Record<string, any> = {};
-      usersSnapshot.docs.forEach((docSnap) => {
-        userMap[docSnap.id] = { uid: docSnap.id, ...docSnap.data() };
-      });
-
-      // Process all users (already have full data)
-      const usersData = usersSnapshot.docs.map((docSnap) => ({
-        uid: docSnap.id,
-        ...docSnap.data()
-      })) as UserProfile[];
-      setUsers(usersData);
-
-      // Process all doctors - combine with user data
-      const allDoctors = doctorsSnapshot.docs.map((docSnap) => {
-        const doctorData = docSnap.data();
-        const userData = userMap[docSnap.id] || {};
-        return combineWithUserData(
-          { uid: docSnap.id, ...doctorData },
-          userData
-        ) as DoctorProfile;
-      });
-      setDoctors(allDoctors);
-
-      // Process patients - combine with user data
-      const patientsData = patientsSnapshot.docs.map((docSnap) => {
-        const patientData = docSnap.data();
-        const userData = userMap[docSnap.id] || {};
-        return combineWithUserData(
-          { uid: docSnap.id, ...patientData },
-          userData
-        ) as PatientProfile;
-      });
-      setPatients(patientsData);
-
-      // Process ambassadors - combine with user data
-      const ambassadorsData = ambassadorsSnapshot.docs.map((docSnap) => {
-        const ambassadorData = docSnap.data();
-        const userData = userMap[docSnap.id] || {};
-        return combineWithUserData(
-          { uid: docSnap.id, ...ambassadorData },
-          userData
-        ) as AmbassadorProfile;
-      });
-      setAmbassadors(ambassadorsData);
-
-      // Process pending doctors with user data
-      const pendingDocs = await Promise.all(
-        pendingDoctorsSnapshot.docs.map(async (docSnap) => {
-          const doctorData = docSnap.data();
-          const userData = userMap[docSnap.id] || {};
-          return combineWithUserData(
-            { 
-              uid: docSnap.id, 
-              ...doctorData,
-              submittedAt: doctorData.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-            },
-            userData
-          ) as DoctorProfile;
-        })
-      );
-      setPendingDoctors(pendingDocs);
-
-      // Process referrals
-      const referralsData = referralsSnapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-        referredAt: docSnap.data().referredAt?.toDate?.()?.toISOString(),
-        verifiedAt: docSnap.data().verifiedAt?.toDate?.()?.toISOString(),
-      })) as Referral[];
-      setReferrals(referralsData);
-
-      // Calculate stats
-      const totalUsers = usersData.length;
-      const totalDoctors = allDoctors.filter(d => d.verificationStatus === 'verified').length;
-      const totalPatients = usersData.filter(u => u.role === 'patient').length;
-      const totalAmbassadors = usersData.filter(u => u.role === 'ambassador').length;
-      const pendingDoctorsCount = pendingDocs.length;
-      const pendingAmbassadorsCount = ambassadorsData.filter(a => a.applicationStatus === 'pending').length;
-      const readyForApproval = ambassadorsData.filter(a => a.interviewStatus === 'passed' && a.applicationStatus === 'pending').length;
-      
-      // Referral stats
-      const totalReferrals = referralsData.length;
-      const pendingReferrals = referralsData.filter(r => r.status === 'pending').length;
-      const totalCommission = referralsData
-        .filter(r => r.status === 'verified')
-        .reduce((sum, r) => sum + (r.commissionEarned || 0), 0);
-
-      setStats({
-        totalUsers,
-        totalDoctors,
-        totalPatients,
-        totalAmbassadors,
-        pendingDoctors: pendingDoctorsCount,
-        pendingAmbassadors: pendingAmbassadorsCount,
-        readyForApproval,
-        openTickets: 0,
-        urgentTickets: 0,
-        totalReferrals,
-        pendingReferrals,
-        totalCommission,
-      });
-
-    } catch (error: any) {
-      console.error('Error fetching dashboard data:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to load dashboard data. Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleApproveDoctor = async (doctorId: string) => {
-    try {
+  // ==================== MUTATIONS ====================
+  
+  // Approve Doctor Mutation
+  const approveDoctorMutation = useMutation({
+    mutationFn: async (doctorId: string) => {
       const batch = writeBatch(db);
       
-      // Update doctor status
       const doctorRef = doc(db, 'doctors', doctorId);
       batch.update(doctorRef, {
         verificationStatus: 'verified',
@@ -424,14 +454,12 @@ const AdminDashboard = () => {
         updatedAt: serverTimestamp(),
       });
 
-      // Update user status
       const userRef = doc(db, 'users', doctorId);
       batch.update(userRef, {
         isActive: true,
         updatedAt: serverTimestamp(),
       });
 
-      // Check if this doctor was referred
       const referralRef = doc(db, 'referrals', `doctor_${doctorId}`);
       const referralDocSnap = await getDoc(referralRef);
       
@@ -446,7 +474,6 @@ const AdminDashboard = () => {
           updatedAt: serverTimestamp(),
         });
         
-        // Update ambassador earnings
         const ambassadorRef = doc(db, 'ambassadors', referralData.ambassadorId);
         const ambassadorDocSnap = await getDoc(ambassadorRef);
         if (ambassadorDocSnap.exists()) {
@@ -461,95 +488,94 @@ const AdminDashboard = () => {
       }
 
       await batch.commit();
-
-      toast({ 
-        title: 'Success', 
-        description: 'Doctor approved successfully.' 
-      });
-      fetchDashboardData();
-    } catch (error: any) {
-      console.error('Error approving doctor:', error);
+    },
+    onSuccess: () => {
+      toast({ title: 'Success', description: 'Doctor approved successfully.' });
+      // Invalidate and refetch dashboard data
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.dashboard] });
+    },
+    onError: (error: any) => {
       toast({ 
         title: 'Error', 
         description: error.message || 'Failed to approve doctor.', 
         variant: 'destructive' 
       });
-    }
-  };
+    },
+  });
 
-  const handleRejectDoctor = async () => {
-    if (!selectedDoctor || !rejectReason) return;
-    
-    try {
-      const doctorId = selectedDoctor.uid || (selectedDoctor as any).id;
+  // Reject Doctor Mutation
+  const rejectDoctorMutation = useMutation({
+    mutationFn: async ({ doctorId, reason }: { doctorId: string; reason: string }) => {
       const batch = writeBatch(db);
       
-      // Update doctor status
       const doctorRef = doc(db, 'doctors', doctorId);
       batch.update(doctorRef, {
         verificationStatus: 'rejected',
         rejectedAt: serverTimestamp(),
-        rejectionReason: rejectReason,
+        rejectionReason: reason,
         updatedAt: serverTimestamp(),
       });
 
-      // Update user status
       const userRef = doc(db, 'users', doctorId);
       batch.update(userRef, {
         isActive: false,
         updatedAt: serverTimestamp(),
       });
 
-      // Check if this doctor was referred
       const referralRef = doc(db, 'referrals', `doctor_${doctorId}`);
       const referralDocSnap = await getDoc(referralRef);
       
       if (referralDocSnap.exists()) {
         batch.update(referralRef, {
           status: 'rejected',
-          rejectionReason: rejectReason,
+          rejectionReason: reason,
           updatedAt: serverTimestamp(),
         });
       }
 
       await batch.commit();
-
-      toast({ 
-        title: 'Success', 
-        description: 'Doctor application rejected.' 
-      });
+    },
+    onSuccess: () => {
+      toast({ title: 'Success', description: 'Doctor application rejected.' });
       setShowRejectDialog(false);
       setSelectedDoctor(null);
       setRejectReason('');
-      fetchDashboardData();
-    } catch (error: any) {
-      console.error('Error rejecting doctor:', error);
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.dashboard] });
+    },
+    onError: (error: any) => {
       toast({ 
         title: 'Error', 
         description: error.message || 'Failed to reject doctor.', 
         variant: 'destructive' 
       });
-    }
-  };
+    },
+  });
 
-  const handleUpdateInterviewStatus = async () => {
-    if (!selectedAmbassador) return;
-    
-    try {
-      const ambassadorRef = doc(db, 'ambassadors', selectedAmbassador.uid);
+  // Update Interview Status Mutation
+  const updateInterviewStatusMutation = useMutation({
+    mutationFn: async ({ 
+      ambassadorId, 
+      status, 
+      notes 
+    }: { 
+      ambassadorId: string; 
+      status: 'pending' | 'scheduled' | 'completed' | 'passed' | 'failed'; 
+      notes?: string;
+    }) => {
+      const ambassadorRef = doc(db, 'ambassadors', ambassadorId);
       const updateData: any = {
-        interviewStatus: interviewStatus,
+        interviewStatus: status,
         updatedAt: serverTimestamp(),
       };
       
-      if (interviewNotes) {
-        updateData.interviewNotes = interviewNotes;
+      if (notes) {
+        updateData.interviewNotes = notes;
       }
       
-      if (interviewStatus === 'passed') {
+      if (status === 'passed') {
         updateData.onboardingStep = 4;
         updateData.applicationStatus = 'pending';
-      } else if (interviewStatus === 'failed') {
+      } else if (status === 'failed') {
         updateData.applicationStatus = 'rejected';
         updateData.rejectedAt = serverTimestamp();
         updateData.isActive = false;
@@ -558,36 +584,35 @@ const AdminDashboard = () => {
       
       await updateDoc(ambassadorRef, updateData);
       
-      // Also update the user's isActive status if rejected
-      if (interviewStatus === 'failed') {
-        const userRef = doc(db, 'users', selectedAmbassador.uid);
+      if (status === 'failed') {
+        const userRef = doc(db, 'users', ambassadorId);
         await updateDoc(userRef, {
           isActive: false,
           updatedAt: serverTimestamp(),
         });
       }
-
+    },
+    onSuccess: () => {
       toast({ 
         title: 'Success', 
         description: `Interview status updated to ${interviewStatus}.` 
       });
       setShowInterviewDialog(false);
       setInterviewNotes('');
-      fetchDashboardData();
-    } catch (error: any) {
-      console.error('Error updating interview status:', error);
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.dashboard] });
+    },
+    onError: (error: any) => {
       toast({ 
         title: 'Error', 
         description: error.message || 'Failed to update interview status.', 
         variant: 'destructive' 
       });
-    }
-  };
+    },
+  });
 
-  const handleApproveAmbassador = async (ambassadorId: string) => {
-    setApprovingAmbassadorId(ambassadorId);
-    try {
-      // Get user data for referral code generation
+  // Approve Ambassador Mutation
+  const approveAmbassadorMutation = useMutation({
+    mutationFn: async (ambassadorId: string) => {
       const userDocRef = doc(db, 'users', ambassadorId);
       const userDocSnap = await getDoc(userDocRef);
       const userData = userDocSnap.data();
@@ -614,27 +639,29 @@ const AdminDashboard = () => {
       
       await batch.commit();
       
-      setGeneratedReferralCode(referralCode);
+      return { referralCode };
+    },
+    onSuccess: (data) => {
+      setGeneratedReferralCode(data.referralCode);
       setShowReferralCodeDialog(true);
       toast({ 
         title: 'Success', 
         description: 'Ambassador approved and referral code generated.' 
       });
-      fetchDashboardData();
-    } catch (error: any) {
-      console.error('Error approving ambassador:', error);
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.dashboard] });
+    },
+    onError: (error: any) => {
       toast({ 
         title: 'Error', 
         description: error.message || 'Failed to approve ambassador.', 
         variant: 'destructive' 
       });
-    } finally {
-      setApprovingAmbassadorId(null);
-    }
-  };
+    },
+  });
 
-  const handleRejectAmbassador = async (ambassadorId: string, reason: string) => {
-    try {
+  // Reject Ambassador Mutation
+  const rejectAmbassadorMutation = useMutation({
+    mutationFn: async ({ ambassadorId, reason }: { ambassadorId: string; reason: string }) => {
       const batch = writeBatch(db);
       
       const ambassadorRef = doc(db, 'ambassadors', ambassadorId);
@@ -653,24 +680,26 @@ const AdminDashboard = () => {
       });
       
       await batch.commit();
-      
+    },
+    onSuccess: () => {
       toast({ 
         title: 'Success', 
         description: 'Ambassador application rejected.' 
       });
-      fetchDashboardData();
-    } catch (error: any) {
-      console.error('Error rejecting ambassador:', error);
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.dashboard] });
+    },
+    onError: (error: any) => {
       toast({ 
         title: 'Error', 
         description: error.message || 'Failed to reject ambassador.', 
         variant: 'destructive' 
       });
-    }
-  };
+    },
+  });
 
-  const handleDeactivateUser = async (userId: string) => {
-    try {
+  // Deactivate User Mutation
+  const deactivateUserMutation = useMutation({
+    mutationFn: async (userId: string) => {
       const userRef = doc(db, 'users', userId);
       const userDocSnap = await getDoc(userRef);
       
@@ -681,24 +710,23 @@ const AdminDashboard = () => {
           updatedAt: serverTimestamp(),
         });
       }
-      
-      toast({ 
-        title: 'Success', 
-        description: 'User status updated.' 
-      });
-      fetchDashboardData();
-    } catch (error: any) {
-      console.error('Error deactivating user:', error);
+    },
+    onSuccess: () => {
+      toast({ title: 'Success', description: 'User status updated.' });
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.dashboard] });
+    },
+    onError: (error: any) => {
       toast({ 
         title: 'Error', 
         description: error.message || 'Failed to update user.', 
         variant: 'destructive' 
       });
-    }
-  };
+    },
+  });
 
-  const handleDeleteInactivePatients = async () => {
-    try {
+  // Delete Inactive Patients Mutation
+  const deleteInactivePatientsMutation = useMutation({
+    mutationFn: async () => {
       const thresholdDate = new Date();
       thresholdDate.setDate(thresholdDate.getDate() - 365);
       
@@ -727,19 +755,110 @@ const AdminDashboard = () => {
         await batch.commit();
       }
       
+      return { deleteCount };
+    },
+    onSuccess: (data) => {
       toast({ 
         title: 'Cleanup Complete', 
-        description: `${deleteCount} inactive patient accounts deleted.` 
+        description: `${data.deleteCount} inactive patient accounts deleted.` 
       });
-      fetchDashboardData();
-    } catch (error: any) {
-      console.error('Error deleting inactive patients:', error);
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.dashboard] });
+    },
+    onError: (error: any) => {
       toast({ 
         title: 'Error', 
         description: error.message || 'Failed to delete inactive patients.', 
         variant: 'destructive' 
       });
+    },
+  });
+
+  // Update Admin Password Mutation
+  const updateAdminPasswordMutation = useMutation({
+    mutationFn: async ({ 
+      currentPassword, 
+      newPassword 
+    }: { 
+      currentPassword: string; 
+      newPassword: string; 
+    }) => {
+      await authService.updateAdminPassword(currentPassword, newPassword);
+    },
+    onSuccess: () => {
+      toast({ title: 'Success', description: 'Password updated successfully.' });
+      setShowProfileDialog(false);
+      setAdminProfileData(prev => ({
+        ...prev,
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: '',
+      }));
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: 'Error', 
+        description: error.message || 'Failed to update password.', 
+        variant: 'destructive' 
+      });
+    },
+  });
+
+  // ==================== HANDLER FUNCTIONS ====================
+  
+  useEffect(() => {
+    // Redirect if not admin
+    if (profile && profile.role !== 'admin') {
+      navigate('/dashboard');
+      return;
     }
+  }, [profile, navigate]);
+
+  const handleApproveDoctor = (doctorId: string) => {
+    approveDoctorMutation.mutate(doctorId);
+  };
+
+  const handleRejectDoctor = async () => {
+    if (!selectedDoctor || !rejectReason) return;
+    rejectDoctorMutation.mutate({ 
+      doctorId: selectedDoctor.uid || (selectedDoctor as any).id, 
+      reason: rejectReason 
+    });
+  };
+
+  const handleUpdateInterviewStatus = async () => {
+    if (!selectedAmbassador) return;
+    updateInterviewStatusMutation.mutate({
+      ambassadorId: selectedAmbassador.uid,
+      status: interviewStatus,
+      notes: interviewNotes,
+    });
+  };
+
+  const handleApproveAmbassador = (ambassadorId: string) => {
+    approveAmbassadorMutation.mutate(ambassadorId);
+  };
+
+  const handleRejectAmbassador = (ambassadorId: string, reason: string) => {
+    rejectAmbassadorMutation.mutate({ ambassadorId, reason });
+  };
+
+  const handleDeactivateUser = (userId: string) => {
+    deactivateUserMutation.mutate(userId);
+  };
+
+  const handleDeleteInactivePatients = () => {
+    deleteInactivePatientsMutation.mutate();
+  };
+
+  const handleUpdateAdminProfile = async () => {
+    if (adminProfileData.newPassword !== adminProfileData.confirmPassword) {
+      toast({ title: 'Password Mismatch', description: 'New passwords do not match.', variant: 'destructive' });
+      return;
+    }
+    updateAdminPasswordMutation.mutate({
+      currentPassword: adminProfileData.currentPassword,
+      newPassword: adminProfileData.newPassword,
+    });
   };
 
   const generateReferralCode = (firstName?: string, lastName?: string): string => {
@@ -760,26 +879,6 @@ const AdminDashboard = () => {
   const handleCopyReferralCode = () => {
     navigator.clipboard.writeText(generatedReferralCode);
     toast({ title: 'Copied!', description: 'Referral code copied to clipboard.' });
-  };
-
-  const handleUpdateAdminProfile = async () => {
-    if (adminProfileData.newPassword !== adminProfileData.confirmPassword) {
-      toast({ title: 'Password Mismatch', description: 'New passwords do not match.', variant: 'destructive' });
-      return;
-    }
-    try {
-      await authService.updateAdminPassword(adminProfileData.currentPassword, adminProfileData.newPassword);
-      toast({ title: 'Success', description: 'Password updated successfully.' });
-      setShowProfileDialog(false);
-      setAdminProfileData(prev => ({
-        ...prev,
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: '',
-      }));
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message || 'Failed to update password.', variant: 'destructive' });
-    }
   };
 
   const handleSignOut = async () => {
@@ -824,7 +923,7 @@ const AdminDashboard = () => {
     });
   };
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -832,13 +931,25 @@ const AdminDashboard = () => {
     );
   }
 
-  // Ambassadors ready for approval (passed interview)
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-4">
+        <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
+        <h2 className="text-xl font-semibold text-gray-900 mb-2">Failed to Load Dashboard</h2>
+        <p className="text-gray-600 mb-4 text-center max-w-md">{error.message}</p>
+        <Button onClick={() => refetch()}>
+          <RefreshCw className="w-4 h-4 mr-2" />
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  // Ambassadors ready for approval
   const readyForApproval = ambassadors.filter(a => a.interviewStatus === 'passed' && a.applicationStatus === 'pending');
-  
-  // Ambassadors pending interview review
   const pendingInterview = ambassadors.filter(a => a.onboardingStep === 4 && a.interviewStatus === 'pending');
 
-  // Stats cards data for mapping
+  // Stats cards data
   const statsCards = [
     { title: 'Total Users', value: stats.totalUsers, icon: Users, color: 'blue' },
     { title: 'Doctors', value: stats.totalDoctors, icon: Stethoscope, color: 'green' },
@@ -863,14 +974,20 @@ const AdminDashboard = () => {
     }
   };
 
+  // Show loading indicator when background refetching
+  const isRefreshing = isRefetching;
+
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Mobile Menu Button - Top Bar */}
+      {/* Mobile Menu Button */}
       <div className="fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 lg:hidden">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-blue-600" />
             <h1 className="text-lg font-semibold text-gray-900">Admin Dashboard</h1>
+            {isRefreshing && (
+              <Loader2 className="w-4 h-4 text-blue-600 animate-spin ml-2" />
+            )}
           </div>
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -880,7 +997,6 @@ const AdminDashboard = () => {
           </button>
         </div>
         
-        {/* Mobile Menu Dropdown */}
         {mobileMenuOpen && (
           <div className="border-t border-gray-200 bg-white py-2">
             <div className="px-4 py-2 border-b border-gray-100">
@@ -897,6 +1013,13 @@ const AdminDashboard = () => {
             >
               <UserCog className="w-4 h-4" />
               Profile
+            </button>
+            <button
+              onClick={() => refetch()}
+              className="w-full flex items-center gap-3 px-4 py-3 text-sm text-blue-600 hover:bg-blue-50"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Refresh Data
             </button>
             <button
               onClick={() => {
@@ -918,8 +1041,23 @@ const AdminDashboard = () => {
           <div className="flex items-center gap-3">
             <Shield className="w-6 h-6 text-blue-600" />
             <h1 className="text-xl font-semibold text-gray-900">Admin Dashboard</h1>
+            {isRefreshing && (
+              <Loader2 className="w-4 h-4 text-blue-600 animate-spin ml-2" />
+            )}
+            <Badge variant="outline" className="text-xs">
+              Auto-refresh every 30s
+            </Badge>
           </div>
           <div className="flex items-center gap-3">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => refetch()}
+              disabled={isRefreshing}
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
             <Badge className="bg-blue-100 text-blue-800">{profile?.email}</Badge>
             <Button variant="ghost" size="sm" onClick={() => setShowProfileDialog(true)}>
               <UserCog className="w-4 h-4 mr-2" />Profile
@@ -931,9 +1069,9 @@ const AdminDashboard = () => {
         </div>
       </div>
 
-      {/* Add padding-top for mobile to account for fixed header */}
+      {/* Main Content - Same as before, just using the data from useQuery */}
       <div className="pt-16 lg:pt-0">
-        {/* Stats Cards - Responsive Grid */}
+        {/* Stats Cards */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-3 md:gap-4">
             {statsCards.map((stat, index) => {
@@ -955,10 +1093,10 @@ const AdminDashboard = () => {
           </div>
         </div>
 
-        {/* Main Content Tabs - Responsive */}
+        {/* Tabs - Same structure, data from useQuery */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
           <Tabs defaultValue="doctors" className="space-y-6">
-            {/* Responsive Tabs List - Horizontal scroll on mobile */}
+            {/* Tabs List - Same as before */}
             <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
               <TabsList className="inline-flex w-auto min-w-full sm:min-w-0 sm:w-full max-w-5xl">
                 <TabsTrigger value="doctors" className="flex-1 text-xs sm:text-sm">Doctors</TabsTrigger>
@@ -970,6 +1108,7 @@ const AdminDashboard = () => {
               </TabsList>
             </div>
 
+            {/* All TabsContent sections remain the same, just use the data from useQuery */}
             {/* Doctors Tab */}
             <TabsContent value="doctors" className="space-y-6">
               {pendingDoctors.length > 0 && (
@@ -1029,10 +1168,25 @@ const AdminDashboard = () => {
                             </div>
                           </div>
                           <div className="flex flex-row sm:flex-col gap-2 ml-0 sm:ml-4">
-                            <Button size="sm" className="bg-green-600 hover:bg-green-700 text-sm" onClick={() => handleApproveDoctor(doctor.uid)}>
-                              <CheckCircle className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />Approve
+                            <Button 
+                              size="sm" 
+                              className="bg-green-600 hover:bg-green-700 text-sm" 
+                              onClick={() => handleApproveDoctor(doctor.uid)}
+                              disabled={approveDoctorMutation.isPending}
+                            >
+                              {approveDoctorMutation.isPending && approveDoctorMutation.variables === doctor.uid ? (
+                                <Loader2 className="w-3 h-3 sm:w-4 sm:h-4 mr-1 animate-spin" />
+                              ) : (
+                                <CheckCircle className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
+                              )}
+                              Approve
                             </Button>
-                            <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700 border-red-300 text-sm" onClick={() => { setSelectedDoctor(doctor); setShowRejectDialog(true); }}>
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="text-red-600 hover:text-red-700 border-red-300 text-sm" 
+                              onClick={() => { setSelectedDoctor(doctor); setShowRejectDialog(true); }}
+                            >
                               <XCircle className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />Reject
                             </Button>
                           </div>
@@ -1062,7 +1216,7 @@ const AdminDashboard = () => {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {/* Mobile Card View for Doctors */}
+                  {/* Mobile Card View */}
                   <div className="block lg:hidden space-y-3">
                     {doctors
                       .filter(d => d.verificationStatus === 'verified')
@@ -1190,14 +1344,24 @@ const AdminDashboard = () => {
                           className="pl-9 w-full sm:w-64 text-sm"
                         />
                       </div>
-                      <Button variant="outline" size="sm" onClick={handleDeleteInactivePatients}>
-                        <Trash2 className="w-4 h-4 mr-2" />Cleanup
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={handleDeleteInactivePatients}
+                        disabled={deleteInactivePatientsMutation.isPending}
+                      >
+                        {deleteInactivePatientsMutation.isPending ? (
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-4 h-4 mr-2" />
+                        )}
+                        Cleanup
                       </Button>
                     </div>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {/* Mobile Card View for Patients */}
+                  {/* Mobile Card View */}
                   <div className="block lg:hidden space-y-3">
                     {patients
                       .filter(p =>
@@ -1237,8 +1401,15 @@ const AdminDashboard = () => {
                               <Button variant="ghost" size="sm" onClick={() => { setSelectedPatient(patient); setShowPatientDetailsDialog(true); }}>
                                 <Eye className="w-4 h-4" />
                               </Button>
-                              <Button variant="ghost" size="sm" onClick={() => handleDeactivateUser(patient.uid)} disabled={!patient.isActive}>
-                                {patient.isActive ? 'Deactivate' : 'Activate'}
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                onClick={() => handleDeactivateUser(patient.uid)} 
+                                disabled={!patient.isActive || deactivateUserMutation.isPending}
+                              >
+                                {deactivateUserMutation.isPending && deactivateUserMutation.variables === patient.uid ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : patient.isActive ? 'Deactivate' : 'Activate'}
                               </Button>
                             </div>
                           </div>
@@ -1293,8 +1464,15 @@ const AdminDashboard = () => {
                                   <Button variant="ghost" size="sm" onClick={() => { setSelectedPatient(patient); setShowPatientDetailsDialog(true); }}>
                                     <Eye className="w-4 h-4" />
                                   </Button>
-                                  <Button variant="ghost" size="sm" onClick={() => handleDeactivateUser(patient.uid)} disabled={!patient.isActive}>
-                                    {patient.isActive ? 'Deactivate' : 'Activate'}
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    onClick={() => handleDeactivateUser(patient.uid)} 
+                                    disabled={!patient.isActive || deactivateUserMutation.isPending}
+                                  >
+                                    {deactivateUserMutation.isPending && deactivateUserMutation.variables === patient.uid ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : patient.isActive ? 'Deactivate' : 'Activate'}
                                   </Button>
                                 </div>
                               </td>
@@ -1309,7 +1487,6 @@ const AdminDashboard = () => {
 
             {/* Ambassadors Tab */}
             <TabsContent value="ambassadors" className="space-y-6">
-              {/* Ready for Approval Section */}
               {readyForApproval.length > 0 && (
                 <Card className="border-2 border-green-200">
                   <CardHeader className="bg-green-50 pb-3">
@@ -1360,9 +1537,9 @@ const AdminDashboard = () => {
                               size="sm"
                               className="bg-green-600 hover:bg-green-700 text-sm whitespace-nowrap"
                               onClick={() => handleApproveAmbassador(ambassador.uid)}
-                              disabled={approvingAmbassadorId === ambassador.uid}
+                              disabled={approveAmbassadorMutation.isPending && approveAmbassadorMutation.variables === ambassador.uid}
                             >
-                              {approvingAmbassadorId === ambassador.uid ? (
+                              {approveAmbassadorMutation.isPending && approveAmbassadorMutation.variables === ambassador.uid ? (
                                 <Loader2 className="w-3 h-3 sm:w-4 sm:h-4 mr-1 animate-spin" />
                               ) : (
                                 <CheckCircle className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
@@ -1377,6 +1554,7 @@ const AdminDashboard = () => {
                                 const reason = prompt('Enter rejection reason:');
                                 if (reason) handleRejectAmbassador(ambassador.uid, reason);
                               }}
+                              disabled={rejectAmbassadorMutation.isPending}
                             >
                               <XCircle className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />Reject
                             </Button>
@@ -1388,7 +1566,6 @@ const AdminDashboard = () => {
                 </Card>
               )}
 
-              {/* Pending Interview Section */}
               {pendingInterview.length > 0 && (
                 <Card className="border-2 border-blue-200">
                   <CardHeader className="bg-blue-50 pb-3">
@@ -1468,7 +1645,6 @@ const AdminDashboard = () => {
                 </Card>
               )}
 
-              {/* All Ambassadors Table */}
               <Card>
                 <CardHeader className="pb-3">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1488,7 +1664,7 @@ const AdminDashboard = () => {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {/* Mobile Card View for Ambassadors */}
+                  {/* Mobile Card View */}
                   <div className="block lg:hidden space-y-3">
                     {ambassadors
                       .filter(a =>
@@ -1698,7 +1874,7 @@ const AdminDashboard = () => {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {/* Mobile Card View for Users */}
+                  {/* Mobile Card View */}
                   <div className="block lg:hidden space-y-3">
                     {users
                       .filter(u =>
@@ -1724,8 +1900,15 @@ const AdminDashboard = () => {
                           </div>
                           <div className="flex justify-end mt-2">
                             {user.role !== 'admin' && (
-                              <Button variant="ghost" size="sm" onClick={() => handleDeactivateUser(user.uid)}>
-                                {user.isActive ? 'Deactivate' : 'Activate'}
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                onClick={() => handleDeactivateUser(user.uid)}
+                                disabled={deactivateUserMutation.isPending && deactivateUserMutation.variables === user.uid}
+                              >
+                                {deactivateUserMutation.isPending && deactivateUserMutation.variables === user.uid ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : user.isActive ? 'Deactivate' : 'Activate'}
                               </Button>
                             )}
                           </div>
@@ -1777,8 +1960,15 @@ const AdminDashboard = () => {
                               </td>
                               <td className="py-3 px-4">
                                 {user.role !== 'admin' && (
-                                  <Button variant="ghost" size="sm" onClick={() => handleDeactivateUser(user.uid)}>
-                                    {user.isActive ? 'Deactivate' : 'Activate'}
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    onClick={() => handleDeactivateUser(user.uid)}
+                                    disabled={deactivateUserMutation.isPending && deactivateUserMutation.variables === user.uid}
+                                  >
+                                    {deactivateUserMutation.isPending && deactivateUserMutation.variables === user.uid ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : user.isActive ? 'Deactivate' : 'Activate'}
                                   </Button>
                                 )}
                               </td>
@@ -1848,7 +2038,7 @@ const AdminDashboard = () => {
                     </div>
                   </div>
 
-                  {/* Mobile Card View for Referrals */}
+                  {/* Mobile Card View */}
                   <div className="block lg:hidden space-y-3">
                     {referrals
                       .filter(r =>
@@ -1993,8 +2183,19 @@ const AdminDashboard = () => {
                           <p className="text-xs sm:text-sm text-yellow-700 mt-1">
                             Patients who haven't logged in for 365 days will be automatically deleted from the database.
                           </p>
-                          <Button variant="outline" size="sm" className="mt-3" onClick={handleDeleteInactivePatients}>
-                            <Trash2 className="w-4 h-4 mr-2" />Run Cleanup Now
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="mt-3" 
+                            onClick={handleDeleteInactivePatients}
+                            disabled={deleteInactivePatientsMutation.isPending}
+                          >
+                            {deleteInactivePatientsMutation.isPending ? (
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4 mr-2" />
+                            )}
+                            Run Cleanup Now
                           </Button>
                         </div>
                       </div>
@@ -2007,7 +2208,7 @@ const AdminDashboard = () => {
         </div>
       </div>
 
-      {/* All Dialogs remain the same */}
+      {/* All Dialogs - Same as before, using the data and mutations */}
       {/* Patient Details Dialog */}
       <Dialog open={showPatientDetailsDialog} onOpenChange={setShowPatientDetailsDialog}>
         <DialogContent className="max-w-[95vw] sm:max-w-2xl max-h-[85vh] overflow-y-auto">
@@ -2208,8 +2409,13 @@ const AdminDashboard = () => {
                   setShowAmbassadorDetailsDialog(false);
                   handleApproveAmbassador(selectedAmbassador.uid);
                 }}
+                disabled={approveAmbassadorMutation.isPending}
               >
-                <CheckCircle className="w-4 h-4 mr-2" />
+                {approveAmbassadorMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                )}
                 Approve Ambassador
               </Button>
             )}
@@ -2258,7 +2464,17 @@ const AdminDashboard = () => {
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => setShowProfileDialog(false)}>Cancel</Button>
-            <Button onClick={handleUpdateAdminProfile}><Save className="w-4 h-4 mr-2" />Save Changes</Button>
+            <Button 
+              onClick={handleUpdateAdminProfile}
+              disabled={updateAdminPasswordMutation.isPending}
+            >
+              {updateAdminPasswordMutation.isPending ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4 mr-2" />
+              )}
+              Save Changes
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2278,7 +2494,15 @@ const AdminDashboard = () => {
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => setShowRejectDialog(false)}>Cancel</Button>
-            <Button className="bg-red-600 hover:bg-red-700" onClick={handleRejectDoctor} disabled={!rejectReason}>Confirm Rejection</Button>
+            <Button 
+              className="bg-red-600 hover:bg-red-700" 
+              onClick={handleRejectDoctor} 
+              disabled={!rejectReason || rejectDoctorMutation.isPending}
+            >
+              {rejectDoctorMutation.isPending ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : 'Confirm Rejection'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2341,14 +2565,17 @@ const AdminDashboard = () => {
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => setShowInterviewDialog(false)}>Cancel</Button>
             <Button 
-              onClick={handleUpdateInterviewStatus} 
+              onClick={handleUpdateInterviewStatus}
+              disabled={updateInterviewStatusMutation.isPending}
               className={
                 interviewStatus === 'passed' ? 'bg-green-600 hover:bg-green-700' :
                 interviewStatus === 'failed' ? 'bg-red-600 hover:bg-red-700' :
                 'bg-blue-600 hover:bg-blue-700'
               }
             >
-              Update Status
+              {updateInterviewStatusMutation.isPending ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : 'Update Status'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2388,5 +2615,8 @@ const AdminDashboard = () => {
     </div>
   );
 };
+
+// Make sure to import RefreshCw
+import { RefreshCw } from 'lucide-react';
 
 export default AdminDashboard;

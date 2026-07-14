@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { db } from '@/lib/firebase';
 import { doc, updateDoc, serverTimestamp, getDoc, getDocs, collection, query, where } from 'firebase/firestore';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,34 +29,26 @@ import {
   CheckCircle,
   AlertCircle,
   Award,
-  XCircle
+  XCircle,
+  RefreshCw
 } from 'lucide-react';
 
 interface DoctorEnrollmentData {
-  // Personal Information
   firstName: string;
   lastName: string;
   email: string;
   phone: string;
-  
-  // Practice Information
   practiceName: string;
   practiceAddress: string;
   practicePhone: string;
   practiceEmail: string;
-  
-  // Professional Information
   specialization: string;
   hpcsaNumber: string;
   qualifications: string[];
   experience: string;
   bio: string;
-  
-  // Consultation
   consultationFee: string;
   consultationDuration: string;
-  
-  // Operating Hours
   operatingHours: {
     monday: { isOpen: boolean; start: string; end: string };
     tuesday: { isOpen: boolean; start: string; end: string };
@@ -65,31 +58,59 @@ interface DoctorEnrollmentData {
     saturday: { isOpen: boolean; start: string; end: string };
     sunday: { isOpen: boolean; start: string; end: string };
   };
-  
-  // Documents
   idDocument: File | null;
   qualificationDocument: File | null;
   hpcsaDocument: File | null;
   profilePicture: File | null;
-  
-  // Referral
   referralCode: string;
-  
-  // Terms
   acceptTerms: boolean;
   acceptDataProcessing: boolean;
 }
+
+// ==================== QUERY KEYS ====================
+const QUERY_KEYS = {
+  validateReferral: 'validateReferral',
+};
+
+// ==================== DATA FETCHING FUNCTIONS ====================
+const validateReferralCode = async (code: string): Promise<{ valid: boolean; ambassadorName: string | null }> => {
+  if (!code || code.length < 4) {
+    return { valid: false, ambassadorName: null };
+  }
+
+  try {
+    const upperCode = code.toUpperCase().trim();
+    const ambassadorsQuery = query(
+      collection(db, 'ambassadors'),
+      where('referralCode', '==', upperCode),
+      where('applicationStatus', '==', 'approved')
+    );
+    const snapshot = await getDocs(ambassadorsQuery);
+    
+    if (!snapshot.empty) {
+      const ambassadorDoc = snapshot.docs[0];
+      const ambassadorData = ambassadorDoc.data();
+      const name = `${ambassadorData.firstName || ''} ${ambassadorData.lastName || ''}`.trim();
+      return { valid: true, ambassadorName: name || 'an ambassador' };
+    }
+    
+    return { valid: false, ambassadorName: null };
+  } catch (error) {
+    console.error('Error validating referral code:', error);
+    return { valid: false, ambassadorName: null };
+  }
+};
 
 const DoctorEnrollmentForm = () => {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
+  
   const [submitted, setSubmitted] = useState(false);
-  const [referralValid, setReferralValid] = useState<boolean | null>(null);
-  const [referralAmbassador, setReferralAmbassador] = useState<string | null>(null);
   const [referralCodeInput, setReferralCodeInput] = useState('');
+  const [debouncedReferralCode, setDebouncedReferralCode] = useState('');
   
   const referralCodeFromUrl = searchParams.get('ref') || '';
   
@@ -148,11 +169,158 @@ const DoctorEnrollmentForm = () => {
     'Other',
   ];
 
-  // Validate referral code from URL
+  // ==================== QUERY: Validate Referral Code ====================
+  const {
+    data: referralValidation,
+    isLoading: isValidatingReferral,
+    isError: referralError,
+    refetch: revalidateReferral,
+  } = useQuery({
+    queryKey: [QUERY_KEYS.validateReferral, debouncedReferralCode],
+    queryFn: () => validateReferralCode(debouncedReferralCode),
+    enabled: debouncedReferralCode.length >= 4,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
+    retry: 1,
+  });
+
+  // ==================== MUTATION: Submit Enrollment ====================
+  const submitEnrollmentMutation = useMutation({
+    mutationFn: async (data: DoctorEnrollmentData) => {
+      if (!user) throw new Error('You must be logged in to submit this application.');
+
+      // Prepare the data for Firestore
+      const doctorData: any = {
+        firstName: data.firstName,
+        lastName: data.lastName,
+        fullName: `${data.firstName} ${data.lastName}`.trim(),
+        email: data.email,
+        phone: data.phone || '',
+        practiceName: data.practiceName,
+        practiceAddress: data.practiceAddress,
+        practicePhone: data.practicePhone || '',
+        practiceEmail: data.practiceEmail || '',
+        specialization: data.specialization,
+        hpcsaNumber: data.hpcsaNumber,
+        qualifications: data.qualifications || [],
+        experience: data.experience || '',
+        bio: data.bio || '',
+        consultationFee: data.consultationFee ? parseFloat(data.consultationFee) : null,
+        consultationDuration: parseInt(data.consultationDuration) || 30,
+        operatingHours: data.operatingHours,
+        verificationStatus: 'pending',
+        enrollmentCompleted: true,
+        enrolledAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      // Add referral code if provided and valid
+      if (data.referralCode && referralValidation?.valid) {
+        doctorData.referralCodeUsed = data.referralCode.toUpperCase();
+      }
+
+      // Update the doctor document in Firestore
+      const doctorRef = doc(db, 'doctors', user.uid);
+      await updateDoc(doctorRef, doctorData);
+
+      // Also update the user profile
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, {
+        firstName: data.firstName,
+        lastName: data.lastName,
+        fullName: `${data.firstName} ${data.lastName}`.trim(),
+        phone: data.phone || '',
+        updatedAt: serverTimestamp(),
+        enrollmentCompleted: true,
+      });
+
+      // If referral code was provided and valid, create referral record
+      if (data.referralCode && referralValidation?.valid) {
+        // Find the ambassador with this referral code
+        const ambassadorsQuery = query(
+          collection(db, 'ambassadors'),
+          where('referralCode', '==', data.referralCode.toUpperCase()),
+          where('applicationStatus', '==', 'approved')
+        );
+        const ambassadorSnapshot = await getDocs(ambassadorsQuery);
+        
+        if (!ambassadorSnapshot.empty) {
+          const ambassadorDoc = ambassadorSnapshot.docs[0];
+          const ambassadorData = ambassadorDoc.data();
+          
+          // Create referral record
+          const referralRef = doc(db, 'referrals', `doctor_${user.uid}`);
+          const referralData = {
+            ambassadorId: ambassadorDoc.id,
+            ambassadorName: `${ambassadorData.firstName || ''} ${ambassadorData.lastName || ''}`.trim(),
+            referralCode: data.referralCode.toUpperCase(),
+            referredAt: serverTimestamp(),
+            doctorId: user.uid,
+            doctorName: `${data.firstName} ${data.lastName}`.trim(),
+            doctorEmail: data.email,
+            status: 'pending',
+            commissionEarned: 0,
+            commissionPaid: false,
+          };
+          
+          await updateDoc(referralRef, referralData);
+          
+          // Update ambassador's referral count
+          const ambassadorRef = doc(db, 'ambassadors', ambassadorDoc.id);
+          await updateDoc(ambassadorRef, {
+            totalReferredDoctors: (ambassadorData.totalReferredDoctors || 0) + 1,
+            updatedAt: serverTimestamp(),
+          });
+          
+          // Update doctor with referredBy
+          await updateDoc(doctorRef, {
+            referredBy: ambassadorDoc.id,
+          });
+          
+          return { referralLinked: true, ambassadorName: referralData.ambassadorName };
+        }
+      }
+      
+      return { referralLinked: false, ambassadorName: null };
+    },
+    onSuccess: (result) => {
+      let toastMessage = 'Your healthcare provider application has been submitted for review.';
+      
+      if (result.referralLinked) {
+        toastMessage = `Your application has been linked to ${result.ambassadorName}'s referral. ${toastMessage}`;
+      }
+      
+      toast({
+        title: 'Application Submitted! 🎉',
+        description: toastMessage,
+        duration: 8000,
+      });
+
+      setSubmitted(true);
+      
+      // Redirect after 3 seconds
+      setTimeout(() => {
+        navigate('/doctor/dashboard');
+      }, 3000);
+    },
+    onError: (error: any) => {
+      console.error('Enrollment error:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to submit application. Please try again.',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // ==================== EFFECTS ====================
+  
+  // Set referral code from URL
   useEffect(() => {
     if (referralCodeFromUrl) {
       setReferralCodeInput(referralCodeFromUrl);
-      validateReferralCode(referralCodeFromUrl);
+      setDebouncedReferralCode(referralCodeFromUrl);
+      setFormData(prev => ({ ...prev, referralCode: referralCodeFromUrl }));
     }
   }, [referralCodeFromUrl]);
 
@@ -169,59 +337,37 @@ const DoctorEnrollmentForm = () => {
     }
   }, [profile]);
 
-  const validateReferralCode = async (code: string) => {
-    if (!code || code.length < 4) {
-      setReferralValid(null);
-      setReferralAmbassador(null);
-      return;
-    }
-
-    try {
-      const upperCode = code.toUpperCase().trim();
-      const ambassadorsQuery = query(
-        collection(db, 'ambassadors'),
-        where('referralCode', '==', upperCode),
-        where('applicationStatus', '==', 'approved')
-      );
-      const snapshot = await getDocs(ambassadorsQuery);
-      
-      if (!snapshot.empty) {
-        const ambassadorDoc = snapshot.docs[0];
-        const ambassadorData = ambassadorDoc.data();
-        setReferralValid(true);
-        const name = `${ambassadorData.firstName || ''} ${ambassadorData.lastName || ''}`.trim();
-        setReferralAmbassador(name || 'an ambassador');
+  // Show toast when referral validation completes
+  useEffect(() => {
+    if (referralValidation && debouncedReferralCode.length >= 4) {
+      if (referralValidation.valid) {
         toast({
           title: 'Valid Referral Code ✅',
-          description: `You've been referred by ${name || 'an ambassador'}`,
+          description: `You've been referred by ${referralValidation.ambassadorName || 'an ambassador'}`,
         });
-        setFormData(prev => ({ ...prev, referralCode: upperCode }));
-      } else {
-        setReferralValid(false);
-        setReferralAmbassador(null);
+        setFormData(prev => ({ ...prev, referralCode: debouncedReferralCode }));
+      } else if (debouncedReferralCode.length >= 4) {
         toast({
           title: 'Invalid Referral Code',
           description: 'The referral code you entered is not valid.',
           variant: 'destructive',
         });
       }
-    } catch (error) {
-      console.error('Error validating referral code:', error);
-      setReferralValid(false);
     }
-  };
+  }, [referralValidation, debouncedReferralCode, toast]);
 
-  const handleReferralCodeChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ==================== HANDLER FUNCTIONS ====================
+  
+  const handleReferralCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const code = e.target.value.toUpperCase().trim();
     setReferralCodeInput(code);
     setFormData(prev => ({ ...prev, referralCode: code }));
     
-    if (code.length >= 4) {
-      await validateReferralCode(code);
-    } else {
-      setReferralValid(null);
-      setReferralAmbassador(null);
-    }
+    // Debounce the validation
+    clearTimeout((window as any).referralTimeout);
+    (window as any).referralTimeout = setTimeout(() => {
+      setDebouncedReferralCode(code);
+    }, 500);
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -289,11 +435,15 @@ const DoctorEnrollmentForm = () => {
     }
 
     // Validate referral code if provided
-    if (formData.referralCode) {
-      // If referral code was provided but not validated yet, validate it
-      if (referralValid === null) {
-        await validateReferralCode(formData.referralCode);
-        if (referralValid === false) {
+    if (formData.referralCode && formData.referralCode.length >= 4) {
+      if (!referralValidation?.valid) {
+        // If we haven't validated yet or it's invalid, trigger validation
+        if (debouncedReferralCode !== formData.referralCode) {
+          setDebouncedReferralCode(formData.referralCode);
+          await new Promise(resolve => setTimeout(resolve, 600)); // Wait for validation
+        }
+        
+        if (!referralValidation?.valid) {
           toast({ 
             title: 'Invalid Referral Code', 
             description: 'Please check the referral code and try again.', 
@@ -301,145 +451,15 @@ const DoctorEnrollmentForm = () => {
           });
           return;
         }
-      } else if (referralValid === false) {
-        toast({ 
-          title: 'Invalid Referral Code', 
-          description: 'Please check the referral code and try again.', 
-          variant: 'destructive' 
-        });
-        return;
       }
     }
 
-    try {
-      setLoading(true);
-
-      if (!user) {
-        toast({ title: 'Error', description: 'You must be logged in to submit this application.', variant: 'destructive' });
-        return;
-      }
-
-      // Prepare the data for Firestore
-      const doctorData: any = {
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        fullName: `${formData.firstName} ${formData.lastName}`.trim(),
-        email: formData.email,
-        phone: formData.phone || '',
-        practiceName: formData.practiceName,
-        practiceAddress: formData.practiceAddress,
-        practicePhone: formData.practicePhone || '',
-        practiceEmail: formData.practiceEmail || '',
-        specialization: formData.specialization,
-        hpcsaNumber: formData.hpcsaNumber,
-        qualifications: formData.qualifications || [],
-        experience: formData.experience || '',
-        bio: formData.bio || '',
-        consultationFee: formData.consultationFee ? parseFloat(formData.consultationFee) : null,
-        consultationDuration: parseInt(formData.consultationDuration) || 30,
-        operatingHours: formData.operatingHours,
-        verificationStatus: 'pending',
-        enrollmentCompleted: true,
-        enrolledAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-
-      // Add referral code if provided and valid
-      if (formData.referralCode && referralValid) {
-        doctorData.referralCodeUsed = formData.referralCode.toUpperCase();
-        // We'll add referredBy when we find the ambassador
-      }
-
-      // Update the doctor document in Firestore
-      const doctorRef = doc(db, 'doctors', user.uid);
-      await updateDoc(doctorRef, doctorData);
-
-      // Also update the user profile
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, {
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        fullName: `${formData.firstName} ${formData.lastName}`.trim(),
-        phone: formData.phone || '',
-        updatedAt: serverTimestamp(),
-        enrollmentCompleted: true,
-      });
-
-      // If referral code was provided, create referral record
-      if (formData.referralCode && referralValid) {
-        // Find the ambassador with this referral code
-        const ambassadorsQuery = query(
-          collection(db, 'ambassadors'),
-          where('referralCode', '==', formData.referralCode.toUpperCase()),
-          where('applicationStatus', '==', 'approved')
-        );
-        const ambassadorSnapshot = await getDocs(ambassadorsQuery);
-        
-        if (!ambassadorSnapshot.empty) {
-          const ambassadorDoc = ambassadorSnapshot.docs[0];
-          const ambassadorData = ambassadorDoc.data();
-          
-          // Create referral record
-          const referralRef = doc(db, 'referrals', `doctor_${user.uid}`);
-          const referralData = {
-            ambassadorId: ambassadorDoc.id,
-            ambassadorName: `${ambassadorData.firstName || ''} ${ambassadorData.lastName || ''}`.trim(),
-            referralCode: formData.referralCode.toUpperCase(),
-            referredAt: serverTimestamp(),
-            doctorId: user.uid,
-            doctorName: `${formData.firstName} ${formData.lastName}`.trim(),
-            doctorEmail: formData.email,
-            status: 'pending',
-            commissionEarned: 0,
-            commissionPaid: false,
-          };
-          
-          await updateDoc(referralRef, referralData);
-          
-          // Update ambassador's referral count
-          const ambassadorRef = doc(db, 'ambassadors', ambassadorDoc.id);
-          await updateDoc(ambassadorRef, {
-            totalReferredDoctors: (ambassadorData.totalReferredDoctors || 0) + 1,
-            updatedAt: serverTimestamp(),
-          });
-          
-          // Update doctor with referredBy
-          await updateDoc(doctorRef, {
-            referredBy: ambassadorDoc.id,
-          });
-          
-          toast({
-            title: 'Referral Linked!',
-            description: `Your application has been linked to ${referralData.ambassadorName}'s referral.`,
-          });
-        }
-      }
-
-      toast({
-        title: 'Application Submitted! 🎉',
-        description: 'Your healthcare provider application has been submitted for review. You will be notified once approved.',
-        duration: 8000,
-      });
-
-      setSubmitted(true);
-      
-      // Redirect after 3 seconds
-      setTimeout(() => {
-        navigate('/doctor/dashboard');
-      }, 3000);
-
-    } catch (error: any) {
-      console.error('Enrollment error:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to submit application. Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
+    // Submit the enrollment
+    submitEnrollmentMutation.mutate(formData);
   };
 
+  // ==================== RENDER ====================
+  
   if (submitted) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-blue-50 flex items-center justify-center px-4">
@@ -450,7 +470,7 @@ const DoctorEnrollmentForm = () => {
             <p className="text-gray-600 mb-4">
               Your healthcare provider application has been successfully submitted for review.
             </p>
-            {formData.referralCode && referralValid && (
+            {formData.referralCode && referralValidation?.valid && (
               <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
                 <Award className="w-5 h-5 text-purple-600 mx-auto mb-1" />
                 <p className="text-sm text-purple-800">
@@ -495,17 +515,17 @@ const DoctorEnrollmentForm = () => {
         </div>
 
         {/* Referral Banner */}
-        {referralCodeFromUrl && referralValid === true && (
+        {referralCodeFromUrl && referralValidation?.valid === true && (
           <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-6 text-center">
             <Award className="w-6 h-6 text-purple-600 mx-auto mb-1" />
             <p className="text-sm text-purple-800">
-              You were referred by <strong>{referralAmbassador || 'an ambassador'}</strong>!
+              You were referred by <strong>{referralValidation.ambassadorName || 'an ambassador'}</strong>!
               Welcome to the MedMap network. 🎉
             </p>
           </div>
         )}
 
-        {referralCodeFromUrl && referralValid === false && (
+        {referralCodeFromUrl && referralValidation?.valid === false && !isValidatingReferral && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 text-center">
             <AlertCircle className="w-6 h-6 text-red-600 mx-auto mb-1" />
             <p className="text-sm text-red-800">
@@ -541,7 +561,7 @@ const DoctorEnrollmentForm = () => {
                       value={formData.firstName}
                       onChange={handleChange}
                       placeholder="John"
-                      disabled={loading}
+                      disabled={submitEnrollmentMutation.isPending}
                       required
                     />
                   </div>
@@ -553,7 +573,7 @@ const DoctorEnrollmentForm = () => {
                       value={formData.lastName}
                       onChange={handleChange}
                       placeholder="Doe"
-                      disabled={loading}
+                      disabled={submitEnrollmentMutation.isPending}
                       required
                     />
                   </div>
@@ -581,7 +601,7 @@ const DoctorEnrollmentForm = () => {
                       value={formData.phone}
                       onChange={handleChange}
                       placeholder="+27 12 345 6789"
-                      disabled={loading}
+                      disabled={submitEnrollmentMutation.isPending}
                       required
                     />
                   </div>
@@ -600,7 +620,7 @@ const DoctorEnrollmentForm = () => {
                   <Select 
                     value={formData.specialization} 
                     onValueChange={(value) => handleSelectChange('specialization', value)}
-                    disabled={loading}
+                    disabled={submitEnrollmentMutation.isPending}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select your specialization" />
@@ -621,7 +641,7 @@ const DoctorEnrollmentForm = () => {
                     value={formData.hpcsaNumber}
                     onChange={handleChange}
                     placeholder="MP 0123456"
-                    disabled={loading}
+                    disabled={submitEnrollmentMutation.isPending}
                     required
                   />
                 </div>
@@ -634,7 +654,7 @@ const DoctorEnrollmentForm = () => {
                     value={formData.experience}
                     onChange={handleChange}
                     placeholder="e.g., 5 years in private practice"
-                    disabled={loading}
+                    disabled={submitEnrollmentMutation.isPending}
                   />
                 </div>
                 
@@ -647,7 +667,7 @@ const DoctorEnrollmentForm = () => {
                     onChange={handleChange}
                     placeholder="Tell patients about yourself, your approach to healthcare, and what makes you unique..."
                     rows={4}
-                    disabled={loading}
+                    disabled={submitEnrollmentMutation.isPending}
                   />
                 </div>
               </div>
@@ -667,7 +687,7 @@ const DoctorEnrollmentForm = () => {
                     value={formData.practiceName}
                     onChange={handleChange}
                     placeholder="e.g., Sandton Medical Centre"
-                    disabled={loading}
+                    disabled={submitEnrollmentMutation.isPending}
                     required
                   />
                 </div>
@@ -680,7 +700,7 @@ const DoctorEnrollmentForm = () => {
                     value={formData.practiceAddress}
                     onChange={handleChange}
                     placeholder="Street address, City, Province, Postal Code"
-                    disabled={loading}
+                    disabled={submitEnrollmentMutation.isPending}
                     required
                   />
                 </div>
@@ -695,7 +715,7 @@ const DoctorEnrollmentForm = () => {
                       value={formData.practicePhone}
                       onChange={handleChange}
                       placeholder="+27 12 345 6789"
-                      disabled={loading}
+                      disabled={submitEnrollmentMutation.isPending}
                     />
                   </div>
                   <div className="space-y-2">
@@ -707,7 +727,7 @@ const DoctorEnrollmentForm = () => {
                       value={formData.practiceEmail}
                       onChange={handleChange}
                       placeholder="practice@example.com"
-                      disabled={loading}
+                      disabled={submitEnrollmentMutation.isPending}
                     />
                   </div>
                 </div>
@@ -730,7 +750,7 @@ const DoctorEnrollmentForm = () => {
                       value={formData.consultationFee}
                       onChange={handleChange}
                       placeholder="500"
-                      disabled={loading}
+                      disabled={submitEnrollmentMutation.isPending}
                       required
                     />
                   </div>
@@ -739,7 +759,7 @@ const DoctorEnrollmentForm = () => {
                     <Select 
                       value={formData.consultationDuration} 
                       onValueChange={(value) => handleSelectChange('consultationDuration', value)}
-                      disabled={loading}
+                      disabled={submitEnrollmentMutation.isPending}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select duration" />
@@ -771,7 +791,7 @@ const DoctorEnrollmentForm = () => {
                         onCheckedChange={(checked) => 
                           handleOperatingHoursChange(day, 'isOpen', checked)
                         }
-                        disabled={loading}
+                        disabled={submitEnrollmentMutation.isPending}
                       />
                       <Label htmlFor={`${day}-open`} className="capitalize font-medium">
                         {day}
@@ -782,7 +802,7 @@ const DoctorEnrollmentForm = () => {
                         type="time"
                         value={formData.operatingHours[day as keyof typeof formData.operatingHours].start}
                         onChange={(e) => handleOperatingHoursChange(day, 'start', e.target.value)}
-                        disabled={!formData.operatingHours[day as keyof typeof formData.operatingHours].isOpen || loading}
+                        disabled={!formData.operatingHours[day as keyof typeof formData.operatingHours].isOpen || submitEnrollmentMutation.isPending}
                         className="w-28"
                       />
                       <span className="text-gray-500">to</span>
@@ -790,7 +810,7 @@ const DoctorEnrollmentForm = () => {
                         type="time"
                         value={formData.operatingHours[day as keyof typeof formData.operatingHours].end}
                         onChange={(e) => handleOperatingHoursChange(day, 'end', e.target.value)}
-                        disabled={!formData.operatingHours[day as keyof typeof formData.operatingHours].isOpen || loading}
+                        disabled={!formData.operatingHours[day as keyof typeof formData.operatingHours].isOpen || submitEnrollmentMutation.isPending}
                         className="w-28"
                       />
                     </div>
@@ -816,25 +836,46 @@ const DoctorEnrollmentForm = () => {
                       value={referralCodeInput}
                       onChange={handleReferralCodeChange}
                       placeholder="e.g., ABXY12"
-                      disabled={loading}
+                      disabled={submitEnrollmentMutation.isPending}
                       className="uppercase flex-1"
                     />
+                    {isValidatingReferral && debouncedReferralCode.length >= 4 && (
+                      <Button variant="outline" disabled>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      </Button>
+                    )}
+                    {debouncedReferralCode.length >= 4 && referralValidation && !isValidatingReferral && (
+                      <Button 
+                        variant="outline" 
+                        onClick={() => revalidateReferral()}
+                        disabled={submitEnrollmentMutation.isPending}
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                      </Button>
+                    )}
                   </div>
-                  {referralValid === true && (
-                    <p className="text-sm text-green-600 flex items-center gap-1">
-                      <CheckCircle className="w-4 h-4" />
-                      Valid referral code from {referralAmbassador || 'an ambassador'} ✅
+                  {isValidatingReferral && debouncedReferralCode.length >= 4 && (
+                    <p className="text-sm text-gray-500 flex items-center gap-1">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      Validating referral code...
                     </p>
                   )}
-                  {referralValid === false && (
+                  {referralValidation?.valid === true && debouncedReferralCode.length >= 4 && (
+                    <p className="text-sm text-green-600 flex items-center gap-1">
+                      <CheckCircle className="w-4 h-4" />
+                      Valid referral code from {referralValidation.ambassadorName || 'an ambassador'} ✅
+                    </p>
+                  )}
+                  {referralValidation?.valid === false && debouncedReferralCode.length >= 4 && !isValidatingReferral && (
                     <p className="text-sm text-red-600 flex items-center gap-1">
                       <XCircle className="w-4 h-4" />
                       Invalid referral code. Please check and try again.
                     </p>
                   )}
-                  {referralValid === null && referralCodeInput.length > 0 && (
-                    <p className="text-sm text-gray-500">
-                      Checking referral code...
+                  {referralError && debouncedReferralCode.length >= 4 && (
+                    <p className="text-sm text-red-600 flex items-center gap-1">
+                      <AlertCircle className="w-4 h-4" />
+                      Error validating referral code. Please try again.
                     </p>
                   )}
                 </div>
@@ -855,7 +896,7 @@ const DoctorEnrollmentForm = () => {
                       type="file"
                       accept=".pdf,.jpg,.jpeg,.png"
                       onChange={(e) => handleFileChange('idDocument', e.target.files?.[0] || null)}
-                      disabled={loading}
+                      disabled={submitEnrollmentMutation.isPending}
                     />
                     <p className="text-xs text-gray-500">PDF, JPG, or PNG (max 5MB)</p>
                   </div>
@@ -866,7 +907,7 @@ const DoctorEnrollmentForm = () => {
                       type="file"
                       accept=".pdf,.jpg,.jpeg,.png"
                       onChange={(e) => handleFileChange('qualificationDocument', e.target.files?.[0] || null)}
-                      disabled={loading}
+                      disabled={submitEnrollmentMutation.isPending}
                     />
                     <p className="text-xs text-gray-500">PDF, JPG, or PNG (max 5MB)</p>
                   </div>
@@ -877,7 +918,7 @@ const DoctorEnrollmentForm = () => {
                       type="file"
                       accept=".pdf,.jpg,.jpeg,.png"
                       onChange={(e) => handleFileChange('hpcsaDocument', e.target.files?.[0] || null)}
-                      disabled={loading}
+                      disabled={submitEnrollmentMutation.isPending}
                     />
                     <p className="text-xs text-gray-500">PDF, JPG, or PNG (max 5MB)</p>
                   </div>
@@ -888,7 +929,7 @@ const DoctorEnrollmentForm = () => {
                       type="file"
                       accept=".jpg,.jpeg,.png"
                       onChange={(e) => handleFileChange('profilePicture', e.target.files?.[0] || null)}
-                      disabled={loading}
+                      disabled={submitEnrollmentMutation.isPending}
                     />
                     <p className="text-xs text-gray-500">JPG or PNG (max 2MB)</p>
                   </div>
@@ -902,7 +943,7 @@ const DoctorEnrollmentForm = () => {
                     id="acceptTerms"
                     checked={formData.acceptTerms}
                     onCheckedChange={(checked) => handleCheckboxChange('acceptTerms', checked as boolean)}
-                    disabled={loading}
+                    disabled={submitEnrollmentMutation.isPending}
                     className="mt-1"
                   />
                   <Label htmlFor="acceptTerms" className="text-sm text-gray-600">
@@ -915,7 +956,7 @@ const DoctorEnrollmentForm = () => {
                     id="acceptDataProcessing"
                     checked={formData.acceptDataProcessing}
                     onCheckedChange={(checked) => handleCheckboxChange('acceptDataProcessing', checked as boolean)}
-                    disabled={loading}
+                    disabled={submitEnrollmentMutation.isPending}
                     className="mt-1"
                   />
                   <Label htmlFor="acceptDataProcessing" className="text-sm text-gray-600">
@@ -928,10 +969,10 @@ const DoctorEnrollmentForm = () => {
             <CardFooter className="flex flex-col space-y-3 px-4 sm:px-6 pb-6">
               <Button 
                 type="submit"
-                disabled={loading}
+                disabled={submitEnrollmentMutation.isPending}
                 className="w-full bg-blue-600 hover:bg-blue-700 text-white h-11 sm:h-12 text-sm sm:text-base"
               >
-                {loading ? (
+                {submitEnrollmentMutation.isPending ? (
                   <div className="flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
                     Submitting application...

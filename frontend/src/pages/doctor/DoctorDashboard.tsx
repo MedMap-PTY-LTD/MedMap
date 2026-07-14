@@ -21,7 +21,8 @@ import {
   Building2,
   Stethoscope,
   Save,
-  X
+  X,
+  RefreshCw
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
@@ -32,6 +33,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   BarChart,
   Bar,
@@ -75,319 +77,269 @@ interface DoctorProfile {
   rejectionReason?: string;
 }
 
+interface BookingData {
+  id: string;
+  patientId: string;
+  patientName: string;
+  appointmentDate: string;
+  appointmentTime: string;
+  status: string;
+  notes: string;
+  consultationFee: number;
+  createdAt: any;
+}
+
+// ==================== QUERY KEYS ====================
+const QUERY_KEYS = {
+  doctorProfile: 'doctorProfile',
+  doctorBookings: 'doctorBookings',
+  doctorStats: 'doctorStats',
+};
+
+// ==================== DATA FETCHING FUNCTIONS ====================
+const fetchDoctorProfile = async (uid: string): Promise<DoctorProfile | null> => {
+  if (!uid) return null;
+
+  try {
+    const doctorRef = doc(db, 'doctors', uid);
+    const doctorSnap = await getDoc(doctorRef);
+    
+    if (!doctorSnap.exists()) {
+      return null;
+    }
+
+    const doctorData = doctorSnap.data();
+    
+    // Get user data
+    const userRef = doc(db, 'users', uid);
+    const userSnap = await getDoc(userRef);
+    const userData = userSnap.exists() ? userSnap.data() : {};
+    
+    return {
+      uid: uid,
+      firstName: userData.firstName || doctorData.firstName || '',
+      lastName: userData.lastName || doctorData.lastName || '',
+      fullName: userData.fullName || doctorData.fullName || '',
+      email: userData.email || doctorData.email || '',
+      phone: userData.phone || doctorData.phone || '',
+      practiceName: doctorData.practiceName || '',
+      practiceAddress: doctorData.practiceAddress || '',
+      practicePhone: doctorData.practicePhone || '',
+      practiceEmail: doctorData.practiceEmail || '',
+      specialization: doctorData.specialization || '',
+      hpcsaNumber: doctorData.hpcsaNumber || '',
+      qualifications: doctorData.qualifications || [],
+      experience: doctorData.experience || '',
+      bio: doctorData.bio || '',
+      consultationFee: doctorData.consultationFee || 0,
+      consultationDuration: doctorData.consultationDuration || 30,
+      operatingHours: doctorData.operatingHours || {},
+      verificationStatus: doctorData.verificationStatus || 'pending',
+      enrollmentCompleted: doctorData.enrollmentCompleted || false,
+      rating: doctorData.rating || 0,
+      reviewCount: doctorData.reviewCount || 0,
+      profileImage: doctorData.profileImage || userData.photoURL || '',
+      createdAt: doctorData.createdAt || userData.createdAt,
+      updatedAt: doctorData.updatedAt || userData.updatedAt,
+      rejectionReason: doctorData.rejectionReason || '',
+    };
+  } catch (error) {
+    console.error('Error fetching doctor profile:', error);
+    throw error;
+  }
+};
+
+const fetchDoctorBookings = async (doctorId: string): Promise<BookingData[]> => {
+  if (!doctorId) return [];
+
+  try {
+    const bookingsRef = collection(db, 'bookings');
+    const q = query(
+      bookingsRef,
+      where('doctorId', '==', doctorId),
+      orderBy('appointmentDate', 'desc'),
+      limit(50)
+    );
+    const bookingsSnap = await getDocs(q);
+    
+    const bookings: BookingData[] = [];
+    
+    for (const docSnap of bookingsSnap.docs) {
+      const data = docSnap.data();
+      
+      // Get patient info
+      let patientName = 'Unknown Patient';
+      
+      if (data.patientId) {
+        try {
+          const patientRef = doc(db, 'users', data.patientId);
+          const patientSnap = await getDoc(patientRef);
+          if (patientSnap.exists()) {
+            const patientData = patientSnap.data();
+            patientName = patientData.fullName || `${patientData.firstName || ''} ${patientData.lastName || ''}`.trim() || 'Unknown Patient';
+          }
+        } catch (e) {
+          // Ignore patient fetch errors
+        }
+      }
+      
+      bookings.push({
+        id: docSnap.id,
+        patientId: data.patientId || '',
+        patientName,
+        appointmentDate: data.appointmentDate || '',
+        appointmentTime: data.appointmentTime || '',
+        status: data.status || 'pending',
+        notes: data.notes || '',
+        consultationFee: data.consultationFee || 0,
+        createdAt: data.createdAt,
+      });
+    }
+    
+    return bookings;
+  } catch (error) {
+    console.log('No bookings found or bookings collection not yet created');
+    return [];
+  }
+};
+
+// ==================== DOCTOR DASHBOARD COMPONENT ====================
 const DoctorDashboard = () => {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   
-  const [doctor, setDoctor] = useState<DoctorProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [pendingBookings, setPendingBookings] = useState<any[]>([]);
-  const [upcomingBookings, setUpcomingBookings] = useState<any[]>([]);
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<any>({});
-  const [stats, setStats] = useState({
-    totalBookings: 0,
-    pendingBookings: 0,
-    completedBookings: 0,
-    monthlyRevenue: 0,
-    rating: 0,
-    totalPatients: 0,
-  });
-  const [analyticsData, setAnalyticsData] = useState({
-    bookingStatus: [] as any[],
-    revenueTrend: [] as any[],
+
+  // ==================== QUERIES ====================
+  
+  // Doctor Profile Query
+  const {
+    data: doctor,
+    isLoading: isLoadingProfile,
+    error: profileError,
+    refetch: refetchProfile,
+    isRefetching: isRefetchingProfile,
+  } = useQuery({
+    queryKey: [QUERY_KEYS.doctorProfile, user?.uid],
+    queryFn: () => fetchDoctorProfile(user!.uid),
+    enabled: !!user && profile?.role === 'doctor',
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    retry: 2,
   });
 
-  useEffect(() => {
-    if (profile?.role === 'doctor') {
-      fetchDoctorData();
-    } else if (profile && profile.role !== 'doctor') {
-      navigate('/dashboard');
-    }
-  }, [user, profile]);
+  // Doctor Bookings Query
+  const {
+    data: bookings = [],
+    isLoading: isLoadingBookings,
+    refetch: refetchBookings,
+  } = useQuery({
+    queryKey: [QUERY_KEYS.doctorBookings, doctor?.uid],
+    queryFn: () => fetchDoctorBookings(doctor!.uid),
+    enabled: !!doctor && doctor.enrollmentCompleted,
+    staleTime: 2 * 60 * 1000, // 2 minutes
+    gcTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    refetchInterval: 30 * 1000, // Auto-refresh every 30 seconds
+  });
 
-  const fetchDoctorData = async () => {
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-    
-    setLoading(true);
-    try {
-      // Get doctor profile
-      const doctorRef = doc(db, 'doctors', user.uid);
-      const doctorSnap = await getDoc(doctorRef);
-      
-      if (doctorSnap.exists()) {
-        const doctorData = doctorSnap.data();
-        
-        // Get user data
-        const userRef = doc(db, 'users', user.uid);
-        const userSnap = await getDoc(userRef);
-        const userData = userSnap.exists() ? userSnap.data() : {};
-        
-        const combinedDoctor: DoctorProfile = {
-          uid: user.uid,
-          firstName: userData.firstName || doctorData.firstName || '',
-          lastName: userData.lastName || doctorData.lastName || '',
-          fullName: userData.fullName || doctorData.fullName || '',
-          email: userData.email || doctorData.email || '',
-          phone: userData.phone || doctorData.phone || '',
-          practiceName: doctorData.practiceName || '',
-          practiceAddress: doctorData.practiceAddress || '',
-          practicePhone: doctorData.practicePhone || '',
-          practiceEmail: doctorData.practiceEmail || '',
-          specialization: doctorData.specialization || '',
-          hpcsaNumber: doctorData.hpcsaNumber || '',
-          qualifications: doctorData.qualifications || [],
-          experience: doctorData.experience || '',
-          bio: doctorData.bio || '',
-          consultationFee: doctorData.consultationFee || 0,
-          consultationDuration: doctorData.consultationDuration || 30,
-          operatingHours: doctorData.operatingHours || {},
-          verificationStatus: doctorData.verificationStatus || 'pending',
-          enrollmentCompleted: doctorData.enrollmentCompleted || false,
-          rating: doctorData.rating || 0,
-          reviewCount: doctorData.reviewCount || 0,
-          profileImage: doctorData.profileImage || userData.photoURL || '',
-          createdAt: doctorData.createdAt || userData.createdAt,
-          updatedAt: doctorData.updatedAt || userData.updatedAt,
-          rejectionReason: doctorData.rejectionReason || '',
-        };
-        
-        setDoctor(combinedDoctor);
-        setEditForm(combinedDoctor);
-        
-        // If enrollment is not completed, redirect to enrollment form
-        if (!combinedDoctor.enrollmentCompleted) {
-          navigate('/doctor-enrollment');
-          setLoading(false);
-          return;
-        }
-        
-        // Fetch bookings (with error handling)
-        await fetchBookings(combinedDoctor.uid);
-        
-      } else {
-        // No doctor profile exists - redirect to enrollment
-        toast({
-          title: 'Profile Incomplete',
-          description: 'Please complete your doctor profile first.',
-        });
-        navigate('/doctor-enrollment');
-      }
-    } catch (error: any) {
-      console.error('Error fetching doctor data:', error);
-      // Don't show error toast for missing collections, just log it
-      if (!error.message?.includes('collection')) {
-        toast({
-          title: 'Error',
-          description: 'Failed to load doctor profile. Please try again.',
-          variant: 'destructive',
-        });
-      }
-    } finally {
-      setLoading(false);
-    }
+  // ==================== DERIVED DATA ====================
+  const pendingBookings = bookings.filter(b => b.status === 'pending');
+  const upcomingBookings = bookings.filter(b => 
+    b.appointmentDate >= new Date().toISOString().split('T')[0] && 
+    b.status !== 'cancelled' &&
+    b.status !== 'completed'
+  );
+
+  const stats = {
+    totalBookings: bookings.length,
+    pendingBookings: pendingBookings.length,
+    completedBookings: bookings.filter(b => b.status === 'completed').length,
+    monthlyRevenue: bookings
+      .filter(b => b.status === 'completed')
+      .reduce((sum, b) => sum + (b.consultationFee || 0), 0),
+    rating: doctor?.rating || 0,
+    totalPatients: new Set(bookings.map(b => b.patientId)).size,
   };
 
-  const fetchBookings = async (doctorId: string) => {
-    try {
-      // Try to get bookings - if collection doesn't exist, just use empty array
-      const bookingsRef = collection(db, 'bookings');
-      const q = query(
-        bookingsRef,
-        where('doctorId', '==', doctorId),
-        orderBy('appointmentDate', 'desc'),
-        limit(50)
-      );
-      const bookingsSnap = await getDocs(q);
-      
-      const bookings: any[] = [];
-      let totalRevenue = 0;
-      let completedCount = 0;
-      let pendingCount = 0;
-      
-      for (const docSnap of bookingsSnap.docs) {
-        const data = docSnap.data();
-        
-        // Get patient info
-        let patientName = 'Unknown Patient';
-        
-        if (data.patientId) {
-          try {
-            const patientRef = doc(db, 'users', data.patientId);
-            const patientSnap = await getDoc(patientRef);
-            if (patientSnap.exists()) {
-              const patientData = patientSnap.data();
-              patientName = patientData.fullName || `${patientData.firstName || ''} ${patientData.lastName || ''}`.trim() || 'Unknown Patient';
-            }
-          } catch (e) {
-            // Ignore patient fetch errors
-          }
-        }
-        
-        const booking = {
-          id: docSnap.id,
-          patientId: data.patientId || '',
-          patientName,
-          appointmentDate: data.appointmentDate || '',
-          appointmentTime: data.appointmentTime || '',
-          status: data.status || 'pending',
-          notes: data.notes || '',
-          consultationFee: data.consultationFee || doctor?.consultationFee || 0,
-          createdAt: data.createdAt,
-        };
-        
-        bookings.push(booking);
-        
-        if (booking.status === 'completed') {
-          totalRevenue += booking.consultationFee;
-          completedCount++;
-        }
-        if (booking.status === 'pending') {
-          pendingCount++;
-        }
-      }
-      
-      setPendingBookings(bookings.filter(b => b.status === 'pending'));
-      
-      // Upcoming bookings (today and future)
-      const today = new Date().toISOString().split('T')[0];
-      const upcoming = bookings.filter(b => 
-        b.appointmentDate >= today && 
-        b.status !== 'cancelled' &&
-        b.status !== 'completed'
-      );
-      setUpcomingBookings(upcoming);
-      
-      // Calculate stats
-      const uniquePatients = new Set(bookings.map(b => b.patientId)).size;
-      
-      setStats({
-        totalBookings: bookings.length,
-        pendingBookings: pendingCount,
-        completedBookings: completedCount,
-        monthlyRevenue: totalRevenue,
-        rating: doctor?.rating || 0,
-        totalPatients: uniquePatients,
-      });
-      
-      // Prepare analytics data
-      const statusCounts = bookings.reduce((acc: any, curr) => {
-        acc[curr.status] = (acc[curr.status] || 0) + 1;
-        return acc;
-      }, {});
-      
-      const COLORS: Record<string, string> = {
-        pending: '#F59E0B',
-        confirmed: '#10B981',
-        completed: '#3B82F6',
-        cancelled: '#EF4444'
-      };
-      
-      const bookingStatusData = Object.keys(statusCounts).map(status => ({
-        name: status.charAt(0).toUpperCase() + status.slice(1),
-        value: statusCounts[status],
-        color: COLORS[status] || '#888888'
-      }));
-      
-      setAnalyticsData({
-        bookingStatus: bookingStatusData,
-        revenueTrend: [],
-      });
-      
-    } catch (error: any) {
-      // If collection doesn't exist, just use empty data
-      console.log('No bookings found or bookings collection not yet created');
-      setPendingBookings([]);
-      setUpcomingBookings([]);
-      setStats({
-        totalBookings: 0,
-        pendingBookings: 0,
-        completedBookings: 0,
-        monthlyRevenue: 0,
-        rating: doctor?.rating || 0,
-        totalPatients: 0,
-      });
-      setAnalyticsData({
-        bookingStatus: [],
-        revenueTrend: [],
-      });
-    }
+  // Analytics Data
+  const statusCounts = bookings.reduce((acc: any, curr) => {
+    acc[curr.status] = (acc[curr.status] || 0) + 1;
+    return acc;
+  }, {});
+
+  const COLORS: Record<string, string> = {
+    pending: '#F59E0B',
+    confirmed: '#10B981',
+    completed: '#3B82F6',
+    cancelled: '#EF4444'
   };
 
-  const handleApproveBooking = async (bookingId: string) => {
-    try {
+  const bookingStatusData = Object.keys(statusCounts).map(status => ({
+    name: status.charAt(0).toUpperCase() + status.slice(1),
+    value: statusCounts[status],
+    color: COLORS[status] || '#888888'
+  }));
+
+  // ==================== MUTATIONS ====================
+  
+  // Update Booking Status Mutation
+  const updateBookingStatusMutation = useMutation({
+    mutationFn: async ({ bookingId, status }: { bookingId: string; status: string }) => {
       const bookingRef = doc(db, 'bookings', bookingId);
       await updateDoc(bookingRef, {
-        status: 'confirmed',
+        status: status,
         updatedAt: serverTimestamp(),
       });
-      
+    },
+    onSuccess: (_, variables) => {
       toast({
-        title: 'Booking Approved',
-        description: 'The appointment has been confirmed.',
+        title: variables.status === 'confirmed' ? 'Booking Approved' : 'Booking Rejected',
+        description: variables.status === 'confirmed' 
+          ? 'The appointment has been confirmed.' 
+          : 'The appointment has been cancelled.',
       });
-      
-      await fetchBookings(doctor!.uid);
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to approve booking.',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const handleRejectBooking = async (bookingId: string) => {
-    try {
-      const bookingRef = doc(db, 'bookings', bookingId);
-      await updateDoc(bookingRef, {
-        status: 'cancelled',
-        updatedAt: serverTimestamp(),
-      });
-      
-      toast({
-        title: 'Booking Rejected',
-        description: 'The appointment has been cancelled.',
-      });
-      
-      await fetchBookings(doctor!.uid);
-    } catch (error: any) {
+      // Invalidate and refetch bookings
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.doctorBookings] });
+    },
+    onError: (error: any) => {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to reject booking.',
+        description: error.message || 'Failed to update booking status.',
         variant: 'destructive',
       });
-    }
-  };
+    },
+  });
 
-  const handleEditProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) return;
-    
-    setEditing(true);
-    try {
+  // Update Doctor Profile Mutation
+  const updateDoctorProfileMutation = useMutation({
+    mutationFn: async (formData: any) => {
+      if (!user) throw new Error('User not authenticated');
+
       const doctorRef = doc(db, 'doctors', user.uid);
       const userRef = doc(db, 'users', user.uid);
       
       // Update doctor profile
       const doctorUpdateData = {
-        practiceName: editForm.practiceName,
-        practiceAddress: editForm.practiceAddress,
-        practicePhone: editForm.practicePhone,
-        practiceEmail: editForm.practiceEmail,
-        specialization: editForm.specialization,
-        hpcsaNumber: editForm.hpcsaNumber,
-        qualifications: editForm.qualifications || [],
-        experience: editForm.experience,
-        bio: editForm.bio,
-        consultationFee: parseFloat(editForm.consultationFee) || 0,
-        consultationDuration: parseInt(editForm.consultationDuration) || 30,
-        operatingHours: editForm.operatingHours,
+        practiceName: formData.practiceName,
+        practiceAddress: formData.practiceAddress,
+        practicePhone: formData.practicePhone,
+        practiceEmail: formData.practiceEmail,
+        specialization: formData.specialization,
+        hpcsaNumber: formData.hpcsaNumber,
+        qualifications: formData.qualifications || [],
+        experience: formData.experience,
+        bio: formData.bio,
+        consultationFee: parseFloat(formData.consultationFee) || 0,
+        consultationDuration: parseInt(formData.consultationDuration) || 30,
+        operatingHours: formData.operatingHours,
         updatedAt: serverTimestamp(),
       };
       
@@ -395,29 +347,47 @@ const DoctorDashboard = () => {
       
       // Update user profile
       await updateDoc(userRef, {
-        firstName: editForm.firstName,
-        lastName: editForm.lastName,
-        phone: editForm.phone,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        phone: formData.phone,
         updatedAt: serverTimestamp(),
       });
-      
+    },
+    onSuccess: () => {
       toast({
         title: 'Profile Updated',
         description: 'Your profile has been updated successfully.',
       });
-      
       setEditOpen(false);
-      await fetchDoctorData();
-      
-    } catch (error: any) {
+      // Invalidate and refetch profile
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.doctorProfile] });
+    },
+    onError: (error: any) => {
       toast({
         title: 'Error',
         description: error.message || 'Failed to update profile.',
         variant: 'destructive',
       });
-    } finally {
+    },
+    onSettled: () => {
       setEditing(false);
-    }
+    },
+  });
+
+  // ==================== HANDLER FUNCTIONS ====================
+  
+  const handleApproveBooking = (bookingId: string) => {
+    updateBookingStatusMutation.mutate({ bookingId, status: 'confirmed' });
+  };
+
+  const handleRejectBooking = (bookingId: string) => {
+    updateBookingStatusMutation.mutate({ bookingId, status: 'cancelled' });
+  };
+
+  const handleEditProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditing(true);
+    updateDoctorProfileMutation.mutate(editForm);
   };
 
   const formatCurrency = (amount: number) => {
@@ -451,8 +421,28 @@ const DoctorDashboard = () => {
     return variants[status] || 'bg-gray-100 text-gray-800';
   };
 
-  // Loading state
-  if (loading) {
+  // ==================== REDIRECTS ====================
+  useEffect(() => {
+    if (profile && profile.role !== 'doctor') {
+      navigate('/dashboard');
+      return;
+    }
+    
+    // If doctor profile exists but enrollment is not completed, redirect to enrollment
+    if (doctor && !doctor.enrollmentCompleted) {
+      navigate('/doctor-enrollment');
+    }
+  }, [profile, doctor, navigate]);
+
+  // Set edit form when doctor data loads
+  useEffect(() => {
+    if (doctor) {
+      setEditForm(doctor);
+    }
+  }, [doctor]);
+
+  // ==================== LOADING STATE ====================
+  if (isLoadingProfile) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
@@ -463,7 +453,26 @@ const DoctorDashboard = () => {
     );
   }
 
-  // No doctor profile
+  // ==================== ERROR STATE ====================
+  if (profileError) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <Card className="max-w-md w-full">
+          <CardContent className="pt-6 text-center">
+            <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Failed to Load Profile</h2>
+            <p className="text-gray-600 mb-4">{profileError.message}</p>
+            <Button onClick={() => refetchProfile()} className="w-full">
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // ==================== NO DOCTOR PROFILE ====================
   if (!doctor) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
@@ -481,7 +490,7 @@ const DoctorDashboard = () => {
     );
   }
 
-  // Verification status banner
+  // ==================== RENDER VERIFICATION BANNER ====================
   const renderVerificationBanner = () => {
     if (doctor.verificationStatus === 'verified') {
       return (
@@ -556,6 +565,7 @@ const DoctorDashboard = () => {
     }
   };
 
+  // ==================== MAIN RENDER ====================
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -570,6 +580,15 @@ const DoctorDashboard = () => {
             </p>
           </div>
           <div className="flex gap-2 mt-4 md:mt-0">
+            <Button 
+              variant="outline" 
+              onClick={() => refetchProfile()}
+              disabled={isRefetchingProfile || isLoadingBookings}
+              className="flex items-center gap-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefetchingProfile ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
             <Button 
               variant="outline" 
               onClick={() => setEditOpen(true)}
@@ -637,6 +656,14 @@ const DoctorDashboard = () => {
           </Card>
         </div>
 
+        {/* Loading indicator for background refetching */}
+        {isLoadingBookings && (
+          <div className="mt-2 flex items-center gap-2 text-sm text-gray-500">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Updating appointments...
+          </div>
+        )}
+
         {/* Main Content */}
         <div className="mt-8">
           <Tabs defaultValue="appointments" className="space-y-6">
@@ -668,7 +695,12 @@ const DoctorDashboard = () => {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {pendingBookings.length === 0 ? (
+                    {updateBookingStatusMutation.isPending ? (
+                      <div className="text-center py-8 text-gray-500">
+                        <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin" />
+                        <p>Updating booking...</p>
+                      </div>
+                    ) : pendingBookings.length === 0 ? (
                       <div className="text-center py-8 text-gray-500">
                         <Clock className="w-12 h-12 mx-auto mb-4 opacity-50" />
                         <p>No pending appointments</p>
@@ -692,6 +724,7 @@ const DoctorDashboard = () => {
                                   size="sm" 
                                   className="bg-green-600 hover:bg-green-700"
                                   onClick={() => handleApproveBooking(booking.id)}
+                                  disabled={updateBookingStatusMutation.isPending}
                                 >
                                   <CheckCircle className="w-3 h-3 mr-1" />
                                   Approve
@@ -701,6 +734,7 @@ const DoctorDashboard = () => {
                                   variant="outline" 
                                   className="text-red-600 border-red-200 hover:bg-red-50"
                                   onClick={() => handleRejectBooking(booking.id)}
+                                  disabled={updateBookingStatusMutation.isPending}
                                 >
                                   <X className="w-3 h-3 mr-1" />
                                   Decline
@@ -759,14 +793,25 @@ const DoctorDashboard = () => {
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between">
                     <span>Practice Profile</span>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => setEditOpen(true)}
-                    >
-                      <Edit className="w-4 h-4 mr-2" />
-                      Edit Profile
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => refetchProfile()}
+                        disabled={isRefetchingProfile}
+                      >
+                        <RefreshCw className={`w-4 h-4 mr-2 ${isRefetchingProfile ? 'animate-spin' : ''}`} />
+                        Refresh
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => setEditOpen(true)}
+                      >
+                        <Edit className="w-4 h-4 mr-2" />
+                        Edit Profile
+                      </Button>
+                    </div>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -851,11 +896,11 @@ const DoctorDashboard = () => {
                     <CardTitle>Booking Status</CardTitle>
                   </CardHeader>
                   <CardContent className="h-[300px]">
-                    {analyticsData.bookingStatus.length > 0 ? (
+                    {bookingStatusData.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                           <Pie
-                            data={analyticsData.bookingStatus}
+                            data={bookingStatusData}
                             cx="50%"
                             cy="50%"
                             innerRadius={60}
@@ -863,7 +908,7 @@ const DoctorDashboard = () => {
                             paddingAngle={5}
                             dataKey="value"
                           >
-                            {analyticsData.bookingStatus.map((entry, index) => (
+                            {bookingStatusData.map((entry, index) => (
                               <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
                           </Pie>
@@ -916,7 +961,7 @@ const DoctorDashboard = () => {
         </div>
       </div>
 
-      {/* Edit Profile Dialog */}
+      {/* Edit Profile Dialog - Same as before but using mutations */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -1089,8 +1134,8 @@ const DoctorDashboard = () => {
               <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={editing} className="bg-blue-600 hover:bg-blue-700">
-                {editing ? (
+              <Button type="submit" disabled={editing || updateDoctorProfileMutation.isPending} className="bg-blue-600 hover:bg-blue-700">
+                {(editing || updateDoctorProfileMutation.isPending) ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     Saving...
