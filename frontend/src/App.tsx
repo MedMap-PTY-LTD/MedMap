@@ -37,7 +37,7 @@ const Careers = lazy(() => import("./pages/Careers"));
 const Contact = lazy(() => import("./pages/Contact"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const BookingHistory = lazy(() => import("./pages/BookingHistory"));
-const PatientDashboard = lazy(() => import("./pages/PatientDashboard"));
+const PatientDashboard = lazy(() => import("./pages/patient/PatientDashboard"));
 const EmailVerification = lazy(() => import("./pages/EmailVerification"));
 const Profile = lazy(() => import("./pages/Profile"));
 const CreateAdminAccount = lazy(() => import("./pages/CreateAdminAccount"));
