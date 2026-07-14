@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,15 +18,11 @@ import {
   Heart, 
   User, 
   CreditCard, 
-  MapPin,
-  Star,
   Activity,
   Shield,
   Plus,
   ArrowRight,
   LogOut,
-  Phone,
-  Mail,
   AlertCircle,
   Users,
   Building2,
@@ -39,31 +34,19 @@ import {
   Save,
   Edit,
   X,
-  Check,
   Lock,
   RefreshCw,
-  Loader2
+  Loader2,
+  Stethoscope
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { format } from 'date-fns';
-import { BookingsRepo, Booking } from '@/backend/repositories/bookings';
-import { MembershipsRepo } from '@/backend/repositories/memberships';
-import { DoctorsRepo, Doctor } from '@/backend/repositories/doctors';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { doc, getDoc, getDocs, updateDoc, collection, query, where, orderBy, limit } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import { serverTimestamp } from 'firebase/firestore';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-interface DashboardStats {
-  totalBookings: number;
-  upcomingBookings: number;
-  completedBookings: number;
-  cancelledBookings: number;
-  favoriteDoctor: string | null;
-  membershipType: string;
-  freeBookingsRemaining: number;
-}
-
+// ==================== TYPES ====================
 interface PatientProfile {
   uid: string;
   email: string;
@@ -88,6 +71,43 @@ interface PatientProfile {
   lastLogin?: any;
 }
 
+interface Doctor {
+  id: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  email: string;
+  specialization: string;
+  practiceName: string;
+  practiceAddress: string;
+  consultationFee: number;
+  rating: number;
+  reviewCount: number;
+  profileImage?: string;
+  verificationStatus: string;
+}
+
+interface Booking {
+  id: string;
+  doctorId: string;
+  patientId: string;
+  doctorName: string;
+  doctorSpecialization: string;
+  appointmentDate: string;
+  appointmentTime: string;
+  status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+  notes?: string;
+  consultationFee: number;
+  createdAt: any;
+}
+
+interface Membership {
+  tier: 'basic' | 'premium';
+  startDate: any;
+  endDate: any;
+  features: string[];
+}
+
 // ==================== QUERY KEYS ====================
 const QUERY_KEYS = {
   patientProfile: 'patientProfile',
@@ -97,38 +117,44 @@ const QUERY_KEYS = {
 };
 
 // ==================== DATA FETCHING FUNCTIONS ====================
+
 const fetchPatientProfile = async (uid: string): Promise<PatientProfile | null> => {
   if (!uid) return null;
 
   try {
-    const patientDoc = await getDoc(doc(db, 'patients', uid));
-    const userDoc = await getDoc(doc(db, 'users', uid));
+    // Fetch from users collection
+    const userRef = doc(db, 'users', uid);
+    const userSnap = await getDoc(userRef);
     
-    if (!patientDoc.exists() || !userDoc.exists()) {
+    if (!userSnap.exists()) {
       return null;
     }
     
-    const patientData = patientDoc.data();
-    const userData = userDoc.data();
+    const userData = userSnap.data();
+    
+    // Fetch from patients collection
+    const patientRef = doc(db, 'patients', uid);
+    const patientSnap = await getDoc(patientRef);
+    const patientData = patientSnap.exists() ? patientSnap.data() : {};
     
     return {
       uid: uid,
-      email: userData.email,
-      firstName: userData.firstName,
-      lastName: userData.lastName,
-      fullName: userData.fullName,
-      phone: userData.phone,
-      idNumber: patientData.idNumber,
-      dateOfBirth: patientData.dateOfBirth,
-      medicalAidProvider: patientData.medicalAidProvider,
-      medicalAidNumber: patientData.medicalAidNumber,
-      emergencyContact: patientData.emergencyContact,
+      email: userData.email || '',
+      firstName: userData.firstName || '',
+      lastName: userData.lastName || '',
+      fullName: userData.fullName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
+      phone: userData.phone || '',
+      idNumber: patientData.idNumber || '',
+      dateOfBirth: patientData.dateOfBirth || '',
+      medicalAidProvider: patientData.medicalAidProvider || '',
+      medicalAidNumber: patientData.medicalAidNumber || '',
+      emergencyContact: patientData.emergencyContact || { name: '', relationship: '', phone: '' },
       allergies: patientData.allergies || [],
       chronicConditions: patientData.chronicConditions || [],
       medications: patientData.medications || [],
-      photoURL: userData.photoURL,
-      createdAt: userData.createdAt,
-      lastLogin: userData.lastLogin,
+      photoURL: userData.photoURL || '',
+      createdAt: userData.createdAt || null,
+      lastLogin: userData.lastLogin || null,
     };
   } catch (error) {
     console.error('Error fetching patient profile:', error);
@@ -138,32 +164,133 @@ const fetchPatientProfile = async (uid: string): Promise<PatientProfile | null> 
 
 const fetchPatientBookings = async (uid: string): Promise<Booking[]> => {
   if (!uid) return [];
-  
+
   try {
-    return await BookingsRepo.listForUser(uid);
+    // Try to fetch bookings from the bookings collection
+    const bookingsRef = collection(db, 'bookings');
+    const q = query(
+      bookingsRef,
+      where('patientId', '==', uid),
+      orderBy('appointmentDate', 'desc'),
+      limit(50)
+    );
+    
+    const bookingsSnap = await getDocs(q);
+    const bookings: Booking[] = [];
+
+    for (const docSnap of bookingsSnap.docs) {
+      const data = docSnap.data();
+      
+      // Get doctor info
+      let doctorName = 'Unknown Doctor';
+      let doctorSpecialization = '';
+      
+      if (data.doctorId) {
+        try {
+          const doctorRef = doc(db, 'doctors', data.doctorId);
+          const doctorSnap = await getDoc(doctorRef);
+          if (doctorSnap.exists()) {
+            const doctorData = doctorSnap.data();
+            // Get user data for the doctor
+            const doctorUserRef = doc(db, 'users', data.doctorId);
+            const doctorUserSnap = await getDoc(doctorUserRef);
+            const doctorUserData = doctorUserSnap.exists() ? doctorUserSnap.data() : {};
+            
+            doctorName = doctorUserData.fullName || `${doctorUserData.firstName || ''} ${doctorUserData.lastName || ''}`.trim() || 'Unknown Doctor';
+            doctorSpecialization = doctorData.specialization || '';
+          }
+        } catch (e) {
+          console.error('Error fetching doctor info:', e);
+        }
+      }
+      
+      bookings.push({
+        id: docSnap.id,
+        doctorId: data.doctorId || '',
+        patientId: data.patientId || '',
+        doctorName: doctorName,
+        doctorSpecialization: doctorSpecialization,
+        appointmentDate: data.appointmentDate || '',
+        appointmentTime: data.appointmentTime || '',
+        status: data.status || 'pending',
+        notes: data.notes || '',
+        consultationFee: data.consultationFee || 0,
+        createdAt: data.createdAt || null,
+      });
+    }
+    
+    return bookings;
   } catch (error) {
-    console.error('Error fetching bookings:', error);
+    console.log('No bookings found or bookings collection not yet created');
     return [];
   }
 };
 
 const fetchAvailableDoctors = async (): Promise<Doctor[]> => {
   try {
-    return await DoctorsRepo.list({ is_available: true });
+    // Fetch verified doctors
+    const doctorsRef = collection(db, 'doctors');
+    const q = query(
+      doctorsRef,
+      where('verificationStatus', '==', 'verified')
+    );
+    
+    const doctorsSnap = await getDocs(q);
+    const doctors: Doctor[] = [];
+
+    for (const docSnap of doctorsSnap.docs) {
+      const data = docSnap.data();
+      
+      // Get user data for the doctor
+      const userRef = doc(db, 'users', docSnap.id);
+      const userSnap = await getDoc(userRef);
+      const userData = userSnap.exists() ? userSnap.data() : {};
+      
+      doctors.push({
+        id: docSnap.id,
+        firstName: userData.firstName || data.firstName || '',
+        lastName: userData.lastName || data.lastName || '',
+        fullName: userData.fullName || data.fullName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
+        email: userData.email || data.email || '',
+        specialization: data.specialization || '',
+        practiceName: data.practiceName || '',
+        practiceAddress: data.practiceAddress || '',
+        consultationFee: data.consultationFee || 0,
+        rating: data.rating || 0,
+        reviewCount: data.reviewCount || 0,
+        profileImage: data.profileImage || '',
+        verificationStatus: data.verificationStatus || 'pending',
+      });
+    }
+    
+    return doctors;
   } catch (error) {
     console.error('Error fetching available doctors:', error);
     return [];
   }
 };
 
-const fetchMembership = async (uid: string): Promise<any> => {
+const fetchMembership = async (uid: string): Promise<Membership | null> => {
   if (!uid) return null;
-  
+
   try {
-    return await MembershipsRepo.getForUser(uid);
+    const membershipRef = doc(db, 'memberships', uid);
+    const membershipSnap = await getDoc(membershipRef);
+    
+    if (membershipSnap.exists()) {
+      const data = membershipSnap.data();
+      return {
+        tier: data.tier || 'basic',
+        startDate: data.startDate || null,
+        endDate: data.endDate || null,
+        features: data.features || [],
+      };
+    }
+    
+    return { tier: 'basic', startDate: null, endDate: null, features: [] };
   } catch (error) {
     console.error('Error fetching membership:', error);
-    return null;
+    return { tier: 'basic', startDate: null, endDate: null, features: [] };
   }
 };
 
@@ -247,14 +374,16 @@ const PatientDashboard = () => {
   // ==================== DERIVED DATA ====================
   const now = new Date();
   const upcomingBookings = bookings.filter(b => 
-    new Date(b.appointment_date) >= now && b.status !== 'cancelled'
+    new Date(b.appointmentDate) >= now && b.status !== 'cancelled'
   );
   const completedBookings = bookings.filter(b => b.status === 'completed');
   const cancelledBookings = bookings.filter(b => b.status === 'cancelled');
+  const pendingBookings = bookings.filter(b => b.status === 'pending');
   
-  const stats: DashboardStats = {
+  const stats = {
     totalBookings: bookings.length,
     upcomingBookings: upcomingBookings.length,
+    pendingBookings: pendingBookings.length,
     completedBookings: completedBookings.length,
     cancelledBookings: cancelledBookings.length,
     favoriteDoctor: null,
@@ -283,18 +412,18 @@ const PatientDashboard = () => {
       await updateDoc(userRef, {
         firstName: editedProfile.firstName,
         lastName: editedProfile.lastName,
-        fullName: `${editedProfile.firstName} ${editedProfile.lastName}`.trim(),
-        phone: editedProfile.phone,
+        fullName: `${editedProfile.firstName || ''} ${editedProfile.lastName || ''}`.trim(),
+        phone: editedProfile.phone || '',
         updatedAt: serverTimestamp(),
       });
       
       // Update patients collection
       const patientRef = doc(db, 'patients', user.uid);
       await updateDoc(patientRef, {
-        dateOfBirth: editedProfile.dateOfBirth,
-        medicalAidProvider: editedProfile.medicalAidProvider,
-        medicalAidNumber: editedProfile.medicalAidNumber,
-        emergencyContact: editedProfile.emergencyContact,
+        dateOfBirth: editedProfile.dateOfBirth || '',
+        medicalAidProvider: editedProfile.medicalAidProvider || '',
+        medicalAidNumber: editedProfile.medicalAidNumber || '',
+        emergencyContact: editedProfile.emergencyContact || { name: '', relationship: '', phone: '' },
         allergies: allergiesList,
         chronicConditions: conditionsList,
         medications: medicationsList,
@@ -365,11 +494,21 @@ const PatientDashboard = () => {
   };
 
   const formatDate = (dateString: string) => {
-    return format(new Date(dateString), 'MMM d, yyyy');
+    if (!dateString) return 'N/A';
+    try {
+      return format(new Date(dateString), 'MMM d, yyyy');
+    } catch {
+      return dateString;
+    }
   };
 
   const formatTime = (timeString: string) => {
-    return format(new Date(`2000-01-01T${timeString}`), 'h:mm a');
+    if (!timeString) return 'N/A';
+    try {
+      return format(new Date(`2000-01-01T${timeString}`), 'h:mm a');
+    } catch {
+      return timeString;
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -388,6 +527,7 @@ const PatientDashboard = () => {
   };
 
   const getInitials = (name: string) => {
+    if (!name) return 'P';
     return name
       .split(' ')
       .map(n => n[0])
@@ -405,6 +545,13 @@ const PatientDashboard = () => {
       setMedicationsInput(patientProfile.medications?.join(', ') || '');
     }
   }, [patientProfile]);
+
+  // Redirect if not patient
+  useEffect(() => {
+    if (profile && profile.role !== 'patient') {
+      navigate('/dashboard');
+    }
+  }, [profile, navigate]);
 
   // ==================== LOADING STATE ====================
   if (isLoadingProfile || isLoadingBookings) {
@@ -426,7 +573,7 @@ const PatientDashboard = () => {
           <CardContent className="pt-6 text-center">
             <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
             <h2 className="text-xl font-bold text-gray-900 mb-2">Failed to Load Profile</h2>
-            <p className="text-gray-600 mb-4">{profileError.message}</p>
+            <p className="text-gray-600 mb-4">{(profileError as Error).message}</p>
             <Button onClick={() => refetchProfile()} className="w-full">
               <RefreshCw className="w-4 h-4 mr-2" />
               Retry
@@ -440,7 +587,7 @@ const PatientDashboard = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Professional Sidebar */}
-      <div className="fixed left-0 top-0 h-full w-64 bg-white border-r border-gray-200 flex flex-col">
+      <div className="fixed left-0 top-0 h-full w-64 bg-white border-r border-gray-200 flex flex-col z-20">
         {/* Logo */}
         <div className="p-6 border-b border-gray-100">
           <h1 className="text-2xl font-bold text-blue-600">MedMap</h1>
@@ -452,7 +599,7 @@ const PatientDashboard = () => {
           <div className="flex items-center gap-3">
             <Avatar className="h-12 w-12">
               <AvatarImage src={patientProfile?.photoURL} />
-              <AvatarFallback className="bg-blue-100 text-blue-600">
+              <AvatarFallback className="bg-blue-100 text-blue-600 text-sm font-bold">
                 {patientProfile ? getInitials(patientProfile.fullName) : 'P'}
               </AvatarFallback>
             </Avatar>
@@ -468,7 +615,7 @@ const PatientDashboard = () => {
         </div>
         
         {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           <button
             onClick={() => setActiveTab('overview')}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
@@ -564,17 +711,17 @@ const PatientDashboard = () => {
       </div>
       
       {/* Main Content */}
-      <div className="ml-64 p-8">
+      <div className="ml-64 p-4 sm:p-6 lg:p-8">
         {/* Top Bar */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 lg:mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">
               {activeTab === 'overview' && `Welcome back, ${patientProfile?.firstName || 'Patient'}!`}
               {activeTab === 'appointments' && 'All Appointments'}
               {activeTab === 'history' && 'Medical History'}
               {activeTab === 'profile' && 'My Profile'}
             </h1>
-            <p className="text-gray-600 mt-1">
+            <p className="text-gray-600 mt-1 text-sm">
               {new Date().toLocaleDateString('en-ZA', { 
                 weekday: 'long', 
                 year: 'numeric', 
@@ -584,7 +731,7 @@ const PatientDashboard = () => {
             </p>
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 mt-3 sm:mt-0">
             {isLoadingBookings && (
               <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
             )}
@@ -601,58 +748,58 @@ const PatientDashboard = () => {
         {activeTab === 'overview' && (
           <>
             {/* Quick Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6 mb-6 lg:mb-8">
               <Card className="border-0 shadow-sm">
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
-                      <Calendar className="h-6 w-6 text-blue-600" />
+                <CardContent className="p-4 sm:p-6">
+                  <div className="flex items-center gap-3 sm:gap-4">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                      <Calendar className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600" />
                     </div>
-                    <div>
-                      <p className="text-sm text-gray-600">Total Bookings</p>
-                      <p className="text-2xl font-bold text-gray-900">{stats.totalBookings}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm text-gray-600">Total Bookings</p>
+                      <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.totalBookings}</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
               <Card className="border-0 shadow-sm">
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
-                      <Clock className="h-6 w-6 text-green-600" />
+                <CardContent className="p-4 sm:p-6">
+                  <div className="flex items-center gap-3 sm:gap-4">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-green-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                      <Clock className="h-5 w-5 sm:h-6 sm:w-6 text-green-600" />
                     </div>
-                    <div>
-                      <p className="text-sm text-gray-600">Upcoming</p>
-                      <p className="text-2xl font-bold text-gray-900">{stats.upcomingBookings}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-0 shadow-sm">
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
-                      <Activity className="h-6 w-6 text-purple-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-600">Completed</p>
-                      <p className="text-2xl font-bold text-gray-900">{stats.completedBookings}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm text-gray-600">Upcoming</p>
+                      <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.upcomingBookings}</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
               <Card className="border-0 shadow-sm">
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center">
-                      <Shield className="h-6 w-6 text-amber-600" />
+                <CardContent className="p-4 sm:p-6">
+                  <div className="flex items-center gap-3 sm:gap-4">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-purple-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                      <Activity className="h-5 w-5 sm:h-6 sm:w-6 text-purple-600" />
                     </div>
-                    <div>
-                      <p className="text-sm text-gray-600">Membership</p>
-                      <p className="text-lg font-bold text-gray-900 capitalize">{stats.membershipType}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm text-gray-600">Completed</p>
+                      <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.completedBookings}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-0 shadow-sm">
+                <CardContent className="p-4 sm:p-6">
+                  <div className="flex items-center gap-3 sm:gap-4">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                      <Shield className="h-5 w-5 sm:h-6 sm:w-6 text-amber-600" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm text-gray-600">Membership</p>
+                      <p className="text-base sm:text-lg font-bold text-gray-900 capitalize">{stats.membershipType}</p>
                     </div>
                   </div>
                 </CardContent>
@@ -664,7 +811,7 @@ const PatientDashboard = () => {
               <div className="lg:col-span-2">
                 <Card className="border-0 shadow-sm">
                   <CardHeader className="flex flex-row items-center justify-between pb-4">
-                    <CardTitle className="text-lg font-semibold text-gray-900">Recent Bookings</CardTitle>
+                    <CardTitle className="text-base sm:text-lg font-semibold text-gray-900">Recent Bookings</CardTitle>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -676,7 +823,11 @@ const PatientDashboard = () => {
                     </Button>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {recentBookings.length === 0 ? (
+                    {isLoadingBookings ? (
+                      <div className="flex justify-center py-8">
+                        <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+                      </div>
+                    ) : recentBookings.length === 0 ? (
                       <div className="text-center py-8">
                         <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-400" />
                         <h3 className="text-lg font-semibold mb-2">No bookings yet</h3>
@@ -692,22 +843,22 @@ const PatientDashboard = () => {
                       </div>
                     ) : (
                       recentBookings.map((booking) => (
-                        <div key={booking.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                        <div key={booking.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-gray-50 rounded-lg gap-3">
                           <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                              <User className="h-5 w-5 text-blue-600" />
+                            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <Stethoscope className="h-5 w-5 text-blue-600" />
                             </div>
-                            <div>
-                              <h4 className="font-medium text-gray-900">
-                                Dr. {booking.doctors?.profiles?.first_name || 'Unknown'} {booking.doctors?.profiles?.last_name || 'Doctor'}
+                            <div className="min-w-0">
+                              <h4 className="font-medium text-gray-900 truncate">
+                                {booking.doctorName || 'Unknown Doctor'}
                               </h4>
-                              <p className="text-sm text-gray-600">{booking.doctors?.speciality}</p>
+                              <p className="text-sm text-gray-600 truncate">{booking.doctorSpecialization}</p>
                               <p className="text-xs text-gray-500">
-                                {formatDate(booking.appointment_date)} at {formatTime(booking.appointment_time)}
+                                {formatDate(booking.appointmentDate)} at {formatTime(booking.appointmentTime)}
                               </p>
                             </div>
                           </div>
-                          <div className="text-right">
+                          <div className="text-right flex-shrink-0">
                             {getStatusBadge(booking.status)}
                           </div>
                         </div>
@@ -722,7 +873,7 @@ const PatientDashboard = () => {
                 {/* Available Doctors */}
                 <Card className="border-0 shadow-sm">
                   <CardHeader className="pb-4">
-                    <CardTitle className="text-lg font-semibold text-gray-900">Available Doctors</CardTitle>
+                    <CardTitle className="text-base sm:text-lg font-semibold text-gray-900">Available Doctors</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     {isLoadingDoctors ? (
@@ -732,23 +883,24 @@ const PatientDashboard = () => {
                     ) : availableDoctors.length === 0 ? (
                       <p className="text-sm text-gray-600 text-center py-4">No doctors available right now.</p>
                     ) : (
-                      availableDoctors.slice(0, 4).map((d) => (
-                        <div key={d.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-10 w-10">
-                              <AvatarFallback className="bg-blue-100 text-blue-600">
-                                {getInitials(`${d.first_name} ${d.last_name}`)}
+                      availableDoctors.slice(0, 4).map((doctor) => (
+                        <div key={doctor.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <Avatar className="h-10 w-10 flex-shrink-0">
+                              <AvatarImage src={doctor.profileImage} />
+                              <AvatarFallback className="bg-blue-100 text-blue-600 text-xs font-medium">
+                                {getInitials(doctor.fullName)}
                               </AvatarFallback>
                             </Avatar>
-                            <div>
-                              <h4 className="font-medium text-gray-900">Dr. {d.first_name} {d.last_name}</h4>
-                              <p className="text-xs text-gray-600">{d.speciality}</p>
+                            <div className="min-w-0">
+                              <h4 className="font-medium text-gray-900 text-sm truncate">Dr. {doctor.firstName} {doctor.lastName}</h4>
+                              <p className="text-xs text-gray-600 truncate">{doctor.specialization}</p>
                             </div>
                           </div>
                           <Button 
                             size="sm" 
-                            className="bg-blue-600 hover:bg-blue-700"
-                            onClick={() => navigate(`/book/${d.id}`)}
+                            className="bg-blue-600 hover:bg-blue-700 flex-shrink-0 ml-2"
+                            onClick={() => navigate(`/book/${doctor.id}`)}
                           >
                             Book
                           </Button>
@@ -760,16 +912,16 @@ const PatientDashboard = () => {
 
                 {/* Membership Card */}
                 <Card className="border-0 shadow-sm bg-gradient-to-br from-blue-50 to-indigo-50">
-                  <CardContent className="p-6">
+                  <CardContent className="p-4 sm:p-6">
                     <div className="flex items-center gap-3 mb-4">
-                      <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center">
+                      <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center flex-shrink-0">
                         <Shield className="h-5 w-5 text-white" />
                       </div>
-                      <div>
-                        <h3 className="font-semibold text-gray-900">
+                      <div className="min-w-0">
+                        <h3 className="font-semibold text-gray-900 text-sm sm:text-base">
                           {stats.membershipType === 'premium' ? 'Premium Member' : 'Basic Member'}
                         </h3>
-                        <p className="text-sm text-gray-600">
+                        <p className="text-xs sm:text-sm text-gray-600 truncate">
                           {stats.membershipType === 'premium' 
                             ? 'Unlimited bookings • Priority support' 
                             : `${stats.freeBookingsRemaining} free bookings remaining`}
@@ -784,7 +936,7 @@ const PatientDashboard = () => {
                           className="h-2 mb-4"
                         />
                         <Button 
-                          className="w-full bg-blue-600 hover:bg-blue-700"
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-sm"
                           onClick={() => navigate('/memberships')}
                         >
                           Upgrade to Premium
@@ -801,7 +953,7 @@ const PatientDashboard = () => {
         {activeTab === 'appointments' && (
           <Card className="border-0 shadow-sm">
             <CardHeader>
-              <CardTitle className="text-lg font-semibold text-gray-900">All Appointments</CardTitle>
+              <CardTitle className="text-base sm:text-lg font-semibold text-gray-900">All Appointments</CardTitle>
             </CardHeader>
             <CardContent>
               {isLoadingBookings ? (
@@ -823,22 +975,22 @@ const PatientDashboard = () => {
               ) : (
                 <div className="space-y-3">
                   {bookings.map((booking) => (
-                    <div key={booking.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                    <div key={booking.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-gray-50 rounded-lg gap-3">
                       <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                          <User className="h-6 w-6 text-blue-600" />
+                        <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                          <Stethoscope className="h-6 w-6 text-blue-600" />
                         </div>
-                        <div>
-                          <h4 className="font-medium text-gray-900">
-                            Dr. {booking.doctors?.profiles?.first_name} {booking.doctors?.profiles?.last_name}
+                        <div className="min-w-0">
+                          <h4 className="font-medium text-gray-900 truncate">
+                            {booking.doctorName || 'Unknown Doctor'}
                           </h4>
-                          <p className="text-sm text-gray-600">{booking.doctors?.speciality}</p>
+                          <p className="text-sm text-gray-600 truncate">{booking.doctorSpecialization}</p>
                           <p className="text-xs text-gray-500">
-                            {formatDate(booking.appointment_date)} at {formatTime(booking.appointment_time)}
+                            {formatDate(booking.appointmentDate)} at {formatTime(booking.appointmentTime)}
                           </p>
                         </div>
                       </div>
-                      <div className="text-right">
+                      <div className="text-right flex-shrink-0">
                         {getStatusBadge(booking.status)}
                       </div>
                     </div>
@@ -853,7 +1005,7 @@ const PatientDashboard = () => {
           <div className="space-y-6">
             <Card className="border-0 shadow-sm">
               <CardHeader>
-                <CardTitle className="text-lg font-semibold text-gray-900">Medical History</CardTitle>
+                <CardTitle className="text-base sm:text-lg font-semibold text-gray-900">Medical History</CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
                 {/* Allergies */}
@@ -921,12 +1073,13 @@ const PatientDashboard = () => {
           <div className="space-y-6">
             {/* Profile Header with Edit/Save buttons */}
             <Card className="border-0 shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-lg font-semibold text-gray-900">Personal Information</CardTitle>
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <CardTitle className="text-base sm:text-lg font-semibold text-gray-900">Personal Information</CardTitle>
                 {!isEditingProfile ? (
                   <Button
                     variant="outline"
                     onClick={() => setIsEditingProfile(true)}
+                    size="sm"
                   >
                     <Edit className="w-4 h-4 mr-2" />
                     Edit Profile
@@ -937,6 +1090,7 @@ const PatientDashboard = () => {
                       variant="outline"
                       onClick={handleCancelEdit}
                       disabled={updateProfileMutation.isPending}
+                      size="sm"
                     >
                       <X className="w-4 h-4 mr-2" />
                       Cancel
@@ -945,6 +1099,7 @@ const PatientDashboard = () => {
                       className="bg-blue-600 hover:bg-blue-700"
                       onClick={handleSaveProfile}
                       disabled={updateProfileMutation.isPending}
+                      size="sm"
                     >
                       {updateProfileMutation.isPending ? (
                         <>
@@ -962,20 +1117,20 @@ const PatientDashboard = () => {
                 )}
               </CardHeader>
               <CardContent>
-                <div className="flex items-center gap-6 mb-6">
-                  <Avatar className="h-20 w-20">
+                <div className="flex items-center gap-4 sm:gap-6 mb-6">
+                  <Avatar className="h-16 w-16 sm:h-20 sm:w-20">
                     <AvatarImage src={patientProfile.photoURL} />
-                    <AvatarFallback className="bg-blue-100 text-blue-600 text-2xl">
+                    <AvatarFallback className="bg-blue-100 text-blue-600 text-xl sm:text-2xl font-bold">
                       {getInitials(patientProfile.fullName)}
                     </AvatarFallback>
                   </Avatar>
-                  <div>
-                    <h3 className="text-xl font-semibold text-gray-900">{patientProfile.fullName}</h3>
-                    <p className="text-gray-600">{patientProfile.email}</p>
+                  <div className="min-w-0">
+                    <h3 className="text-lg sm:text-xl font-semibold text-gray-900 truncate">{patientProfile.fullName}</h3>
+                    <p className="text-sm text-gray-600 truncate">{patientProfile.email}</p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                   <div>
                     <Label className="text-gray-500 text-sm">First Name</Label>
                     {isEditingProfile ? (
@@ -985,7 +1140,7 @@ const PatientDashboard = () => {
                         className="mt-1"
                       />
                     ) : (
-                      <p className="font-medium text-gray-900 mt-1">{patientProfile.firstName}</p>
+                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.firstName}</p>
                     )}
                   </div>
                   
@@ -998,7 +1153,7 @@ const PatientDashboard = () => {
                         className="mt-1"
                       />
                     ) : (
-                      <p className="font-medium text-gray-900 mt-1">{patientProfile.lastName}</p>
+                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.lastName}</p>
                     )}
                   </div>
                   
@@ -1007,7 +1162,7 @@ const PatientDashboard = () => {
                       <Lock className="w-3 h-3" />
                       ID Number
                     </Label>
-                    <p className="font-medium text-gray-900 mt-1">{patientProfile.idNumber || 'Not provided'}</p>
+                    <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.idNumber || 'Not provided'}</p>
                     <p className="text-xs text-gray-500 mt-1">ID number cannot be changed</p>
                   </div>
                   
@@ -1021,7 +1176,7 @@ const PatientDashboard = () => {
                         className="mt-1"
                       />
                     ) : (
-                      <p className="font-medium text-gray-900 mt-1">{patientProfile.dateOfBirth || 'Not provided'}</p>
+                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.dateOfBirth || 'Not provided'}</p>
                     )}
                   </div>
                   
@@ -1035,13 +1190,13 @@ const PatientDashboard = () => {
                         className="mt-1"
                       />
                     ) : (
-                      <p className="font-medium text-gray-900 mt-1">{patientProfile.phone || 'Not provided'}</p>
+                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.phone || 'Not provided'}</p>
                     )}
                   </div>
                   
                   <div>
                     <Label className="text-gray-500 text-sm">Email</Label>
-                    <p className="font-medium text-gray-900 mt-1">{patientProfile.email}</p>
+                    <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.email}</p>
                     <p className="text-xs text-gray-500 mt-1">Email cannot be changed</p>
                   </div>
                 </div>
@@ -1051,13 +1206,13 @@ const PatientDashboard = () => {
             {/* Emergency Contact */}
             <Card className="border-0 shadow-sm">
               <CardHeader>
-                <CardTitle className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <CardTitle className="text-base sm:text-lg font-semibold text-gray-900 flex items-center gap-2">
                   <Users className="w-5 h-5 text-red-500" />
                   Emergency Contact
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
                   <div>
                     <Label className="text-gray-500 text-sm">Full Name</Label>
                     {isEditingProfile ? (
@@ -1075,7 +1230,7 @@ const PatientDashboard = () => {
                         className="mt-1"
                       />
                     ) : (
-                      <p className="font-medium text-gray-900 mt-1">{patientProfile.emergencyContact?.name || 'Not provided'}</p>
+                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.emergencyContact?.name || 'Not provided'}</p>
                     )}
                   </div>
                   
@@ -1108,7 +1263,7 @@ const PatientDashboard = () => {
                         </SelectContent>
                       </Select>
                     ) : (
-                      <p className="font-medium text-gray-900 mt-1">{patientProfile.emergencyContact?.relationship || 'Not provided'}</p>
+                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.emergencyContact?.relationship || 'Not provided'}</p>
                     )}
                   </div>
                   
@@ -1130,7 +1285,7 @@ const PatientDashboard = () => {
                         className="mt-1"
                       />
                     ) : (
-                      <p className="font-medium text-gray-900 mt-1">{patientProfile.emergencyContact?.phone || 'Not provided'}</p>
+                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.emergencyContact?.phone || 'Not provided'}</p>
                     )}
                   </div>
                 </div>
@@ -1140,13 +1295,13 @@ const PatientDashboard = () => {
             {/* Medical Aid */}
             <Card className="border-0 shadow-sm">
               <CardHeader>
-                <CardTitle className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <CardTitle className="text-base sm:text-lg font-semibold text-gray-900 flex items-center gap-2">
                   <Building2 className="w-5 h-5 text-green-500" />
                   Medical Aid
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                   <div>
                     <Label className="text-gray-500 text-sm">Provider</Label>
                     {isEditingProfile ? (
@@ -1171,7 +1326,7 @@ const PatientDashboard = () => {
                         </SelectContent>
                       </Select>
                     ) : (
-                      <p className="font-medium text-gray-900 mt-1">{patientProfile.medicalAidProvider || 'None'}</p>
+                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.medicalAidProvider || 'None'}</p>
                     )}
                   </div>
                   
@@ -1184,7 +1339,7 @@ const PatientDashboard = () => {
                         className="mt-1"
                       />
                     ) : (
-                      <p className="font-medium text-gray-900 mt-1">{patientProfile.medicalAidNumber || 'Not provided'}</p>
+                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.medicalAidNumber || 'Not provided'}</p>
                     )}
                   </div>
                 </div>
@@ -1194,7 +1349,7 @@ const PatientDashboard = () => {
             {/* Medical Information */}
             <Card className="border-0 shadow-sm">
               <CardHeader>
-                <CardTitle className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <CardTitle className="text-base sm:text-lg font-semibold text-gray-900 flex items-center gap-2">
                   <Pill className="w-5 h-5 text-purple-500" />
                   Medical Information
                 </CardTitle>
