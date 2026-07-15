@@ -4,33 +4,12 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { AuthProvider } from "./hooks/useAuth";
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { ProtectedRoute } from "./components/ProtectedRoute";
 import { LoadingSpinner } from "./components/LoadingSpinner";
 import { HelpWidget } from "./components/HelpWidget";
-
-// ==================== CONSTANTS ====================
-export const ROLES = {
-  ADMIN: 'admin',
-  DOCTOR: 'doctor',
-  PATIENT: 'patient',
-  AMBASSADOR: 'ambassador',
-} as const;
-
-export const ROUTES = {
-  HOME: '/',
-  SIGNIN: '/signin',
-  SIGNUP: '/signup',
-  ADMIN: '/admin',
-  DOCTOR: '/doctor',
-  PATIENT: '/dashboard',
-  AMBASSADOR: '/ambassador/portal',
-  SEARCH: '/search',
-  BOOKINGS: '/bookings',
-  PROFILE: '/profile',
-} as const;
+import InitialAdminSetup from './pages/InitialAdminSetup';
 
 // ==================== QUERY CLIENT ====================
 const queryClient = new QueryClient({
@@ -46,53 +25,76 @@ const queryClient = new QueryClient({
 });
 
 // ==================== LAZY LOADING ====================
-const load = (path: string) => lazy(() => import(path));
-
 // Public Routes
-const Index = load("./pages/Index");
-const Memberships = load("./pages/Memberships");
-const About = load("./pages/About");
-const Team = load("./pages/Team");
-const Legal = load("./pages/Legal");
-const PrivacyPolicy = load("./pages/PrivacyPolicy");
-const PAIAManual = load("./pages/PAIAManual");
-const DoctorEnrollment = load("./pages/doctor/DoctorEnrollmentForm");
-const AmbassadorProgramme = load("./pages/AmbassadorProgramme");
-const DoctorSearch = load("./pages/DoctorSearch");
-const DoctorProfile = load("./pages/DoctorProfile");
-const BookAppointment = load("./pages/BookAppointment"); // ✅ ADDED THIS
-const Telemedicine = load("./pages/Telemedicine");
-const DoctorPortal = load("./pages/DoctorPortal");
-const PracticeManagement = load("./pages/PracticeManagement");
-const Support = load("./pages/Support");
-const Careers = load("./pages/Careers");
-const Contact = load("./pages/Contact");
-const NotFound = load("./pages/NotFound");
-const BookingSuccess = load("./pages/BookingSuccess");
-const PayFastSuccess = load("./pages/PayFastSuccess");
-const PayFastCancel = load("./pages/PayFastCancel");
-const BookingHistory = load("./pages/BookingHistory");
-const EmailVerification = load("./pages/EmailVerification");
-const Profile = load("./pages/Profile");
-const CreateAdminAccount = load("./pages/CreateAdminAccount");
-const RouteTest = load("./pages/RouteTest");
-const FixAdminAccount = load("./pages/FixAdminAccount");
-const ManualAdminSetup = load("./pages/ManualAdminSetup");
-const InitialAdminSetup = load("./pages/InitialAdminSetup");
+const Index = lazy(() => import("./pages/Index"));
+const Memberships = lazy(() => import("./pages/Memberships"));
+const About = lazy(() => import("./pages/About"));
+const Team = lazy(() => import("./pages/Team"));
+const Legal = lazy(() => import("./pages/Legal"));
+const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
+const PAIAManual = lazy(() => import("./pages/PAIAManual"));
+const DoctorEnrollment = lazy(() => import("./pages/doctor/DoctorEnrollmentForm"));
+const AmbassadorProgramme = lazy(() => import("./pages/AmbassadorProgramme"));
+const DoctorSearch = lazy(() => import("./pages/DoctorSearch"));
+const DoctorProfile = lazy(() => import("./pages/DoctorProfile"));
+const BookAppointment = lazy(() => import("./pages/BookAppointment"));
+const Telemedicine = lazy(() => import("./pages/Telemedicine"));
+const DoctorPortal = lazy(() => import("./pages/DoctorPortal"));
+const PracticeManagement = lazy(() => import("./pages/PracticeManagement"));
+const Support = lazy(() => import("./pages/Support"));
+const Careers = lazy(() => import("./pages/Careers"));
+const Contact = lazy(() => import("./pages/Contact"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const BookingSuccess = lazy(() => import("./pages/BookingSuccess"));
+const PayFastSuccess = lazy(() => import("./pages/PayFastSuccess"));
+const PayFastCancel = lazy(() => import("./pages/PayFastCancel"));
+const BookingHistory = lazy(() => import("./pages/BookingHistory"));
+const EmailVerification = lazy(() => import("./pages/EmailVerification"));
+const Profile = lazy(() => import("./pages/Profile"));
+const CreateAdminAccount = lazy(() => import("./pages/CreateAdminAccount"));
+const RouteTest = lazy(() => import("./pages/RouteTest"));
+const FixAdminAccount = lazy(() => import("./pages/FixAdminAccount"));
+const ManualAdminSetup = lazy(() => import("./pages/ManualAdminSetup"));
 
 // Auth Routes
-const SignIn = load("./pages/auth/SignIn");
-const SignUpSelection = load("./pages/auth/SignUpSelection");
-const PatientSignUp = load("./pages/auth/PatientSignUp");
-const DoctorSignUp = load("./pages/auth/DoctorSignUp");
-const AmbassadorSignUp = load("./pages/auth/AmbassadorSignUp");
+const SignIn = lazy(() => import("./pages/auth/SignIn"));
+const SignUpSelection = lazy(() => import("./pages/auth/SignUpSelection"));
+const PatientSignUp = lazy(() => import("./pages/auth/PatientSignUp"));
+const DoctorSignUp = lazy(() => import("./pages/auth/DoctorSignUp"));
+const AmbassadorSignUp = lazy(() => import("./pages/auth/AmbassadorSignUp"));
 
 // Dashboard Routes
-const AdminDashboard = load("./pages/admin/AdminDashboard");
-const DoctorDashboard = load("./pages/doctor/DoctorDashboard");
-const PatientDashboard = load("./pages/patient/PatientDashboard");
-const AmbassadorPortal = load("./pages/ambassador/AmbassadorPortal");
-const PsychometricTest = load("./pages/ambassador/PsychometricTest");
+const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
+const DoctorDashboard = lazy(() => import("./pages/doctor/DoctorDashboard"));
+const PatientDashboard = lazy(() => import("./pages/patient/PatientDashboard"));
+const AmbassadorPortal = lazy(() => import("./pages/ambassador/AmbassadorPortal"));
+const PsychometricTest = lazy(() => import("./pages/ambassador/PsychometricTest"));
+
+// ==================== LOADING SPINNER COMPONENT ====================
+// If you don't have LoadingSpinner yet, use this inline component
+const PageLoader = () => (
+  <div className="flex items-center justify-center min-h-screen bg-gray-50">
+    <div className="flex flex-col items-center gap-4">
+      <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      <p className="text-gray-600 text-sm">Loading...</p>
+    </div>
+  </div>
+);
+
+// ==================== PROTECTED ROUTE ====================
+const ProtectedRoute = () => {
+  const { user, profile, isLoading } = useAuth();
+  
+  if (isLoading) {
+    return <PageLoader />;
+  }
+
+  if (!user) {
+    return <Navigate to="/signin" replace />;
+  }
+
+  return <Outlet />;
+};
 
 // ==================== APP COMPONENT ====================
 const App = () => {
@@ -109,7 +111,7 @@ const App = () => {
             }}
           >
             <ErrorBoundary>
-              <Suspense fallback={<LoadingSpinner />}>
+              <Suspense fallback={<PageLoader />}>
                 <Routes>
                   {/* ===== PUBLIC ROUTES ===== */}
                   <Route path="/" element={<Index />} />
@@ -141,6 +143,7 @@ const App = () => {
                     {/* Admin Routes */}
                     <Route path="/admin" element={<AdminDashboard />} />
                     <Route path="/create-admin-account" element={<CreateAdminAccount />} />
+                    <Route path="/admin-setup" element={<InitialAdminSetup />} />
                     
                     {/* Doctor Routes */}
                     <Route path="/doctor" element={<DoctorDashboard />} />
@@ -155,6 +158,7 @@ const App = () => {
                     <Route path="/book/:doctorId" element={<BookAppointment />} />
                     <Route path="/bookings" element={<BookingHistory />} />
                     <Route path="/booking-history" element={<BookingHistory />} />
+                    <Route path="/BookingHistory" element={<BookingHistory />} />
                     <Route path="/profile" element={<Profile />} />
                     
                     {/* Ambassador Routes */}
@@ -162,19 +166,20 @@ const App = () => {
                     <Route path="/ambassador/psychometric-test" element={<PsychometricTest />} />
                   </Route>
                   
-                  {/* ===== PAYMENT ROUTES (Public but handle redirects) ===== */}
+                  {/* ===== PAYMENT ROUTES ===== */}
                   <Route path="/booking-success" element={<BookingSuccess />} />
                   <Route path="/BookingSuccess" element={<Navigate to="/booking-success" replace />} />
                   <Route path="/bookingSuccess" element={<Navigate to="/booking-success" replace />} />
                   <Route path="/payfast/success" element={<PayFastSuccess />} />
                   <Route path="/payfast/cancel" element={<PayFastCancel />} />
                   
-                  {/* ===== ADMIN SETUP ROUTES ===== */}
-                  <Route path="/admin-setup" element={<InitialAdminSetup />} />
+                  {/* ===== ADMIN SETUP ROUTES (Aliases) ===== */}
                   <Route path="/AdminSetup" element={<Navigate to="/admin-setup" replace />} />
                   <Route path="/adminSetup" element={<Navigate to="/admin-setup" replace />} />
                   <Route path="/admin_setup" element={<Navigate to="/admin-setup" replace />} />
                   <Route path="/ADMIN_SETUP" element={<Navigate to="/admin-setup" replace />} />
+                  
+                  {/* ===== FIX/UTILITY ROUTES ===== */}
                   <Route path="/fix-admin-account" element={<FixAdminAccount />} />
                   <Route path="/manual-admin-setup" element={<ManualAdminSetup />} />
                   <Route path="/route-test" element={<RouteTest />} />
