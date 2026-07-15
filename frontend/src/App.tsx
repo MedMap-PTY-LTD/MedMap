@@ -59,9 +59,9 @@ const ManualAdminSetup = lazy(() => import("./pages/ManualAdminSetup"));
 // Auth Routes
 const SignIn = lazy(() => import("./pages/auth/SignIn"));
 const SignUpSelection = lazy(() => import("./pages/auth/SignUpSelection"));
-const PatientSignUp = lazy(() => import("./pages/auth/PatientSignUp"));
-const DoctorSignUp = lazy(() => import("./pages/auth/DoctorSignUp"));
-const AmbassadorSignUp = lazy(() => import("./pages/auth/AmbassadorSignUp"));
+const PatientSignUp = lazy(() => import("./pages/patient/PatientSignUp"));
+const DoctorSignUp = lazy(() => import("./pages/doctor/DoctorSignUp"));
+const AmbassadorSignUp = lazy(() => import("./pages/ambassador/AmbassadorSignUp"));
 
 // Dashboard Routes
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
