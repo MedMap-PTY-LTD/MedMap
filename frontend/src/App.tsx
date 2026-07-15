@@ -1,14 +1,15 @@
+// App.tsx
 import React, { lazy, Suspense } from 'react';
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./hooks/useAuth";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { ProtectedRoute } from "./components/ProtectedRoute";
 import { LoadingSpinner } from "./components/LoadingSpinner";
 import { HelpWidget } from "./components/HelpWidget";
-import { ProtectedRoute } from "./components/ProtectedRoute";
 
 // ==================== CONSTANTS ====================
 export const ROLES = {
@@ -59,6 +60,7 @@ const DoctorEnrollment = load("./pages/doctor/DoctorEnrollmentForm");
 const AmbassadorProgramme = load("./pages/AmbassadorProgramme");
 const DoctorSearch = load("./pages/DoctorSearch");
 const DoctorProfile = load("./pages/DoctorProfile");
+const BookAppointment = load("./pages/BookAppointment"); // ✅ ADDED THIS
 const Telemedicine = load("./pages/Telemedicine");
 const DoctorPortal = load("./pages/DoctorPortal");
 const PracticeManagement = load("./pages/PracticeManagement");
@@ -162,11 +164,17 @@ const App = () => {
                   
                   {/* ===== PAYMENT ROUTES (Public but handle redirects) ===== */}
                   <Route path="/booking-success" element={<BookingSuccess />} />
+                  <Route path="/BookingSuccess" element={<Navigate to="/booking-success" replace />} />
+                  <Route path="/bookingSuccess" element={<Navigate to="/booking-success" replace />} />
                   <Route path="/payfast/success" element={<PayFastSuccess />} />
                   <Route path="/payfast/cancel" element={<PayFastCancel />} />
                   
                   {/* ===== ADMIN SETUP ROUTES ===== */}
                   <Route path="/admin-setup" element={<InitialAdminSetup />} />
+                  <Route path="/AdminSetup" element={<Navigate to="/admin-setup" replace />} />
+                  <Route path="/adminSetup" element={<Navigate to="/admin-setup" replace />} />
+                  <Route path="/admin_setup" element={<Navigate to="/admin-setup" replace />} />
+                  <Route path="/ADMIN_SETUP" element={<Navigate to="/admin-setup" replace />} />
                   <Route path="/fix-admin-account" element={<FixAdminAccount />} />
                   <Route path="/manual-admin-setup" element={<ManualAdminSetup />} />
                   <Route path="/route-test" element={<RouteTest />} />
