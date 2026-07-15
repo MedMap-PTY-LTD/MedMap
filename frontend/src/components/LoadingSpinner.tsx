@@ -2,26 +2,28 @@
 import { Loader2 } from 'lucide-react';
 
 interface LoadingSpinnerProps {
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
   text?: string;
   fullScreen?: boolean;
+  className?: string;
 }
 
 export const LoadingSpinner = ({ 
   size = 'md', 
   text = 'Loading...', 
-  fullScreen = true 
+  fullScreen = false,
+  className = '',
 }: LoadingSpinnerProps) => {
   const sizeClasses = {
-    sm: 'w-6 h-6',
-    md: 'w-10 h-10',
-    lg: 'w-14 h-14',
+    sm: 'w-5 h-5',
+    md: 'w-8 h-8',
+    lg: 'w-12 h-12',
+    xl: 'w-16 h-16',
   };
 
-  const Wrapper = fullScreen ? 'div' : 'div';
   const wrapperClasses = fullScreen 
-    ? 'flex items-center justify-center min-h-screen bg-gray-50' 
-    : 'flex items-center justify-center p-8';
+    ? `flex items-center justify-center min-h-screen bg-gray-50 ${className}` 
+    : `flex items-center justify-center p-8 ${className}`;
 
   return (
     <div className={wrapperClasses}>
