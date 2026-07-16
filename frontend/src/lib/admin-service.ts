@@ -23,6 +23,22 @@ const isFirebaseInitialized = () => {
   return !!(auth && db);
 };
 
+// Helper function to generate referral code
+function generateReferralCode(firstName?: string, lastName?: string): string {
+  if (firstName && firstName.length >= 2) {
+    const prefix = firstName.substring(0, 2).toUpperCase();
+    const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+    return `${prefix}${random}`;
+  }
+  // Fallback: generate a random code
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code = 'AMB';
+  for (let i = 0; i < 5; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
 export const adminService = {
   // Create initial admin account (run once during setup)
   async createInitialAdmin(email: string, password: string, adminData: any, secretKey: string) {
@@ -301,21 +317,64 @@ export const adminService = {
     }
   },
   
-  // Approve ambassador
+  // ✅ FIXED: Approve ambassador with referral code generation
   async approveAmbassador(ambassadorId: string) {
+    if (!isFirebaseInitialized()) {
+      return { error: 'Firebase is not initialized.', referralCode: null };
+    }
+
     try {
+      // Get ambassador data first
+      const ambassadorRef = doc(db, 'ambassadors', ambassadorId);
+      const ambassadorDoc = await getDoc(ambassadorRef);
+      
+      if (!ambassadorDoc.exists()) {
+        return { error: 'Ambassador not found', referralCode: null };
+      }
+      
+      // Get user data for generating personalized referral code
+      const userRef = doc(db, 'users', ambassadorId);
+      const userDoc = await getDoc(userRef);
+      const userData = userDoc.data();
+      const firstName = userData?.firstName || 'AMB';
+      const lastName = userData?.lastName || '';
+      
+      // Generate unique referral code
+      let referralCode = generateReferralCode(firstName, lastName);
+      
+      // Ensure uniqueness - check if code already exists
+      let isUnique = false;
+      let attempts = 0;
+      while (!isUnique && attempts < 10) {
+        const existingQuery = query(
+          collection(db, 'ambassadors'),
+          where('referralCode', '==', referralCode)
+        );
+        const existingSnapshot = await getDocs(existingQuery);
+        
+        if (existingSnapshot.empty) {
+          isUnique = true;
+        } else {
+          // Generate new code with random suffix
+          const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+          referralCode = `${referralCode.substring(0, 4)}${random}`;
+          attempts++;
+        }
+      }
+      
       const batch = writeBatch(db);
       
-      // Update ambassador status
-      const ambassadorRef = doc(db, 'ambassadors', ambassadorId);
+      // Update ambassador with referral code
       batch.update(ambassadorRef, {
         applicationStatus: 'approved',
+        referralCode: referralCode,
         approvedAt: serverTimestamp(),
+        onboardingStep: 5,
         updatedAt: serverTimestamp(),
+        isActive: true,
       });
       
       // Update user status
-      const userRef = doc(db, 'users', ambassadorId);
       batch.update(userRef, {
         isActive: true,
         updatedAt: serverTimestamp(),
@@ -323,12 +382,12 @@ export const adminService = {
       
       await batch.commit();
       
-      // Log admin action
-      await this.logAdminAction('approve_ambassador', ambassadorId, {});
+      console.log(`✅ Ambassador ${ambassadorId} approved with referral code: ${referralCode}`);
       
-      return { error: null };
+      return { error: null, referralCode };
     } catch (error: any) {
-      return { error: error.message };
+      console.error('Error approving ambassador:', error);
+      return { error: error.message, referralCode: null };
     }
   },
   
