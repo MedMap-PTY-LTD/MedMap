@@ -574,10 +574,9 @@ const AdminDashboard = () => {
     },
   });
 
-  // ✅ FIXED: Approve Ambassador Mutation with referral code generation
+  // ✅ APPROVE AMBASSADOR MUTATION - Generates referral code
   const approveAmbassadorMutation = useMutation({
     mutationFn: async (ambassadorId: string) => {
-      // Use adminService which has the fixed approveAmbassador function
       const result = await adminService.approveAmbassador(ambassadorId);
       if (result.error) {
         throw new Error(result.error);
@@ -1040,7 +1039,7 @@ const AdminDashboard = () => {
 
         {/* Tabs */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
-          <Tabs defaultValue="doctors" className="space-y-6">
+          <Tabs defaultValue="ambassadors" className="space-y-6">
             <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
               <TabsList className="inline-flex w-auto min-w-full sm:min-w-0 sm:w-full max-w-5xl">
                 <TabsTrigger value="doctors" className="flex-1 text-xs sm:text-sm">Doctors</TabsTrigger>
@@ -1054,7 +1053,6 @@ const AdminDashboard = () => {
 
             {/* ==================== DOCTORS TAB ==================== */}
             <TabsContent value="doctors" className="space-y-6">
-              {/* Pending Doctors Section */}
               {pendingDoctors.length > 0 ? (
                 <Card>
                   <CardHeader className="pb-3">
@@ -1149,7 +1147,6 @@ const AdminDashboard = () => {
                 </Card>
               )}
 
-              {/* Verified Doctors */}
               <Card>
                 <CardHeader className="pb-3">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1436,7 +1433,7 @@ const AdminDashboard = () => {
 
             {/* ==================== AMBASSADORS TAB ==================== */}
             <TabsContent value="ambassadors" className="space-y-6">
-              {/* Pending Ambassador Applications */}
+              {/* ✅ PENDING AMBASSADOR APPLICATIONS - WITH APPROVE BUTTON */}
               {pendingAmbassadors.length > 0 && (
                 <Card className="border-2 border-yellow-200">
                   <CardHeader className="bg-yellow-50 pb-3">
@@ -1447,7 +1444,7 @@ const AdminDashboard = () => {
                       </span>
                       <Badge className="bg-yellow-100 text-yellow-800 w-fit">{pendingAmbassadors.length}</Badge>
                     </CardTitle>
-                    <CardDescription className="text-xs sm:text-sm">Ambassadors waiting for initial review</CardDescription>
+                    <CardDescription className="text-xs sm:text-sm">Review and approve ambassador applications</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4 pt-4">
                     {pendingAmbassadors.map((ambassador) => (
@@ -1497,6 +1494,20 @@ const AdminDashboard = () => {
                             )}
                           </div>
                           <div className="flex flex-row sm:flex-col gap-2 ml-0 sm:ml-4">
+                            {/* ✅ APPROVE BUTTON - Generates referral code */}
+                            <Button
+                              size="sm"
+                              className="bg-green-600 hover:bg-green-700 text-sm whitespace-nowrap"
+                              onClick={() => handleApproveAmbassador(ambassador.uid)}
+                              disabled={approveAmbassadorMutation.isPending && approveAmbassadorMutation.variables === ambassador.uid}
+                            >
+                              {approveAmbassadorMutation.isPending && approveAmbassadorMutation.variables === ambassador.uid ? (
+                                <Loader2 className="w-3 h-3 sm:w-4 sm:h-4 mr-1 animate-spin" />
+                              ) : (
+                                <CheckCircle className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
+                              )}
+                              Approve
+                            </Button>
                             <Button
                               size="sm"
                               variant="outline"
