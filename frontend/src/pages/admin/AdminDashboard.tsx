@@ -16,6 +16,7 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { authService } from '@/lib/firebase';
+import { adminService } from '@/lib/admin-service';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -573,42 +574,22 @@ const AdminDashboard = () => {
     },
   });
 
+  // ✅ FIXED: Approve Ambassador Mutation with referral code generation
   const approveAmbassadorMutation = useMutation({
     mutationFn: async (ambassadorId: string) => {
-      const userDocRef = doc(db, 'users', ambassadorId);
-      const userDocSnap = await getDoc(userDocRef);
-      const userData = userDocSnap.data();
-      const firstName = userData?.firstName || '';
-      const lastName = userData?.lastName || '';
-      const referralCode = generateReferralCode(firstName, lastName);
-      
-      const batch = writeBatch(db);
-      
-      const ambassadorRef = doc(db, 'ambassadors', ambassadorId);
-      batch.update(ambassadorRef, {
-        applicationStatus: 'approved',
-        referralCode: referralCode,
-        approvedAt: serverTimestamp(),
-        onboardingStep: 5,
-        updatedAt: serverTimestamp(),
-      });
-      
-      const userRef = doc(db, 'users', ambassadorId);
-      batch.update(userRef, {
-        isActive: true,
-        updatedAt: serverTimestamp(),
-      });
-      
-      await batch.commit();
-      
-      return { referralCode };
+      // Use adminService which has the fixed approveAmbassador function
+      const result = await adminService.approveAmbassador(ambassadorId);
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      return { referralCode: result.referralCode };
     },
     onSuccess: (data) => {
-      setGeneratedReferralCode(data.referralCode);
+      setGeneratedReferralCode(data.referralCode || '');
       setShowReferralCodeDialog(true);
       toast({ 
         title: 'Success', 
-        description: 'Ambassador approved and referral code generated.' 
+        description: `Ambassador approved! Referral code: ${data.referralCode}` 
       });
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.dashboard] });
     },
@@ -1455,6 +1436,99 @@ const AdminDashboard = () => {
 
             {/* ==================== AMBASSADORS TAB ==================== */}
             <TabsContent value="ambassadors" className="space-y-6">
+              {/* Pending Ambassador Applications */}
+              {pendingAmbassadors.length > 0 && (
+                <Card className="border-2 border-yellow-200">
+                  <CardHeader className="bg-yellow-50 pb-3">
+                    <CardTitle className="text-base sm:text-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <span className="flex items-center gap-2">
+                        <UserCheck className="w-5 h-5 text-yellow-600" />
+                        Pending Ambassador Applications
+                      </span>
+                      <Badge className="bg-yellow-100 text-yellow-800 w-fit">{pendingAmbassadors.length}</Badge>
+                    </CardTitle>
+                    <CardDescription className="text-xs sm:text-sm">Ambassadors waiting for initial review</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4 pt-4">
+                    {pendingAmbassadors.map((ambassador) => (
+                      <div key={ambassador.uid} className="border rounded-lg p-3 sm:p-4 bg-white">
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                          <div className="space-y-3 flex-1">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                <UserCheck className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-semibold text-base sm:text-lg truncate">{ambassador.fullName}</p>
+                                <p className="text-xs sm:text-sm text-gray-600 truncate">{ambassador.email}</p>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs sm:text-sm">
+                              <div>
+                                <p className="text-gray-500">ID Number</p>
+                                <p className="font-medium truncate">{ambassador.idNumber || 'N/A'}</p>
+                              </div>
+                              <div>
+                                <p className="text-gray-500">Phone</p>
+                                <p className="font-medium truncate">{ambassador.phone || 'N/A'}</p>
+                              </div>
+                              <div>
+                                <p className="text-gray-500">Onboarding Step</p>
+                                <Badge className={getOnboardingStatusBadge(ambassador.onboardingStep).color}>
+                                  {getOnboardingStatusBadge(ambassador.onboardingStep).label}
+                                </Badge>
+                              </div>
+                              <div>
+                                <p className="text-gray-500">Application Status</p>
+                                <Badge className="bg-yellow-100 text-yellow-800">{ambassador.applicationStatus}</Badge>
+                              </div>
+                            </div>
+                            {ambassador.referralSource && (
+                              <div className="text-xs sm:text-sm">
+                                <p className="text-gray-500">How did you hear about us?</p>
+                                <p className="font-medium">{ambassador.referralSource}</p>
+                              </div>
+                            )}
+                            {ambassador.motivation && (
+                              <div className="text-xs sm:text-sm">
+                                <p className="text-gray-500">Motivation</p>
+                                <p className="font-medium line-clamp-2">{ambassador.motivation}</p>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-row sm:flex-col gap-2 ml-0 sm:ml-4">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-blue-600 border-blue-300 text-sm whitespace-nowrap"
+                              onClick={() => {
+                                setSelectedAmbassador(ambassador);
+                                setShowAmbassadorDetailsDialog(true);
+                              }}
+                            >
+                              <Eye className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
+                              Review
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-red-600 hover:text-red-700 border-red-300 text-sm whitespace-nowrap"
+                              onClick={() => {
+                                const reason = prompt('Enter rejection reason:');
+                                if (reason) handleRejectAmbassador(ambassador.uid, reason);
+                              }}
+                              disabled={rejectAmbassadorMutation.isPending}
+                            >
+                              <XCircle className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />Reject
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Ready for Approval */}
               {readyForApproval.length > 0 && (
                 <Card className="border-2 border-green-200">
@@ -1976,7 +2050,6 @@ const AdminDashboard = () => {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {/* Summary Cards */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                     <div className="bg-gray-50 rounded-lg p-3 text-center">
                       <p className="text-xs text-gray-500">Total Referrals</p>
