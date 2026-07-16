@@ -70,9 +70,10 @@ import {
   ChevronDown,
   Filter,
   ArrowUpDown,
+  RefreshCw
 } from 'lucide-react';
 
-// Types remain the same
+// ==================== TYPES ====================
 interface UserProfile {
   uid: string;
   email: string;
@@ -196,7 +197,7 @@ interface Referral {
   rejectionReason?: string;
 }
 
-// Helper to combine user data with role data
+// ==================== HELPER FUNCTIONS ====================
 const combineWithUserData = (roleData: any, userData: any): any => {
   return {
     ...roleData,
@@ -216,50 +217,37 @@ const combineWithUserData = (roleData: any, userData: any): any => {
 // ==================== QUERY KEYS ====================
 const QUERY_KEYS = {
   dashboard: 'dashboard',
-  users: 'users',
-  doctors: 'doctors',
-  patients: 'patients',
-  ambassadors: 'ambassadors',
-  pendingDoctors: 'pendingDoctors',
-  referrals: 'referrals',
-  stats: 'stats',
 };
 
 // ==================== DATA FETCHING FUNCTIONS ====================
 const fetchDashboardData = async () => {
   try {
+    console.log('🔄 Fetching dashboard data...');
+    
     const [
       usersSnapshot,
       doctorsSnapshot,
       patientsSnapshot,
       ambassadorsSnapshot,
-      pendingDoctorsSnapshot,
       referralsSnapshot,
     ] = await Promise.all([
       getDocs(collection(db, 'users')),
       getDocs(collection(db, 'doctors')),
       getDocs(collection(db, 'patients')),
       getDocs(collection(db, 'ambassadors')),
-      getDocs(query(
-        collection(db, 'doctors'),
-        where('verificationStatus', '==', 'pending')
-      )),
       getDocs(collection(db, 'referrals')),
     ]);
 
-    // Build a map of user data by uid for quick lookup
     const userMap: Record<string, any> = {};
     usersSnapshot.docs.forEach((docSnap) => {
       userMap[docSnap.id] = { uid: docSnap.id, ...docSnap.data() };
     });
 
-    // Process all users
     const usersData = usersSnapshot.docs.map((docSnap) => ({
       uid: docSnap.id,
       ...docSnap.data()
     })) as UserProfile[];
 
-    // Process all doctors
     const allDoctors = doctorsSnapshot.docs.map((docSnap) => {
       const doctorData = docSnap.data();
       const userData = userMap[docSnap.id] || {};
@@ -269,7 +257,6 @@ const fetchDashboardData = async () => {
       ) as DoctorProfile;
     });
 
-    // Process patients
     const patientsData = patientsSnapshot.docs.map((docSnap) => {
       const patientData = docSnap.data();
       const userData = userMap[docSnap.id] || {};
@@ -279,7 +266,6 @@ const fetchDashboardData = async () => {
       ) as PatientProfile;
     });
 
-    // Process ambassadors
     const ambassadorsData = ambassadorsSnapshot.docs.map((docSnap) => {
       const ambassadorData = docSnap.data();
       const userData = userMap[docSnap.id] || {};
@@ -289,23 +275,16 @@ const fetchDashboardData = async () => {
       ) as AmbassadorProfile;
     });
 
-    // Process pending doctors
-    const pendingDocs = await Promise.all(
-      pendingDoctorsSnapshot.docs.map(async (docSnap) => {
-        const doctorData = docSnap.data();
-        const userData = userMap[docSnap.id] || {};
-        return combineWithUserData(
-          { 
-            uid: docSnap.id, 
-            ...doctorData,
-            submittedAt: doctorData.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-          },
-          userData
-        ) as DoctorProfile;
-      })
+    // Filter pending doctors
+    const pendingDoctorsData = allDoctors.filter(
+      d => d.verificationStatus === 'pending'
     );
 
-    // Process referrals
+    // Filter pending ambassadors
+    const pendingAmbassadorsData = ambassadorsData.filter(
+      a => a.applicationStatus === 'pending'
+    );
+
     const referralsData = referralsSnapshot.docs.map((docSnap) => ({
       id: docSnap.id,
       ...docSnap.data(),
@@ -313,49 +292,42 @@ const fetchDashboardData = async () => {
       verifiedAt: docSnap.data().verifiedAt?.toDate?.()?.toISOString(),
     })) as Referral[];
 
-    // Calculate stats
-    const totalUsers = usersData.length;
-    const totalDoctors = allDoctors.filter(d => d.verificationStatus === 'verified').length;
-    const totalPatients = usersData.filter(u => u.role === 'patient').length;
-    const totalAmbassadors = usersData.filter(u => u.role === 'ambassador').length;
-    const pendingDoctorsCount = pendingDocs.length;
-    const pendingAmbassadorsCount = ambassadorsData.filter(a => a.applicationStatus === 'pending').length;
-    const readyForApproval = ambassadorsData.filter(a => a.interviewStatus === 'passed' && a.applicationStatus === 'pending').length;
-    
-    const totalReferrals = referralsData.length;
-    const pendingReferrals = referralsData.filter(r => r.status === 'pending').length;
-    const totalCommission = referralsData
-      .filter(r => r.status === 'verified')
-      .reduce((sum, r) => sum + (r.commissionEarned || 0), 0);
+    const readyForApproval = ambassadorsData.filter(
+      a => a.interviewStatus === 'passed' && a.applicationStatus === 'pending'
+    ).length;
 
     return {
       users: usersData,
       doctors: allDoctors,
       patients: patientsData,
       ambassadors: ambassadorsData,
-      pendingDoctors: pendingDocs,
+      pendingDoctors: pendingDoctorsData,
+      pendingAmbassadors: pendingAmbassadorsData,
       referrals: referralsData,
       stats: {
-        totalUsers,
-        totalDoctors,
-        totalPatients,
-        totalAmbassadors,
-        pendingDoctors: pendingDoctorsCount,
-        pendingAmbassadors: pendingAmbassadorsCount,
-        readyForApproval,
+        totalUsers: usersData.length,
+        totalDoctors: allDoctors.filter(d => d.verificationStatus === 'verified').length,
+        totalPatients: usersData.filter(u => u.role === 'patient').length,
+        totalAmbassadors: usersData.filter(u => u.role === 'ambassador').length,
+        pendingDoctors: pendingDoctorsData.length,
+        pendingAmbassadors: pendingAmbassadorsData.length,
+        readyForApproval: readyForApproval,
         openTickets: 0,
         urgentTickets: 0,
-        totalReferrals,
-        pendingReferrals,
-        totalCommission,
+        totalReferrals: referralsData.length,
+        pendingReferrals: referralsData.filter(r => r.status === 'pending').length,
+        totalCommission: referralsData
+          .filter(r => r.status === 'verified')
+          .reduce((sum, r) => sum + (r.commissionEarned || 0), 0),
       },
     };
   } catch (error: any) {
-    console.error('Error fetching dashboard data:', error);
+    console.error('❌ Error fetching dashboard data:', error);
     throw new Error(error.message || 'Failed to load dashboard data');
   }
 };
 
+// ==================== ADMIN DASHBOARD COMPONENT ====================
 const AdminDashboard = () => {
   const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
@@ -391,7 +363,7 @@ const AdminDashboard = () => {
     confirmPassword: '',
   });
 
-  // ==================== QUERY: Fetch all dashboard data ====================
+  // ==================== QUERY ====================
   const { 
     data, 
     isLoading, 
@@ -401,28 +373,23 @@ const AdminDashboard = () => {
   } = useQuery({
     queryKey: [QUERY_KEYS.dashboard],
     queryFn: fetchDashboardData,
-    // Enable background refetching
     refetchOnWindowFocus: true,
     refetchOnMount: true,
     refetchOnReconnect: true,
-    // Cache data for 5 minutes
     staleTime: 5 * 60 * 1000,
-    // Keep cache for 10 minutes
     gcTime: 10 * 60 * 1000,
-    // Refetch every 30 seconds for fresh data
     refetchInterval: 30 * 1000,
-    // Don't refetch on error
     retry: 2,
     retryDelay: 1000,
   });
 
-  // Extract data from query result
   const {
     users = [],
     doctors = [],
     patients = [],
     ambassadors = [],
     pendingDoctors = [],
+    pendingAmbassadors = [],
     referrals = [],
     stats = {
       totalUsers: 0,
@@ -442,7 +409,6 @@ const AdminDashboard = () => {
 
   // ==================== MUTATIONS ====================
   
-  // Approve Doctor Mutation
   const approveDoctorMutation = useMutation({
     mutationFn: async (doctorId: string) => {
       const batch = writeBatch(db);
@@ -491,7 +457,6 @@ const AdminDashboard = () => {
     },
     onSuccess: () => {
       toast({ title: 'Success', description: 'Doctor approved successfully.' });
-      // Invalidate and refetch dashboard data
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.dashboard] });
     },
     onError: (error: any) => {
@@ -503,7 +468,6 @@ const AdminDashboard = () => {
     },
   });
 
-  // Reject Doctor Mutation
   const rejectDoctorMutation = useMutation({
     mutationFn: async ({ doctorId, reason }: { doctorId: string; reason: string }) => {
       const batch = writeBatch(db);
@@ -551,7 +515,6 @@ const AdminDashboard = () => {
     },
   });
 
-  // Update Interview Status Mutation
   const updateInterviewStatusMutation = useMutation({
     mutationFn: async ({ 
       ambassadorId, 
@@ -610,7 +573,6 @@ const AdminDashboard = () => {
     },
   });
 
-  // Approve Ambassador Mutation
   const approveAmbassadorMutation = useMutation({
     mutationFn: async (ambassadorId: string) => {
       const userDocRef = doc(db, 'users', ambassadorId);
@@ -659,7 +621,6 @@ const AdminDashboard = () => {
     },
   });
 
-  // Reject Ambassador Mutation
   const rejectAmbassadorMutation = useMutation({
     mutationFn: async ({ ambassadorId, reason }: { ambassadorId: string; reason: string }) => {
       const batch = writeBatch(db);
@@ -697,7 +658,6 @@ const AdminDashboard = () => {
     },
   });
 
-  // Deactivate User Mutation
   const deactivateUserMutation = useMutation({
     mutationFn: async (userId: string) => {
       const userRef = doc(db, 'users', userId);
@@ -724,7 +684,6 @@ const AdminDashboard = () => {
     },
   });
 
-  // Delete Inactive Patients Mutation
   const deleteInactivePatientsMutation = useMutation({
     mutationFn: async () => {
       const thresholdDate = new Date();
@@ -773,7 +732,6 @@ const AdminDashboard = () => {
     },
   });
 
-  // Update Admin Password Mutation
   const updateAdminPasswordMutation = useMutation({
     mutationFn: async ({ 
       currentPassword, 
@@ -806,7 +764,6 @@ const AdminDashboard = () => {
   // ==================== HANDLER FUNCTIONS ====================
   
   useEffect(() => {
-    // Redirect if not admin
     if (profile && profile.role !== 'admin') {
       navigate('/dashboard');
       return;
@@ -923,10 +880,14 @@ const AdminDashboard = () => {
     });
   };
 
+  // ==================== LOADING STATE ====================
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-12 h-12 text-blue-600 animate-spin" />
+          <p className="text-gray-600">Loading dashboard...</p>
+        </div>
       </div>
     );
   }
@@ -936,7 +897,7 @@ const AdminDashboard = () => {
       <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-4">
         <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
         <h2 className="text-xl font-semibold text-gray-900 mb-2">Failed to Load Dashboard</h2>
-        <p className="text-gray-600 mb-4 text-center max-w-md">{error.message}</p>
+        <p className="text-gray-600 mb-4 text-center max-w-md">{(error as Error).message}</p>
         <Button onClick={() => refetch()}>
           <RefreshCw className="w-4 h-4 mr-2" />
           Retry
@@ -945,19 +906,21 @@ const AdminDashboard = () => {
     );
   }
 
-  // Ambassadors ready for approval
-  const readyForApproval = ambassadors.filter(a => a.interviewStatus === 'passed' && a.applicationStatus === 'pending');
-  const pendingInterview = ambassadors.filter(a => a.onboardingStep === 4 && a.interviewStatus === 'pending');
+  const readyForApproval = ambassadors.filter(
+    a => a.interviewStatus === 'passed' && a.applicationStatus === 'pending'
+  );
+  const pendingInterview = ambassadors.filter(
+    a => a.onboardingStep === 4 && a.interviewStatus === 'pending'
+  );
 
-  // Stats cards data
   const statsCards = [
     { title: 'Total Users', value: stats.totalUsers, icon: Users, color: 'blue' },
     { title: 'Doctors', value: stats.totalDoctors, icon: Stethoscope, color: 'green' },
     { title: 'Patients', value: stats.totalPatients, icon: Activity, color: 'purple' },
     { title: 'Ambassadors', value: stats.totalAmbassadors, icon: Award, color: 'amber' },
-    { title: 'Pending', value: stats.pendingDoctors + stats.pendingAmbassadors, icon: Clock, color: 'yellow' },
+    { title: 'Pending Doctors', value: stats.pendingDoctors, icon: Clock, color: 'yellow' },
+    { title: 'Pending Ambassadors', value: stats.pendingAmbassadors, icon: UserCheck, color: 'orange' },
     { title: 'Ready to Approve', value: stats.readyForApproval, icon: Trophy, color: 'green' },
-    { title: 'Referrals', value: stats.totalReferrals, icon: Users, color: 'indigo' },
     { title: 'Commission', value: `R${stats.totalCommission.toLocaleString()}`, icon: CreditCard, color: 'emerald' },
   ];
 
@@ -968,15 +931,16 @@ const AdminDashboard = () => {
       case 'purple': return 'text-purple-600';
       case 'amber': return 'text-amber-600';
       case 'yellow': return 'text-yellow-600';
+      case 'orange': return 'text-orange-600';
       case 'indigo': return 'text-indigo-600';
       case 'emerald': return 'text-emerald-600';
       default: return 'text-gray-600';
     }
   };
 
-  // Show loading indicator when background refetching
   const isRefreshing = isRefetching;
 
+  // ==================== MAIN RENDER ====================
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Mobile Menu Button */}
@@ -1069,7 +1033,7 @@ const AdminDashboard = () => {
         </div>
       </div>
 
-      {/* Main Content - Same as before, just using the data from useQuery */}
+      {/* Main Content */}
       <div className="pt-16 lg:pt-0">
         {/* Stats Cards */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -1093,10 +1057,9 @@ const AdminDashboard = () => {
           </div>
         </div>
 
-        {/* Tabs - Same structure, data from useQuery */}
+        {/* Tabs */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
           <Tabs defaultValue="doctors" className="space-y-6">
-            {/* Tabs List - Same as before */}
             <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
               <TabsList className="inline-flex w-auto min-w-full sm:min-w-0 sm:w-full max-w-5xl">
                 <TabsTrigger value="doctors" className="flex-1 text-xs sm:text-sm">Doctors</TabsTrigger>
@@ -1108,10 +1071,10 @@ const AdminDashboard = () => {
               </TabsList>
             </div>
 
-            {/* All TabsContent sections remain the same, just use the data from useQuery */}
-            {/* Doctors Tab */}
+            {/* ==================== DOCTORS TAB ==================== */}
             <TabsContent value="doctors" className="space-y-6">
-              {pendingDoctors.length > 0 && (
+              {/* Pending Doctors Section */}
+              {pendingDoctors.length > 0 ? (
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base sm:text-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -1174,7 +1137,7 @@ const AdminDashboard = () => {
                               onClick={() => handleApproveDoctor(doctor.uid)}
                               disabled={approveDoctorMutation.isPending}
                             >
-                              {approveDoctorMutation.isPending && approveDoctorMutation.variables === doctor.uid ? (
+                              {approveDoctorMutation.isPending ? (
                                 <Loader2 className="w-3 h-3 sm:w-4 sm:h-4 mr-1 animate-spin" />
                               ) : (
                                 <CheckCircle className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
@@ -1195,8 +1158,17 @@ const AdminDashboard = () => {
                     ))}
                   </CardContent>
                 </Card>
+              ) : (
+                <Card className="border-2 border-green-200 bg-green-50">
+                  <CardContent className="py-8 text-center">
+                    <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-3" />
+                    <h3 className="text-lg font-semibold text-green-800">No Pending Doctors</h3>
+                    <p className="text-sm text-green-700">All doctor applications have been reviewed.</p>
+                  </CardContent>
+                </Card>
               )}
 
+              {/* Verified Doctors */}
               <Card>
                 <CardHeader className="pb-3">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1216,7 +1188,6 @@ const AdminDashboard = () => {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {/* Mobile Card View */}
                   <div className="block lg:hidden space-y-3">
                     {doctors
                       .filter(d => d.verificationStatus === 'verified')
@@ -1265,7 +1236,6 @@ const AdminDashboard = () => {
                     )}
                   </div>
 
-                  {/* Desktop Table View */}
                   <div className="hidden lg:block overflow-x-auto">
                     <table className="w-full">
                       <thead>
@@ -1325,7 +1295,7 @@ const AdminDashboard = () => {
               </Card>
             </TabsContent>
 
-            {/* Patients Tab */}
+            {/* ==================== PATIENTS TAB ==================== */}
             <TabsContent value="patients">
               <Card>
                 <CardHeader className="pb-3">
@@ -1361,7 +1331,6 @@ const AdminDashboard = () => {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {/* Mobile Card View */}
                   <div className="block lg:hidden space-y-3">
                     {patients
                       .filter(p =>
@@ -1417,7 +1386,6 @@ const AdminDashboard = () => {
                       ))}
                   </div>
 
-                  {/* Desktop Table View */}
                   <div className="hidden lg:block overflow-x-auto">
                     <table className="w-full">
                       <thead>
@@ -1485,8 +1453,9 @@ const AdminDashboard = () => {
               </Card>
             </TabsContent>
 
-            {/* Ambassadors Tab */}
+            {/* ==================== AMBASSADORS TAB ==================== */}
             <TabsContent value="ambassadors" className="space-y-6">
+              {/* Ready for Approval */}
               {readyForApproval.length > 0 && (
                 <Card className="border-2 border-green-200">
                   <CardHeader className="bg-green-50 pb-3">
@@ -1524,11 +1493,11 @@ const AdminDashboard = () => {
                               </div>
                               <div>
                                 <p className="text-gray-500">Psychometric Score</p>
-                                <p className="font-medium">{ambassador.psychometricTest?.score}%</p>
+                                <p className="font-medium">{ambassador.psychometricTest?.score || 0}%</p>
                               </div>
                               <div>
                                 <p className="text-gray-500">Knowledge Test</p>
-                                <p className="font-medium">{ambassador.knowledgeTest?.score}% ({ambassador.knowledgeTest?.attempts} attempts)</p>
+                                <p className="font-medium">{ambassador.knowledgeTest?.score || 0}% ({ambassador.knowledgeTest?.attempts || 0} attempts)</p>
                               </div>
                             </div>
                           </div>
@@ -1566,6 +1535,7 @@ const AdminDashboard = () => {
                 </Card>
               )}
 
+              {/* Pending Interview */}
               {pendingInterview.length > 0 && (
                 <Card className="border-2 border-blue-200">
                   <CardHeader className="bg-blue-50 pb-3">
@@ -1599,11 +1569,11 @@ const AdminDashboard = () => {
                               </div>
                               <div>
                                 <p className="text-gray-500">Knowledge Score</p>
-                                <p className="font-medium">{ambassador.knowledgeTest?.score}%</p>
+                                <p className="font-medium">{ambassador.knowledgeTest?.score || 0}%</p>
                               </div>
                               <div>
                                 <p className="text-gray-500">Psychometric Score</p>
-                                <p className="font-medium">{ambassador.psychometricTest?.score}%</p>
+                                <p className="font-medium">{ambassador.psychometricTest?.score || 0}%</p>
                               </div>
                               <div>
                                 <p className="text-gray-500">Step</p>
@@ -1645,6 +1615,7 @@ const AdminDashboard = () => {
                 </Card>
               )}
 
+              {/* All Ambassadors */}
               <Card>
                 <CardHeader className="pb-3">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1664,7 +1635,6 @@ const AdminDashboard = () => {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {/* Mobile Card View */}
                   <div className="block lg:hidden space-y-3">
                     {ambassadors
                       .filter(a =>
@@ -1728,7 +1698,6 @@ const AdminDashboard = () => {
                       ))}
                   </div>
 
-                  {/* Desktop Table View */}
                   <div className="hidden lg:block overflow-x-auto">
                     <table className="w-full">
                       <thead>
@@ -1848,7 +1817,7 @@ const AdminDashboard = () => {
               </Card>
             </TabsContent>
 
-            {/* All Users Tab */}
+            {/* ==================== ALL USERS TAB ==================== */}
             <TabsContent value="users">
               <Card>
                 <CardHeader className="pb-3">
@@ -1874,7 +1843,6 @@ const AdminDashboard = () => {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {/* Mobile Card View */}
                   <div className="block lg:hidden space-y-3">
                     {users
                       .filter(u =>
@@ -1916,7 +1884,6 @@ const AdminDashboard = () => {
                       ))}
                   </div>
 
-                  {/* Desktop Table View */}
                   <div className="hidden lg:block overflow-x-auto">
                     <table className="w-full">
                       <thead>
@@ -1981,7 +1948,7 @@ const AdminDashboard = () => {
               </Card>
             </TabsContent>
 
-            {/* Referrals Tab */}
+            {/* ==================== REFERRALS TAB ==================== */}
             <TabsContent value="referrals">
               <Card>
                 <CardHeader className="pb-3">
@@ -2038,7 +2005,6 @@ const AdminDashboard = () => {
                     </div>
                   </div>
 
-                  {/* Mobile Card View */}
                   <div className="block lg:hidden space-y-3">
                     {referrals
                       .filter(r =>
@@ -2089,7 +2055,6 @@ const AdminDashboard = () => {
                     )}
                   </div>
 
-                  {/* Desktop Table View */}
                   <div className="hidden lg:block overflow-x-auto">
                     <table className="w-full">
                       <thead>
@@ -2165,7 +2130,7 @@ const AdminDashboard = () => {
               </Card>
             </TabsContent>
 
-            {/* Settings Tab */}
+            {/* ==================== SETTINGS TAB ==================== */}
             <TabsContent value="settings">
               <Card>
                 <CardHeader className="pb-3">
@@ -2208,7 +2173,8 @@ const AdminDashboard = () => {
         </div>
       </div>
 
-      {/* All Dialogs - Same as before, using the data and mutations */}
+      {/* ==================== DIALOGS ==================== */}
+      
       {/* Patient Details Dialog */}
       <Dialog open={showPatientDetailsDialog} onOpenChange={setShowPatientDetailsDialog}>
         <DialogContent className="max-w-[95vw] sm:max-w-2xl max-h-[85vh] overflow-y-auto">
@@ -2615,8 +2581,5 @@ const AdminDashboard = () => {
     </div>
   );
 };
-
-// Make sure to import RefreshCw
-import { RefreshCw } from 'lucide-react';
 
 export default AdminDashboard;
