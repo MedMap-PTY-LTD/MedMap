@@ -10,8 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { db } from '../../lib/firebase';
-import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { adminService } from '@/lib/admin-service';
+import { doc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import TrainingModule from './TrainingModule';
 import KnowledgeTest from './KnowledgeTest';
 import {
@@ -69,7 +68,7 @@ const AmbassadorPortal = () => {
         const data = ambassadorDoc.data();
         setAmbassadorData(data);
         
-        // Fetch referrals if ambassador is approved
+        // Check if approved and has referral code
         if (data.applicationStatus === 'approved' && data.referralCode) {
           await fetchReferrals(user.uid);
         }
@@ -114,23 +113,87 @@ const AmbassadorPortal = () => {
 
   const fetchReferrals = async (ambassadorId: string) => {
     try {
-      // Get referrals with doctor details
-      const result = await adminService.getAmbassadorReferralsWithDoctors(ambassadorId);
-      if (result.error) {
-        console.error('Error fetching referrals:', result.error);
-        toast({ title: 'Error', description: 'Failed to load referrals.', variant: 'destructive' });
-        return;
+      // Get referrals from Firestore directly
+      const referralsRef = collection(db, 'referrals');
+      const q = query(
+        referralsRef,
+        where('ambassadorId', '==', ambassadorId)
+      );
+      const snapshot = await getDocs(q);
+      
+      const referralsList: any[] = [];
+      for (const docSnap of snapshot.docs) {
+        const data = docSnap.data();
+        
+        // Get doctor details
+        let doctorFullName = data.doctorName || 'Unknown Doctor';
+        let doctorEmail = data.doctorEmail || '';
+        let doctorSpecialization = 'N/A';
+        let doctorVerificationStatus = data.status || 'pending';
+        let doctorIsActive = false;
+        
+        if (data.doctorId) {
+          try {
+            const doctorDoc = await getDoc(doc(db, 'doctors', data.doctorId));
+            if (doctorDoc.exists()) {
+              const doctorData = doctorDoc.data();
+              doctorSpecialization = doctorData.specialization || 'N/A';
+              doctorVerificationStatus = doctorData.verificationStatus || data.status || 'pending';
+            }
+            
+            const userDoc = await getDoc(doc(db, 'users', data.doctorId));
+            if (userDoc.exists()) {
+              const userData = userDoc.data();
+              doctorFullName = userData.fullName || doctorFullName;
+              doctorEmail = userData.email || doctorEmail;
+              doctorIsActive = userData.isActive || false;
+            }
+          } catch (e) {
+            console.error('Error fetching doctor details:', e);
+          }
+        }
+        
+        referralsList.push({
+          id: docSnap.id,
+          ...data,
+          doctorFullName,
+          doctorEmail,
+          doctorSpecialization,
+          doctorVerificationStatus,
+          doctorIsActive,
+          referredAt: data.referredAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+          verifiedAt: data.verifiedAt?.toDate?.()?.toISOString() || null,
+          commissionEarned: data.commissionEarned || 0,
+          commissionPaid: data.commissionPaid || false,
+          status: data.status || 'pending',
+        });
       }
       
-      setReferrals(result.referrals || []);
+      setReferrals(referralsList);
       
-      // Get referral stats
-      const statsResult = await adminService.getAmbassadorReferralStats(ambassadorId);
-      if (!statsResult.error) {
-        setReferralStats(statsResult.stats);
-      }
+      // Calculate stats
+      const stats = {
+        totalReferrals: referralsList.length,
+        pendingReferrals: referralsList.filter(r => r.status === 'pending').length,
+        verifiedReferrals: referralsList.filter(r => r.status === 'verified').length,
+        rejectedReferrals: referralsList.filter(r => r.status === 'rejected').length,
+        totalCommission: referralsList
+          .filter(r => r.status === 'verified')
+          .reduce((sum, r) => sum + (r.commissionEarned || 0), 0),
+        activeDoctors: referralsList.filter(r => r.status === 'verified' && r.doctorIsActive).length,
+        pendingCommission: referralsList
+          .filter(r => r.status === 'verified' && !r.commissionPaid)
+          .reduce((sum, r) => sum + (r.commissionEarned || 0), 0),
+        paidCommission: referralsList
+          .filter(r => r.status === 'verified' && r.commissionPaid)
+          .reduce((sum, r) => sum + (r.commissionEarned || 0), 0),
+      };
+      
+      setReferralStats(stats);
+      
     } catch (error) {
       console.error('Error fetching referrals:', error);
+      toast({ title: 'Error', description: 'Failed to load referrals.', variant: 'destructive' });
     }
   };
 
@@ -481,16 +544,9 @@ const AmbassadorPortal = () => {
                         Share this code with doctors when they sign up for MedMap. Each doctor you refer is permanently linked to you.
                       </p>
                     </div>
-                    <div className="mt-4 grid grid-cols-2 gap-2">
-                      <div className="bg-gray-50 p-3 rounded-lg text-center">
-                        <p className="text-xs text-gray-500">Referral Link</p>
-                        <p className="text-xs font-mono text-purple-600 truncate">
-                          {window.location.origin}/doctor-enrollment?ref={ambassadorData?.referralCode}
-                        </p>
-                      </div>
+                    <div className="mt-4">
                       <Button 
-                        variant="outline" 
-                        className="w-full"
+                        className="w-full bg-purple-600 hover:bg-purple-700"
                         onClick={() => {
                           const link = `${window.location.origin}/doctor-enrollment?ref=${ambassadorData?.referralCode}`;
                           navigator.clipboard.writeText(link);
@@ -498,7 +554,7 @@ const AmbassadorPortal = () => {
                         }}
                       >
                         <Copy className="w-4 h-4 mr-2" />
-                        Copy Link
+                        Copy Full Referral Link
                       </Button>
                     </div>
                   </CardContent>
@@ -689,7 +745,6 @@ const AmbassadorPortal = () => {
                               <th className="text-left py-3 px-4 text-sm font-semibold">Referred</th>
                               <th className="text-left py-3 px-4 text-sm font-semibold">Status</th>
                               <th className="text-left py-3 px-4 text-sm font-semibold">Commission</th>
-                              <th className="text-left py-3 px-4 text-sm font-semibold">Actions</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -721,21 +776,6 @@ const AmbassadorPortal = () => {
                                   <span className="font-medium text-green-600">
                                     R{referral.commissionEarned || 0}
                                   </span>
-                                </td>
-                                <td className="py-3 px-4">
-                                  <Button 
-                                    variant="ghost" 
-                                    size="sm"
-                                    onClick={() => {
-                                      // Show doctor details in a dialog or navigate
-                                      toast({
-                                        title: 'Doctor Details',
-                                        description: `${referral.doctorFullName} - ${referral.doctorSpecialization || 'N/A'}`,
-                                      });
-                                    }}
-                                  >
-                                    <Eye className="w-4 h-4" />
-                                  </Button>
                                 </td>
                               </tr>
                             ))}
@@ -771,19 +811,13 @@ const AmbassadorPortal = () => {
                     <div className="bg-yellow-50 p-4 rounded-lg text-center">
                       <p className="text-sm text-gray-600">Pending Commission</p>
                       <p className="text-2xl font-bold text-yellow-700">
-                        R{referrals
-                          .filter(r => r.status === 'verified' && !r.commissionPaid)
-                          .reduce((sum, r) => sum + (r.commissionEarned || 0), 0)
-                          .toLocaleString()}
+                        R{(referralStats?.pendingCommission || 0).toLocaleString()}
                       </p>
                     </div>
                     <div className="bg-blue-50 p-4 rounded-lg text-center">
                       <p className="text-sm text-gray-600">Paid Commission</p>
                       <p className="text-2xl font-bold text-blue-700">
-                        R{referrals
-                          .filter(r => r.status === 'verified' && r.commissionPaid)
-                          .reduce((sum, r) => sum + (r.commissionEarned || 0), 0)
-                          .toLocaleString()}
+                        R{(referralStats?.paidCommission || 0).toLocaleString()}
                       </p>
                     </div>
                   </div>
