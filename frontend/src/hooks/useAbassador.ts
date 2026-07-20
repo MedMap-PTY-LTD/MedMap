@@ -1,4 +1,3 @@
-// hooks/useAmbassador.ts
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AmbassadorService } from '@/lib/services/ambassadorService';
 import { AmbassadorStatsCalculator } from '@/lib/utils/ambassadorStats';
@@ -50,8 +49,8 @@ export const useAmbassador = (uid: string) => {
   // Calculate stats using the utility
   const stats = useMemo(() => AmbassadorStatsCalculator.calculate(referrals), [referrals]);
 
-  const refetch = () => {
-    return Promise.all([refetchAmbassador(), refetchReferrals()]);
+  const refetch = async () => {
+    await Promise.all([refetchAmbassador(), refetchReferrals()]);
   };
 
   return {

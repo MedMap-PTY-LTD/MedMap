@@ -1,4 +1,3 @@
-// lib/utils/ambassadorStats.ts
 import { ReferralDoctor, AmbassadorStats, TIERS, TierConfig } from '@/lib/types/ambassador';
 
 export class AmbassadorStatsCalculator {

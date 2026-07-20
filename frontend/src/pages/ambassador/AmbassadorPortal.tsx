@@ -1,8 +1,10 @@
-// pages/ambassador/AmbassadorPortal.tsx (Full updated file)
+// pages/ambassador/AmbassadorPortal.tsx
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
+import { useAmbassador } from '@/hooks/useAmbassador';
+import { TIERS } from '@/lib/types/ambassador';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -28,73 +30,9 @@ import {
   Video,
   Sparkles,
   UserCheck,
-  CheckCircle,
 } from 'lucide-react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AmbassadorService } from '@/lib/services/ambassadorService';
-import { AmbassadorStatsCalculator } from '@/lib/utils/ambassadorStats';
-import { TIERS } from '@/lib/types/ambassador';
 import TrainingModule from './TrainingModule';
 import KnowledgeTest from './KnowledgeTest';
-
-// ==================== QUERY KEYS ====================
-const QUERY_KEYS = {
-  ambassador: 'ambassador',
-  referrals: 'referrals',
-};
-
-// ==================== HOOK ====================
-const useAmbassador = (uid: string) => {
-  const queryClient = useQueryClient();
-
-  const { 
-    data: ambassadorData, 
-    isLoading: isLoadingAmbassador,
-    refetch: refetchAmbassador,
-  } = useQuery({
-    queryKey: [QUERY_KEYS.ambassador, uid],
-    queryFn: () => AmbassadorService.getAmbassadorData(uid),
-    enabled: !!uid,
-    staleTime: 2 * 60 * 1000,
-    gcTime: 5 * 60 * 1000,
-  });
-
-  const { 
-    data: referrals = [], 
-    isLoading: isLoadingReferrals, 
-    refetch: refetchReferrals,
-  } = useQuery({
-    queryKey: [QUERY_KEYS.referrals, ambassadorData?.uid],
-    queryFn: () => AmbassadorService.getReferrals(ambassadorData!.uid),
-    enabled: !!ambassadorData?.uid && ambassadorData?.applicationStatus === 'approved',
-    staleTime: 1 * 60 * 1000,
-    gcTime: 3 * 60 * 1000,
-    refetchInterval: 30000, // Auto-refresh every 30 seconds
-  });
-
-  const updateTier = useMutation({
-    mutationFn: (tier: string) => AmbassadorService.updateAmbassadorTier(uid, tier),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.ambassador] });
-    },
-  });
-
-  const stats = React.useMemo(() => AmbassadorStatsCalculator.calculate(referrals), [referrals]);
-
-  const refetch = () => {
-    return Promise.all([refetchAmbassador(), refetchReferrals()]);
-  };
-
-  return {
-    ambassadorData,
-    referrals,
-    stats,
-    isLoading: isLoadingAmbassador || isLoadingReferrals,
-    refetch,
-    updateTier: updateTier.mutate,
-    isUpdatingTier: updateTier.isPending,
-  };
-};
 
 // ==================== SUB-COMPONENTS ====================
 
@@ -115,13 +53,13 @@ const StatsCard = ({ title, value, icon: Icon, color, badge }: any) => (
 
 // ==================== MAIN COMPONENT ====================
 const AmbassadorPortal = () => {
-  const { user, profile } = useAuth();
+  const { user, profile, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [debugInfo, setDebugInfo] = useState<string>('');
 
+  // ✅ USING THE CUSTOM HOOK
   const {
     ambassadorData,
     referrals,
@@ -129,24 +67,6 @@ const AmbassadorPortal = () => {
     isLoading,
     refetch,
   } = useAmbassador(user?.uid || '');
-
-  // ==================== DEBUG: Log referrals ====================
-  useEffect(() => {
-    if (referrals.length > 0) {
-      console.log('📊 Referrals loaded:', referrals);
-      console.log('📊 Referral count:', referrals.length);
-      console.log('📊 First referral:', referrals[0]);
-      setDebugInfo(`Found ${referrals.length} referrals`);
-      
-      // Show toast notification when referrals are loaded
-      if (referrals.length > 0) {
-        toast({
-          title: 'Referrals Loaded',
-          description: `You have ${referrals.length} doctor referrals.`,
-        });
-      }
-    }
-  }, [referrals]);
 
   // ==================== HANDLERS ====================
   const handleCopyReferralCode = () => {
@@ -157,7 +77,7 @@ const AmbassadorPortal = () => {
   };
 
   const handleRefresh = async () => {
-    toast({ title: 'Refreshing...', description: 'Fetching latest data...' });
+    toast({ title: 'Refreshing...' });
     await refetch();
     toast({ title: 'Refreshed', description: `Found ${referrals.length} referrals.` });
   };
@@ -166,22 +86,6 @@ const AmbassadorPortal = () => {
     const tier = TIERS.find(t => t.name === tierName);
     if (!tier) return { label: 'Bronze', color: 'bg-amber-600', rate: '10%' };
     return { label: tier.label, color: tier.color, rate: `${tier.commissionRate * 100}%` };
-  };
-
-  const getFilteredReferrals = () => {
-    let filtered = referrals;
-    if (filterStatus !== 'all') {
-      filtered = filtered.filter((r: any) => r.status === filterStatus);
-    }
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter((r: any) => 
-        r.doctorFullName?.toLowerCase().includes(term) ||
-        r.doctorEmail?.toLowerCase().includes(term) ||
-        r.doctorSpecialization?.toLowerCase().includes(term)
-      );
-    }
-    return filtered;
   };
 
   const getStatusBadge = (status: string) => {
@@ -211,16 +115,51 @@ const AmbassadorPortal = () => {
     });
   };
 
+  const getFilteredReferrals = () => {
+    let filtered = referrals;
+    if (filterStatus !== 'all') {
+      filtered = filtered.filter((r: any) => r.status === filterStatus);
+    }
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter((r: any) => 
+        r.doctorFullName?.toLowerCase().includes(term) ||
+        r.doctorEmail?.toLowerCase().includes(term) ||
+        r.doctorSpecialization?.toLowerCase().includes(term)
+      );
+    }
+    return filtered;
+  };
+
   // ==================== LOADING ====================
-  if (isLoading) {
+  if (authLoading || isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <Loader2 className="w-12 h-12 text-purple-600 animate-spin" />
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-12 h-12 text-purple-600 animate-spin" />
+          <p className="text-gray-600">Loading...</p>
+        </div>
       </div>
     );
   }
 
-  // ==================== NOT FOUND ====================
+  // ==================== NOT LOGGED IN ====================
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardContent className="pt-6 text-center">
+            <AlertCircle className="w-12 h-12 text-yellow-600 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Not Signed In</h2>
+            <p className="text-gray-600 mb-4">Please sign in to access your ambassador dashboard.</p>
+            <Button onClick={() => navigate('/signin')} className="w-full">Sign In</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // ==================== NO AMBASSADOR PROFILE ====================
   if (!ambassadorData) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -242,12 +181,133 @@ const AmbassadorPortal = () => {
   const psychometricScore = ambassadorData?.psychometricTest?.score;
   const nextAttemptDate = ambassadorData?.psychometricTest?.nextAttemptDate?.toDate?.();
   const trainingCompleted = ambassadorData?.trainingModule?.completed;
-  const knowledgePassed = ambassadorData?.knowledgeTest?.passed;
-  const knowledgeScore = ambassadorData?.knowledgeTest?.score;
   const interviewStatus = ambassadorData?.interviewStatus;
   const applicationStatus = ambassadorData?.applicationStatus;
 
-  // ... (keep all the onboarding step checks the same)
+  // Step 2: Failed psychometric
+  if (step === 2 && psychometricPassed === false) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardHeader className="text-center">
+            <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+              <XCircle className="w-8 h-8 text-red-600" />
+            </div>
+            <CardTitle>Assessment Cooldown Period</CardTitle>
+            <CardDescription>Your psychometric assessment did not meet the required threshold.</CardDescription>
+          </CardHeader>
+          <CardContent className="text-center space-y-4">
+            {psychometricScore && (
+              <div className="bg-gray-100 p-4 rounded-lg">
+                <p className="text-sm text-gray-600">Your Score</p>
+                <p className="text-2xl font-bold text-gray-800">{psychometricScore}%</p>
+                <p className="text-xs text-gray-500 mt-1">Required: 70% to pass</p>
+              </div>
+            )}
+            {nextAttemptDate && nextAttemptDate > new Date() && (
+              <div className="bg-yellow-50 p-4 rounded-lg">
+                <p className="text-sm text-yellow-800">You can retake the assessment on:</p>
+                <p className="text-xl font-bold text-yellow-900 mt-1">
+                  {nextAttemptDate.toLocaleDateString('en-ZA', { day: '2-digit', month: 'long', year: 'numeric' })}
+                </p>
+              </div>
+            )}
+            <p className="text-sm text-gray-600">
+              Please use this time to prepare. You will receive an email notification when you can retake the assessment.
+            </p>
+            <Button variant="outline" onClick={() => navigate('/')} className="w-full">
+              Return to Home
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Step 3: Training Module
+  if (step === 2 || (step === 3 && !trainingCompleted)) {
+    return <TrainingModule />;
+  }
+
+  // Step 3: Knowledge Test (after training completed)
+  if (step === 3 && trainingCompleted) {
+    return <KnowledgeTest />;
+  }
+
+  // Step 4: Interview pending
+  if (step === 4 && interviewStatus === 'pending') {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardHeader className="text-center">
+            <div className="mx-auto w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
+              <Clock className="w-8 h-8 text-blue-600" />
+            </div>
+            <CardTitle>Application Under Review</CardTitle>
+            <CardDescription>You have successfully passed the knowledge test!</CardDescription>
+          </CardHeader>
+          <CardContent className="text-center space-y-4">
+            <p className="text-gray-600">
+              Our team is reviewing your application. If selected, you will be contacted to schedule an interview.
+            </p>
+            <Button variant="outline" onClick={() => navigate('/')} className="w-full">
+              Return to Home
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Step 4: Interview scheduled
+  if (step === 4 && interviewStatus === 'scheduled') {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardHeader className="text-center">
+            <div className="mx-auto w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4">
+              <Video className="w-8 h-8 text-purple-600" />
+            </div>
+            <CardTitle>Interview Scheduled</CardTitle>
+            <CardDescription>Your interview has been scheduled with our team.</CardDescription>
+          </CardHeader>
+          <CardContent className="text-center space-y-4">
+            <p className="text-gray-600">
+              You will receive an email with the interview details and link. Please check your inbox.
+            </p>
+            <Button variant="outline" onClick={() => navigate('/')} className="w-full">
+              Return to Home
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Step 4: Interview failed
+  if (step === 4 && interviewStatus === 'failed') {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardHeader className="text-center">
+            <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+              <XCircle className="w-8 h-8 text-red-600" />
+            </div>
+            <CardTitle>Application Not Successful</CardTitle>
+            <CardDescription>Thank you for your interest in becoming a MedMap Ambassador.</CardDescription>
+          </CardHeader>
+          <CardContent className="text-center space-y-4">
+            <p className="text-gray-600">
+              While your application showed promise, we have decided to move forward with other candidates at this time.
+            </p>
+            <Button variant="outline" onClick={() => navigate('/')} className="w-full">
+              Return to Home
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   // ==================== APPROVED AMBASSADOR - FULL DASHBOARD ====================
   if (step === 5 && applicationStatus === 'approved') {
@@ -263,7 +323,6 @@ const AmbassadorPortal = () => {
               <div>
                 <h1 className="text-3xl font-bold">Ambassador Dashboard</h1>
                 <p className="text-purple-100 mt-1">Welcome back, {profile?.firstName || 'Ambassador'}!</p>
-                {/* Show referral count in header */}
                 {referrals.length > 0 && (
                   <p className="text-purple-200 text-sm mt-1">
                     <Users className="w-4 h-4 inline mr-1" />
@@ -305,15 +364,13 @@ const AmbassadorPortal = () => {
             <StatsCard title="Total Earnings" value={`R${(stats?.totalCommission || 0).toLocaleString()}`} icon={TrendingUp} color="green" />
           </div>
 
-          {/* Debug info - remove in production */}
-          <div className="mb-4 text-sm text-gray-500 bg-gray-100 p-2 rounded">
-            <p>Debug: {debugInfo || `Loading referrals...`}</p>
-            <p>Referral code: {ambassadorData?.referralCode || 'None'}</p>
-            <p>Referrals in state: {referrals.length}</p>
+          {/* Debug Info */}
+          <div className="mb-4 p-3 bg-gray-100 rounded-lg text-xs text-gray-600">
+            <p>Debug: {referrals.length} referrals found | Referral Code: {ambassadorData?.referralCode || 'None'}</p>
           </div>
 
           {/* Tabs */}
-          <Tabs defaultValue="referrals" className="space-y-6">
+          <Tabs defaultValue="overview" className="space-y-6">
             <TabsList className="grid w-full max-w-md grid-cols-3">
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="referrals">Referrals</TabsTrigger>
@@ -322,17 +379,17 @@ const AmbassadorPortal = () => {
 
             <TabsContent value="overview">
               <OverviewTab 
-                ambassadorData={ambassadorData} 
-                stats={stats} 
+                ambassadorData={ambassadorData}
+                referrals={referrals}
+                stats={stats}
                 tierDisplay={tierDisplay}
                 onCopyCode={handleCopyReferralCode}
-                referralsCount={referrals.length}
               />
             </TabsContent>
 
             <TabsContent value="referrals">
               <ReferralsTab 
-                referrals={filteredReferrals} 
+                referrals={filteredReferrals}
                 totalReferrals={referrals.length}
                 searchTerm={searchTerm}
                 setSearchTerm={setSearchTerm}
@@ -342,16 +399,19 @@ const AmbassadorPortal = () => {
                 getStatusBadge={getStatusBadge}
                 formatDate={formatDate}
                 onRefresh={handleRefresh}
+                onCopyCode={handleCopyReferralCode}
+                referralCode={ambassadorData?.referralCode}
               />
             </TabsContent>
 
             <TabsContent value="earnings">
               <EarningsTab 
-                stats={stats} 
-                referrals={referrals} 
+                stats={stats}
+                referrals={referrals}
                 tierDisplay={tierDisplay}
                 formatDate={formatDate}
                 getStatusBadge={getStatusBadge}
+                onCopyCode={handleCopyReferralCode}
               />
             </TabsContent>
           </Tabs>
@@ -378,7 +438,7 @@ const AmbassadorPortal = () => {
 };
 
 // ==================== OVERVIEW TAB ====================
-const OverviewTab = ({ ambassadorData, stats, tierDisplay, onCopyCode, referralsCount }: any) => {
+const OverviewTab = ({ ambassadorData, referrals, stats, tierDisplay, onCopyCode }: any) => {
   const { toast } = useToast();
 
   return (
@@ -401,18 +461,10 @@ const OverviewTab = ({ ambassadorData, stats, tierDisplay, onCopyCode, referrals
               </Button>
             </div>
           </div>
-          
-          {/* Show referral count */}
           <div className="mt-4 bg-green-50 p-3 rounded-lg">
             <p className="text-sm text-green-800 flex items-center gap-2">
               <UserCheck className="w-4 h-4" />
-              <strong>{referralsCount || 0}</strong> doctor{referralsCount !== 1 ? 's' : ''} referred so far
-            </p>
-          </div>
-          
-          <div className="mt-4 bg-blue-50 p-4 rounded-lg">
-            <p className="text-sm text-blue-800">
-              Share this code with doctors when they sign up for MedMap. Each doctor you refer is permanently linked to you.
+              <strong>{referrals?.length || 0}</strong> doctor{referrals?.length !== 1 ? 's' : ''} referred so far
             </p>
           </div>
           <Button 
@@ -452,7 +504,6 @@ const OverviewTab = ({ ambassadorData, stats, tierDisplay, onCopyCode, referrals
               value={Math.min(((stats?.activeDoctors || 0) / (stats?.tierProgress?.next || 10)) * 100, 100)} 
               className="h-2" 
             />
-            
             <div className="bg-purple-50 p-4 rounded-lg">
               <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
                 <Info className="w-4 h-4 text-purple-600" />
@@ -462,21 +513,7 @@ const OverviewTab = ({ ambassadorData, stats, tierDisplay, onCopyCode, referrals
                 <li>• MedMap charges a <strong>R10 booking fee</strong> per consultation</li>
                 <li>• You earn a percentage of the <strong>R10 booking fee</strong></li>
                 <li>• Only doctors with <strong>50+ bookings per month</strong> generate commission</li>
-                <li className="font-medium text-purple-700 mt-1">
-                  Current rate: <strong>{tierDisplay.rate}</strong> of R10 per eligible booking
-                </li>
               </ul>
-            </div>
-            
-            <div className="bg-green-50 p-3 rounded-lg">
-              <p className="text-sm text-green-800">
-                <strong>Eligible Doctors:</strong> {stats?.eligibleDoctors || 0} of {stats?.verifiedReferrals || 0} verified doctors
-                {stats?.eligibleBookingFeeRevenue && stats.eligibleBookingFeeRevenue > 0 && (
-                  <span className="block text-xs text-green-700 mt-1">
-                    Total booking fee revenue: R{(stats.eligibleBookingFeeRevenue || 0).toLocaleString()}
-                  </span>
-                )}
-              </p>
             </div>
           </div>
         </CardContent>
@@ -497,6 +534,8 @@ const ReferralsTab = ({
   getStatusBadge,
   formatDate,
   onRefresh,
+  onCopyCode,
+  referralCode,
 }: any) => {
   return (
     <Card>
@@ -512,7 +551,6 @@ const ReferralsTab = ({
           <div className="flex items-center gap-2">
             <Badge className="bg-purple-100 text-purple-800">Total: {totalReferrals}</Badge>
             <Badge className="bg-green-100 text-green-800">Verified: {referrals.filter((r: any) => r.status === 'verified').length}</Badge>
-            <Badge className="bg-blue-100 text-blue-800">Eligible: {referrals.filter((r: any) => r.eligibleForCommission).length}</Badge>
             <Button variant="ghost" size="sm" onClick={onRefresh}>
               <RefreshCw className="w-4 h-4" />
             </Button>
@@ -553,133 +591,49 @@ const ReferralsTab = ({
             <p className="text-sm text-gray-500 mb-4">Start sharing your referral code with doctors today!</p>
             <div className="bg-gray-50 p-4 rounded-lg max-w-md mx-auto">
               <p className="text-xs text-gray-500 mb-1">Your Referral Code</p>
-              <code className="text-lg font-mono font-bold text-purple-700">{ambassadorData?.referralCode}</code>
+              <code className="text-lg font-mono font-bold text-purple-700">{referralCode}</code>
             </div>
             <Button 
               variant="outline" 
               className="mt-4"
-              onClick={() => {
-                const code = ambassadorData?.referralCode;
-                if (code) {
-                  navigator.clipboard.writeText(code);
-                  toast({ title: 'Copied!', description: 'Referral code copied to clipboard.' });
-                }
-              }}
+              onClick={onCopyCode}
             >
               <Copy className="w-4 h-4 mr-2" />Copy Your Referral Code
             </Button>
           </div>
         ) : (
           <div className="space-y-4">
-            {/* Mobile Card View */}
-            <div className="block lg:hidden space-y-4">
-              {referrals.map((referral: any) => (
-                <div key={referral.id} className="border rounded-lg p-4 bg-white">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                          <Stethoscope className="w-5 h-5 text-blue-600" />
-                        </div>
-                        <div>
-                          <p className="font-semibold">{referral.doctorFullName}</p>
-                          <p className="text-sm text-gray-500">{referral.doctorEmail}</p>
-                        </div>
+            {referrals.map((referral: any) => (
+              <div key={referral.id} className="border rounded-lg p-4 bg-white">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                        <Stethoscope className="w-5 h-5 text-blue-600" />
                       </div>
-                      <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
-                        <div>
-                          <p className="text-gray-500">Specialization</p>
-                          <p className="font-medium">{referral.doctorSpecialization || 'N/A'}</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Referred</p>
-                          <p className="font-medium">{formatDate(referral.referredAt)}</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Status</p>
-                          <Badge className={getStatusBadge(referral.status)}>{referral.status}</Badge>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Monthly Bookings</p>
-                          <p className={`font-medium ${referral.monthlyBookings >= 50 ? 'text-green-600' : 'text-gray-600'}`}>
-                            {referral.monthlyBookings}
-                            {referral.monthlyBookings >= 50 && ' ✅'}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Booking Fees</p>
-                          <p className="font-medium">R{referral.monthlyBookingFeeRevenue.toLocaleString()}</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Eligible</p>
-                          <Badge className={referral.eligibleForCommission ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}>
-                            {referral.eligibleForCommission ? 'Yes' : 'No'}
-                          </Badge>
-                        </div>
+                      <div>
+                        <p className="font-semibold">{referral.doctorFullName}</p>
+                        <p className="text-sm text-gray-500">{referral.doctorEmail}</p>
                       </div>
-                      {referral.verifiedAt && (
-                        <p className="text-xs text-gray-400 mt-2">
-                          Verified: {formatDate(referral.verifiedAt)}
-                        </p>
-                      )}
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <p className="text-gray-500">Specialization</p>
+                        <p className="font-medium">{referral.doctorSpecialization || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500">Referred</p>
+                        <p className="font-medium">{formatDate(referral.referredAt)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500">Status</p>
+                        <Badge className={getStatusBadge(referral.status)}>{referral.status}</Badge>
+                      </div>
                     </div>
                   </div>
                 </div>
-              ))}
-            </div>
-
-            {/* Desktop Table View */}
-            <div className="hidden lg:block overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-3 px-4 text-sm font-semibold">Doctor</th>
-                    <th className="text-left py-3 px-4 text-sm font-semibold">Specialization</th>
-                    <th className="text-left py-3 px-4 text-sm font-semibold">Referred</th>
-                    <th className="text-left py-3 px-4 text-sm font-semibold">Status</th>
-                    <th className="text-left py-3 px-4 text-sm font-semibold">Monthly Bookings</th>
-                    <th className="text-left py-3 px-4 text-sm font-semibold">Booking Fees</th>
-                    <th className="text-left py-3 px-4 text-sm font-semibold">Eligible</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {referrals.map((referral: any) => (
-                    <tr key={referral.id} className="border-b hover:bg-gray-50">
-                      <td className="py-3 px-4">
-                        <div>
-                          <p className="font-medium text-sm">{referral.doctorFullName}</p>
-                          <p className="text-xs text-gray-600">{referral.doctorEmail}</p>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 text-sm">{referral.doctorSpecialization || 'N/A'}</td>
-                      <td className="py-3 px-4 text-sm">{formatDate(referral.referredAt)}</td>
-                      <td className="py-3 px-4">
-                        <Badge className={getStatusBadge(referral.status)}>{referral.status}</Badge>
-                      </td>
-                      <td className="py-3 px-4 text-sm">
-                        <span className={referral.monthlyBookings >= 50 ? 'font-bold text-green-600' : 'text-gray-600'}>
-                          {referral.monthlyBookings}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-sm">R{referral.monthlyBookingFeeRevenue.toLocaleString()}</td>
-                      <td className="py-3 px-4">
-                        {referral.eligibleForCommission ? (
-                          <Badge className="bg-green-100 text-green-800">Yes</Badge>
-                        ) : (
-                          <Badge className="bg-gray-100 text-gray-600">No</Badge>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {referrals.length > 0 && (
-              <div className="text-sm text-gray-500 text-center pt-4">
-                Showing {referrals.length} referrals
               </div>
-            )}
+            ))}
           </div>
         )}
       </CardContent>
@@ -688,7 +642,7 @@ const ReferralsTab = ({
 };
 
 // ==================== EARNINGS TAB ====================
-const EarningsTab = ({ stats, referrals, tierDisplay, formatDate, getStatusBadge }: any) => {
+const EarningsTab = ({ stats, referrals, tierDisplay, formatDate, getStatusBadge, onCopyCode }: any) => {
   const eligibleReferrals = referrals.filter((r: any) => r.status === 'verified' && r.eligibleForCommission);
 
   return (
@@ -738,6 +692,14 @@ const EarningsTab = ({ stats, referrals, tierDisplay, formatDate, getStatusBadge
             <TrendingUp className="w-16 h-16 mx-auto mb-4 text-gray-300" />
             <p className="text-lg font-medium">No eligible earnings yet</p>
             <p className="text-sm">Commission is earned when referred doctors have 50+ monthly bookings</p>
+            <Button 
+              variant="outline" 
+              className="mt-4"
+              onClick={onCopyCode}
+            >
+              <Copy className="w-4 h-4 mr-2" />
+              Share Your Referral Code
+            </Button>
           </div>
         ) : (
           <div className="space-y-3">

@@ -1,4 +1,3 @@
-// lib/types/ambassador.ts
 export const MEDMAP_BOOKING_FEE = 10;
 
 export interface TierConfig {
