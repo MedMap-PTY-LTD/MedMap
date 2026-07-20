@@ -52,7 +52,13 @@ const StatsCard = ({ title, value, icon: Icon, color, badge }: any) => (
 );
 
 // ==================== OVERVIEW TAB ====================
-const OverviewTab = ({ ambassadorData, referrals, stats, tierDisplay, onCopyCode }: any) => {
+const OverviewTab = ({ 
+  referralCode,  // ✅ Pass referralCode directly
+  referralsCount, 
+  stats, 
+  tierDisplay, 
+  onCopyCode 
+}: any) => {
   const { toast } = useToast();
 
   return (
@@ -69,7 +75,7 @@ const OverviewTab = ({ ambassadorData, referrals, stats, tierDisplay, onCopyCode
           <div className="bg-gray-50 p-4 rounded-lg">
             <p className="text-xs text-gray-500 mb-1">Your Referral Code</p>
             <div className="flex items-center justify-between">
-              <code className="text-lg font-mono font-bold text-purple-700">{ambassadorData?.referralCode}</code>
+              <code className="text-lg font-mono font-bold text-purple-700">{referralCode || 'N/A'}</code>
               <Button size="sm" onClick={onCopyCode}>
                 <Copy className="w-4 h-4 mr-2" />Copy
               </Button>
@@ -78,13 +84,13 @@ const OverviewTab = ({ ambassadorData, referrals, stats, tierDisplay, onCopyCode
           <div className="mt-4 bg-green-50 p-3 rounded-lg">
             <p className="text-sm text-green-800 flex items-center gap-2">
               <UserCheck className="w-4 h-4" />
-              <strong>{referrals?.length || 0}</strong> doctor{referrals?.length !== 1 ? 's' : ''} referred so far
+              <strong>{referralsCount || 0}</strong> doctor{referralsCount !== 1 ? 's' : ''} referred so far
             </p>
           </div>
           <Button 
             className="w-full bg-purple-600 hover:bg-purple-700 mt-4"
             onClick={() => {
-              const link = `${window.location.origin}/doctor-enrollment?ref=${ambassadorData?.referralCode}`;
+              const link = `${window.location.origin}/doctor-enrollment?ref=${referralCode}`;
               navigator.clipboard.writeText(link);
               toast({ title: 'Copied!', description: 'Referral link copied to clipboard.' });
             }}
@@ -164,7 +170,7 @@ const ReferralsTab = ({
           </div>
           <div className="flex items-center gap-2">
             <Badge className="bg-purple-100 text-purple-800">Total: {totalReferrals}</Badge>
-            <Badge className="bg-green-100 text-green-800">Verified: {referrals.filter((r: any) => r.status === 'verified').length}</Badge>
+            <Badge className="bg-green-100 text-green-800">Verified: {referrals?.filter((r: any) => r.status === 'verified').length || 0}</Badge>
             <Button variant="ghost" size="sm" onClick={onRefresh}>
               <RefreshCw className="w-4 h-4" />
             </Button>
@@ -198,14 +204,14 @@ const ReferralsTab = ({
           <div className="flex justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-purple-600" />
           </div>
-        ) : referrals.length === 0 ? (
+        ) : !referrals || referrals.length === 0 ? (
           <div className="text-center py-12">
             <Users className="w-16 h-16 mx-auto mb-4 text-gray-300" />
             <p className="text-lg font-medium text-gray-700">No referrals yet</p>
             <p className="text-sm text-gray-500 mb-4">Start sharing your referral code with doctors today!</p>
             <div className="bg-gray-50 p-4 rounded-lg max-w-md mx-auto">
               <p className="text-xs text-gray-500 mb-1">Your Referral Code</p>
-              <code className="text-lg font-mono font-bold text-purple-700">{referralCode}</code>
+              <code className="text-lg font-mono font-bold text-purple-700">{referralCode || 'N/A'}</code>
             </div>
             <Button 
               variant="outline" 
@@ -267,7 +273,7 @@ const ReferralsTab = ({
 
 // ==================== EARNINGS TAB ====================
 const EarningsTab = ({ stats, referrals, tierDisplay, formatDate, getStatusBadge, onCopyCode }: any) => {
-  const eligibleReferrals = referrals.filter((r: any) => r.status === 'verified' && r.eligibleForCommission);
+  const eligibleReferrals = referrals?.filter((r: any) => r.status === 'verified' && r.eligibleForCommission) || [];
 
   return (
     <Card>
@@ -382,7 +388,7 @@ const AmbassadorPortal = () => {
   const handleRefresh = async () => {
     toast({ title: 'Refreshing...' });
     await refetch();
-    toast({ title: 'Refreshed', description: `Found ${referrals.length} referrals.` });
+    toast({ title: 'Refreshed', description: `Found ${referrals?.length || 0} referrals.` });
   };
 
   const getTierDisplay = (tierName: string) => {
@@ -419,7 +425,7 @@ const AmbassadorPortal = () => {
   };
 
   const getFilteredReferrals = () => {
-    let filtered = referrals;
+    let filtered = referrals || [];
     if (filterStatus !== 'all') {
       filtered = filtered.filter((r: any) => r.status === filterStatus);
     }
@@ -626,7 +632,7 @@ const AmbassadorPortal = () => {
               <div>
                 <h1 className="text-3xl font-bold">Ambassador Dashboard</h1>
                 <p className="text-purple-100 mt-1">Welcome back, {profile?.firstName || 'Ambassador'}!</p>
-                {referrals.length > 0 && (
+                {(referrals?.length || 0) > 0 && (
                   <p className="text-purple-200 text-sm mt-1">
                     <Users className="w-4 h-4 inline mr-1" />
                     {referrals.length} doctor{referrals.length > 1 ? 's' : ''} referred
@@ -646,7 +652,7 @@ const AmbassadorPortal = () => {
                 <div className="bg-white/20 rounded-lg px-4 py-2 text-center">
                   <p className="text-xs text-purple-200">Your Referral Code</p>
                   <div className="flex items-center gap-2">
-                    <code className="text-xl font-bold tracking-wider font-mono">{ambassadorData?.referralCode}</code>
+                    <code className="text-xl font-bold tracking-wider font-mono">{ambassadorData?.referralCode || 'N/A'}</code>
                     <button onClick={handleCopyReferralCode} className="p-1 hover:bg-white/20 rounded transition-colors">
                       <Copy className="w-4 h-4" />
                     </button>
@@ -667,9 +673,9 @@ const AmbassadorPortal = () => {
             <StatsCard title="Total Earnings" value={`R${(stats?.totalCommission || 0).toLocaleString()}`} icon={TrendingUp} color="green" />
           </div>
 
-          {/* Debug Info */}
+          {/* Debug Info - Remove in production */}
           <div className="mb-4 p-3 bg-gray-100 rounded-lg text-xs text-gray-600">
-            <p>Debug: {referrals.length} referrals found | Referral Code: {ambassadorData?.referralCode || 'None'}</p>
+            <p>Debug: {(referrals?.length || 0)} referrals found | Referral Code: {ambassadorData?.referralCode || 'None'}</p>
           </div>
 
           {/* Tabs */}
@@ -682,8 +688,8 @@ const AmbassadorPortal = () => {
 
             <TabsContent value="overview">
               <OverviewTab 
-                ambassadorData={ambassadorData}
-                referrals={referrals}
+                referralCode={ambassadorData?.referralCode}
+                referralsCount={referrals?.length || 0}
                 stats={stats}
                 tierDisplay={tierDisplay}
                 onCopyCode={handleCopyReferralCode}
@@ -693,7 +699,7 @@ const AmbassadorPortal = () => {
             <TabsContent value="referrals">
               <ReferralsTab 
                 referrals={filteredReferrals}
-                totalReferrals={referrals.length}
+                totalReferrals={referrals?.length || 0}
                 searchTerm={searchTerm}
                 setSearchTerm={setSearchTerm}
                 filterStatus={filterStatus}
@@ -703,7 +709,7 @@ const AmbassadorPortal = () => {
                 formatDate={formatDate}
                 onRefresh={handleRefresh}
                 onCopyCode={handleCopyReferralCode}
-                referralCode={ambassadorData?.referralCode} // ✅ Pass referralCode here
+                referralCode={ambassadorData?.referralCode}
               />
             </TabsContent>
 
