@@ -30,7 +30,6 @@ import {
   Video,
   Sparkles,
   UserCheck,
-  CheckCircle,
 } from 'lucide-react';
 import TrainingModule from './TrainingModule';
 import KnowledgeTest from './KnowledgeTest';
@@ -145,22 +144,35 @@ const OverviewTab = ({
 
 // ==================== REFERRALS TAB ====================
 const ReferralsTab = ({ 
-  referrals, 
-  totalReferrals, 
-  searchTerm, 
-  setSearchTerm, 
-  filterStatus, 
-  setFilterStatus,
-  isLoading,
-  getStatusBadge,
-  formatDate,
-  onRefresh,
-  onCopyCode,
-  referralCode,
+  referrals = [], 
+  totalReferrals = 0, 
+  searchTerm = '', 
+  setSearchTerm = () => {}, 
+  filterStatus = 'all', 
+  setFilterStatus = () => {},
+  isLoading = false,
+  getStatusBadge = () => 'bg-gray-100 text-gray-800',
+  formatDate = () => 'N/A',
+  onRefresh = () => {},
+  onCopyCode = () => {},
+  referralCode = null,
 }: any) => {
   // Ensure referrals is always an array
   const safeReferrals = Array.isArray(referrals) ? referrals : [];
   
+  // Filter referrals
+  const filteredReferrals = safeReferrals.filter((r: any) => {
+    if (filterStatus !== 'all' && r?.status !== filterStatus) return false;
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      const name = (r?.doctorFullName || '').toLowerCase();
+      const email = (r?.doctorEmail || '').toLowerCase();
+      const spec = (r?.doctorSpecialization || '').toLowerCase();
+      if (!name.includes(term) && !email.includes(term) && !spec.includes(term)) return false;
+    }
+    return true;
+  });
+
   return (
     <Card>
       <CardHeader>
@@ -187,14 +199,14 @@ const ReferralsTab = ({
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
             <Input
               placeholder="Search by name, email, or specialization..."
-              value={searchTerm || ''}
+              value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-9"
             />
           </div>
           <select
             className="px-3 py-2 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-            value={filterStatus || 'all'}
+            value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
           >
             <option value="all">All Status</option>
@@ -227,7 +239,7 @@ const ReferralsTab = ({
           </div>
         ) : (
           <div className="space-y-4">
-            {safeReferrals.map((referral: any, index: number) => (
+            {filteredReferrals.map((referral: any, index: number) => (
               <div key={referral?.id || `referral-${index}`} className="border rounded-lg p-4 bg-white">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
@@ -247,18 +259,18 @@ const ReferralsTab = ({
                       </div>
                       <div>
                         <p className="text-gray-500">Referred</p>
-                        <p className="font-medium">{formatDate ? formatDate(referral?.referredAt) : 'N/A'}</p>
+                        <p className="font-medium">{formatDate(referral?.referredAt)}</p>
                       </div>
                       <div>
                         <p className="text-gray-500">Status</p>
-                        <Badge className={getStatusBadge ? getStatusBadge(referral?.status) : 'bg-gray-100 text-gray-800'}>
+                        <Badge className={getStatusBadge(referral?.status)}>
                           {referral?.status || 'pending'}
                         </Badge>
                       </div>
                     </div>
                     {referral?.verifiedAt && (
                       <p className="text-xs text-gray-400 mt-2">
-                        Verified: {formatDate ? formatDate(referral.verifiedAt) : 'N/A'}
+                        Verified: {formatDate(referral.verifiedAt)}
                       </p>
                     )}
                     {referral?.rejectionReason && (
@@ -278,7 +290,7 @@ const ReferralsTab = ({
 };
 
 // ==================== EARNINGS TAB ====================
-const EarningsTab = ({ stats, referrals, tierDisplay, formatDate, getStatusBadge, onCopyCode }: any) => {
+const EarningsTab = ({ stats = {}, referrals = [], tierDisplay = { label: 'Bronze', rate: '10%' }, formatDate = () => 'N/A', getStatusBadge = () => 'bg-gray-100 text-gray-800', onCopyCode = () => {} }: any) => {
   const safeReferrals = Array.isArray(referrals) ? referrals : [];
   const eligibleReferrals = safeReferrals.filter((r: any) => r?.status === 'verified' && r?.eligibleForCommission) || [];
 
@@ -415,19 +427,23 @@ const AmbassadorPortal = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
-  // ✅ USING THE CUSTOM HOOK
+  // Get the UID safely
+  const uid = user?.uid || '';
+  
+  // USE THE HOOK
   const {
     ambassadorData,
     referrals,
     stats,
     isLoading,
     refetch,
-  } = useAmbassador(user?.uid || '');
+  } = useAmbassador(uid);
 
   // ==================== HANDLERS ====================
   const handleCopyReferralCode = () => {
-    if (ambassadorData?.referralCode) {
-      navigator.clipboard.writeText(ambassadorData.referralCode);
+    const code = ambassadorData?.referralCode;
+    if (code) {
+      navigator.clipboard.writeText(code);
       toast({ title: 'Copied!', description: 'Referral code copied to clipboard.' });
     } else {
       toast({ title: 'No Code', description: 'No referral code available yet.', variant: 'destructive' });
@@ -473,24 +489,7 @@ const AmbassadorPortal = () => {
     });
   };
 
-  const getFilteredReferrals = () => {
-    const safeReferrals = Array.isArray(referrals) ? referrals : [];
-    let filtered = safeReferrals;
-    if (filterStatus !== 'all') {
-      filtered = filtered.filter((r: any) => r?.status === filterStatus);
-    }
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter((r: any) => 
-        (r?.doctorFullName || '').toLowerCase().includes(term) ||
-        (r?.doctorEmail || '').toLowerCase().includes(term) ||
-        (r?.doctorSpecialization || '').toLowerCase().includes(term)
-      );
-    }
-    return filtered;
-  };
-
-  // ==================== EFFECT ====================
+  // ==================== EFFECTS ====================
   useEffect(() => {
     if (!authLoading && !user) {
       navigate('/signin');
@@ -498,7 +497,7 @@ const AmbassadorPortal = () => {
     }
   }, [authLoading, user, navigate]);
 
-  // ==================== LOADING ====================
+  // ==================== LOADING STATES ====================
   if (authLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
@@ -510,7 +509,6 @@ const AmbassadorPortal = () => {
     );
   }
 
-  // ==================== NOT LOGGED IN ====================
   if (!user) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -526,7 +524,6 @@ const AmbassadorPortal = () => {
     );
   }
 
-  // ==================== WAIT FOR AMBASSADOR DATA ====================
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
@@ -538,7 +535,6 @@ const AmbassadorPortal = () => {
     );
   }
 
-  // ==================== NO AMBASSADOR PROFILE ====================
   if (!ambassadorData) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -555,7 +551,7 @@ const AmbassadorPortal = () => {
   }
 
   // ==================== ONBOARDING STEPS ====================
-  // Safely extract all values with fallbacks
+  // All values are now safely accessed from ambassadorData
   const step = ambassadorData.onboardingStep ?? 1;
   const psychometricPassed = ambassadorData.psychometricTest?.passed ?? null;
   const psychometricScore = ambassadorData.psychometricTest?.score ?? null;
@@ -578,13 +574,12 @@ const AmbassadorPortal = () => {
     referralCode,
   });
 
-  // Step 1: Take Psychometric Test (if not taken yet)
+  // ==================== STEP 1: PSYCHOMETRIC TEST ====================
   if (step === 1 && psychometricPassed === null) {
     navigate('/ambassador/psychometric-test');
     return null;
   }
 
-  // Step 1: Psychometric test failed - cooldown
   if (step === 1 && psychometricPassed === false) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -624,20 +619,17 @@ const AmbassadorPortal = () => {
     );
   }
 
-  // Step 2: Training Module (after psychometric passed)
+  // ==================== STEP 2: TRAINING MODULE ====================
   if (step === 2 && psychometricPassed === true && !trainingCompleted) {
     return <TrainingModule />;
   }
 
-  // Step 3: Knowledge Test (after training completed)
+  // ==================== STEP 3: KNOWLEDGE TEST ====================
   if (step === 3 && trainingCompleted) {
-    // Check if knowledge test was already passed
     if (knowledgeTestPassed === true) {
-      // Already passed, but step might not have been updated
       navigate('/ambassador/portal');
       return null;
     } else if (knowledgeTestAttempts >= maxAttempts && knowledgeTestPassed === false) {
-      // Failed all attempts
       return (
         <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
           <Card className="max-w-md w-full">
@@ -661,12 +653,11 @@ const AmbassadorPortal = () => {
         </div>
       );
     } else {
-      // Take the knowledge test
       return <KnowledgeTest />;
     }
   }
 
-  // Step 4: Interview pending (waiting for admin action)
+  // ==================== STEP 4: INTERVIEW ====================
   if (step === 4 && interviewStatus === 'pending') {
     return (
       <OnboardingPendingScreen 
@@ -683,7 +674,6 @@ const AmbassadorPortal = () => {
     );
   }
 
-  // Step 4: Interview scheduled
   if (step === 4 && interviewStatus === 'scheduled') {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -708,7 +698,6 @@ const AmbassadorPortal = () => {
     );
   }
 
-  // Step 4: Interview failed
   if (step === 4 && interviewStatus === 'failed') {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -733,7 +722,6 @@ const AmbassadorPortal = () => {
     );
   }
 
-  // Step 4: Interview passed but not yet approved - show pending screen
   if (step === 4 && interviewStatus === 'passed' && applicationStatus === 'pending') {
     return (
       <OnboardingPendingScreen 
@@ -750,10 +738,24 @@ const AmbassadorPortal = () => {
     );
   }
 
-  // Step 5: Approved Ambassador - Full Dashboard
+  // ==================== STEP 5: APPROVED ====================
   if (step === 5 && applicationStatus === 'approved') {
     const tierDisplay = getTierDisplay(stats?.currentTier || 'bronze');
-    const filteredReferrals = getFilteredReferrals();
+    const safeReferrals = Array.isArray(referrals) ? referrals : [];
+    
+    // Filter referrals client-side
+    let filteredReferrals = safeReferrals;
+    if (filterStatus !== 'all') {
+      filteredReferrals = filteredReferrals.filter((r: any) => r?.status === filterStatus);
+    }
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filteredReferrals = filteredReferrals.filter((r: any) => 
+        (r?.doctorFullName || '').toLowerCase().includes(term) ||
+        (r?.doctorEmail || '').toLowerCase().includes(term) ||
+        (r?.doctorSpecialization || '').toLowerCase().includes(term)
+      );
+    }
 
     return (
       <div className="min-h-screen bg-gray-50">
@@ -764,10 +766,10 @@ const AmbassadorPortal = () => {
               <div>
                 <h1 className="text-3xl font-bold">Ambassador Dashboard</h1>
                 <p className="text-purple-100 mt-1">Welcome back, {profile?.firstName || 'Ambassador'}!</p>
-                {(referrals?.length || 0) > 0 && (
+                {(safeReferrals.length || 0) > 0 && (
                   <p className="text-purple-200 text-sm mt-1">
                     <Users className="w-4 h-4 inline mr-1" />
-                    {referrals?.length || 0} doctor{(referrals?.length || 0) > 1 ? 's' : ''} referred
+                    {safeReferrals.length} doctor{safeReferrals.length > 1 ? 's' : ''} referred
                   </p>
                 )}
               </div>
@@ -816,7 +818,7 @@ const AmbassadorPortal = () => {
             <TabsContent value="overview">
               <OverviewTab 
                 referralCode={referralCode}
-                referralsCount={referrals?.length || 0}
+                referralsCount={safeReferrals.length || 0}
                 stats={stats}
                 tierDisplay={tierDisplay}
                 onCopyCode={handleCopyReferralCode}
@@ -826,7 +828,7 @@ const AmbassadorPortal = () => {
             <TabsContent value="referrals">
               <ReferralsTab 
                 referrals={filteredReferrals}
-                totalReferrals={referrals?.length || 0}
+                totalReferrals={safeReferrals.length || 0}
                 searchTerm={searchTerm}
                 setSearchTerm={setSearchTerm}
                 filterStatus={filterStatus}
@@ -843,7 +845,7 @@ const AmbassadorPortal = () => {
             <TabsContent value="earnings">
               <EarningsTab 
                 stats={stats}
-                referrals={referrals}
+                referrals={safeReferrals}
                 tierDisplay={tierDisplay}
                 formatDate={formatDate}
                 getStatusBadge={getStatusBadge}
@@ -856,7 +858,7 @@ const AmbassadorPortal = () => {
     );
   }
 
-  // ==================== FALLBACK - Should never reach here ====================
+  // ==================== FALLBACK ====================
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-blue-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto text-center">
