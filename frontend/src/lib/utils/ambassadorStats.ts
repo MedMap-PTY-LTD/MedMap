@@ -1,9 +1,9 @@
+// lib/services/ambassadorStats.ts
 import { ReferralDoctor, AmbassadorStats, TIERS, TierConfig } from '@/lib/types/ambassador';
 
 export class AmbassadorStatsCalculator {
-  static calculate(referrals: ReferralDoctor[]): AmbassadorStats | null {
-    if (!referrals.length) return null;
-    
+  static calculate(referrals: ReferralDoctor[]): AmbassadorStats {
+    // Always return stats, even if empty
     const verifiedDoctors = referrals.filter(r => r.status === 'verified');
     const activeDoctors = verifiedDoctors.filter(r => r.doctorIsActive);
     const activeVerifiedCount = activeDoctors.length;
@@ -12,7 +12,7 @@ export class AmbassadorStatsCalculator {
     const eligibleDoctors = referrals.filter(r => r.eligibleForCommission && r.status === 'verified');
     
     const totalEligibleBookingFeeRevenue = eligibleDoctors.reduce(
-      (sum, r) => sum + r.monthlyBookingFeeRevenue, 0
+      (sum, r) => sum + (r.monthlyBookingFeeRevenue || 0), 0
     );
     
     const commissionRate = currentTier.commissionRate;
@@ -20,26 +20,27 @@ export class AmbassadorStatsCalculator {
     
     const pendingCommission = referrals
       .filter(r => r.status === 'verified' && !r.commissionPaid && r.eligibleForCommission)
-      .reduce((sum, r) => sum + (r.monthlyBookingFeeRevenue * commissionRate), 0);
+      .reduce((sum, r) => sum + ((r.monthlyBookingFeeRevenue || 0) * commissionRate), 0);
     
     const paidCommission = referrals
       .filter(r => r.status === 'verified' && r.commissionPaid && r.eligibleForCommission)
-      .reduce((sum, r) => sum + (r.monthlyBookingFeeRevenue * commissionRate), 0);
+      .reduce((sum, r) => sum + ((r.monthlyBookingFeeRevenue || 0) * commissionRate), 0);
     
     const tierIndex = TIERS.indexOf(currentTier);
     const nextTier = tierIndex < TIERS.length - 1 ? TIERS[tierIndex + 1] : null;
     
+    // Ensure we always return valid numbers
     return {
       totalReferrals: referrals.length,
       pendingReferrals: referrals.filter(r => r.status === 'pending').length,
       verifiedReferrals: referrals.filter(r => r.status === 'verified').length,
       rejectedReferrals: referrals.filter(r => r.status === 'rejected').length,
-      totalCommission,
+      totalCommission: totalCommission || 0,
       activeDoctors: activeVerifiedCount,
       eligibleDoctors: eligibleDoctors.length,
-      eligibleBookingFeeRevenue: totalEligibleBookingFeeRevenue,
-      pendingCommission,
-      paidCommission,
+      eligibleBookingFeeRevenue: totalEligibleBookingFeeRevenue || 0,
+      pendingCommission: pendingCommission || 0,
+      paidCommission: paidCommission || 0,
       currentTier: currentTier.name,
       commissionRate: commissionRate * 100,
       tierProgress: {

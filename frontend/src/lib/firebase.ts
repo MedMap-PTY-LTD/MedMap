@@ -273,7 +273,6 @@ export const authService = {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         isActive: true,
-        // Only include these fields if they have values
         ...(profileData.phone ? { phone: profileData.phone } : {}),
         ...(user.photoURL ? { photoURL: user.photoURL } : {}),
       };
@@ -309,15 +308,17 @@ export const authService = {
             if (!ambassadorSnapshot.empty) {
               const ambassadorDoc = ambassadorSnapshot.docs[0];
               const ambassadorData = ambassadorDoc.data();
+              const ambassadorId = ambassadorDoc.id;
               
               referralData = {
-                ambassadorId: ambassadorDoc.id,
+                ambassadorId: ambassadorId,
                 ambassadorName: `${ambassadorData.firstName || ''} ${ambassadorData.lastName || ''}`.trim(),
                 referralCode: referralCode,
                 referredAt: serverTimestamp(),
                 doctorId: user.uid,
                 doctorName: userProfile.fullName,
                 doctorEmail: user.email!,
+                doctorSpecialization: profileData.specialization || '',
                 status: 'pending',
                 commissionEarned: 0,
                 commissionPaid: false,
@@ -325,14 +326,16 @@ export const authService = {
               
               console.log(`✅ Referral found from ambassador: ${referralData.ambassadorName}`);
               
-              // Save referral data
+              // Save referral data with the correct document ID
               await setDoc(doc(db, 'referrals', `doctor_${user.uid}`), referralData);
               
-              // Update ambassador's referred count
-              await updateDoc(doc(db, 'ambassadors', ambassadorDoc.id), {
+              // ✅ CRITICAL: Update ambassador's totalReferredDoctors count
+              console.log(`📊 Updating ambassador ${ambassadorId} total referrals...`);
+              await updateDoc(doc(db, 'ambassadors', ambassadorId), {
                 totalReferredDoctors: (ambassadorData.totalReferredDoctors || 0) + 1,
                 updatedAt: serverTimestamp(),
               });
+              console.log(`✅ Ambassador ${ambassadorId} total referrals updated to ${(ambassadorData.totalReferredDoctors || 0) + 1}`);
               
               console.log('✅ Referral data saved');
             } else {
