@@ -158,7 +158,7 @@ const ReferralsTab = ({
   onCopyCode,
   referralCode,
 }: any) => {
-  // Make sure we have a valid referrals array
+  // Ensure referrals is always an array
   const safeReferrals = Array.isArray(referrals) ? referrals : [];
   
   return (
@@ -174,7 +174,7 @@ const ReferralsTab = ({
           </div>
           <div className="flex items-center gap-2">
             <Badge className="bg-purple-100 text-purple-800">Total: {totalReferrals || 0}</Badge>
-            <Badge className="bg-green-100 text-green-800">Verified: {safeReferrals.filter((r: any) => r.status === 'verified').length || 0}</Badge>
+            <Badge className="bg-green-100 text-green-800">Verified: {safeReferrals.filter((r: any) => r?.status === 'verified').length || 0}</Badge>
             <Button variant="ghost" size="sm" onClick={onRefresh}>
               <RefreshCw className="w-4 h-4" />
             </Button>
@@ -227,8 +227,8 @@ const ReferralsTab = ({
           </div>
         ) : (
           <div className="space-y-4">
-            {safeReferrals.map((referral: any) => (
-              <div key={referral.id || Math.random().toString()} className="border rounded-lg p-4 bg-white">
+            {safeReferrals.map((referral: any, index: number) => (
+              <div key={referral?.id || `referral-${index}`} className="border rounded-lg p-4 bg-white">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
@@ -236,32 +236,32 @@ const ReferralsTab = ({
                         <Stethoscope className="w-5 h-5 text-blue-600" />
                       </div>
                       <div>
-                        <p className="font-semibold">{referral.doctorFullName || 'Unknown Doctor'}</p>
-                        <p className="text-sm text-gray-500">{referral.doctorEmail || ''}</p>
+                        <p className="font-semibold">{referral?.doctorFullName || 'Unknown Doctor'}</p>
+                        <p className="text-sm text-gray-500">{referral?.doctorEmail || ''}</p>
                       </div>
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                       <div>
                         <p className="text-gray-500">Specialization</p>
-                        <p className="font-medium">{referral.doctorSpecialization || 'N/A'}</p>
+                        <p className="font-medium">{referral?.doctorSpecialization || 'N/A'}</p>
                       </div>
                       <div>
                         <p className="text-gray-500">Referred</p>
-                        <p className="font-medium">{formatDate ? formatDate(referral.referredAt) : 'N/A'}</p>
+                        <p className="font-medium">{formatDate ? formatDate(referral?.referredAt) : 'N/A'}</p>
                       </div>
                       <div>
                         <p className="text-gray-500">Status</p>
-                        <Badge className={getStatusBadge ? getStatusBadge(referral.status) : 'bg-gray-100 text-gray-800'}>
-                          {referral.status || 'pending'}
+                        <Badge className={getStatusBadge ? getStatusBadge(referral?.status) : 'bg-gray-100 text-gray-800'}>
+                          {referral?.status || 'pending'}
                         </Badge>
                       </div>
                     </div>
-                    {referral.verifiedAt && (
+                    {referral?.verifiedAt && (
                       <p className="text-xs text-gray-400 mt-2">
                         Verified: {formatDate ? formatDate(referral.verifiedAt) : 'N/A'}
                       </p>
                     )}
-                    {referral.rejectionReason && (
+                    {referral?.rejectionReason && (
                       <p className="text-xs text-red-600 mt-2">
                         Reason: {referral.rejectionReason}
                       </p>
@@ -280,7 +280,7 @@ const ReferralsTab = ({
 // ==================== EARNINGS TAB ====================
 const EarningsTab = ({ stats, referrals, tierDisplay, formatDate, getStatusBadge, onCopyCode }: any) => {
   const safeReferrals = Array.isArray(referrals) ? referrals : [];
-  const eligibleReferrals = safeReferrals.filter((r: any) => r.status === 'verified' && r.eligibleForCommission) || [];
+  const eligibleReferrals = safeReferrals.filter((r: any) => r?.status === 'verified' && r?.eligibleForCommission) || [];
 
   return (
     <Card>
@@ -340,21 +340,21 @@ const EarningsTab = ({ stats, referrals, tierDisplay, formatDate, getStatusBadge
           </div>
         ) : (
           <div className="space-y-3">
-            {eligibleReferrals.map((referral: any) => {
-              const commissionAmount = (referral.monthlyBookingFeeRevenue || 0) * ((stats?.commissionRate || 10) / 100);
+            {eligibleReferrals.map((referral: any, index: number) => {
+              const commissionAmount = ((referral?.monthlyBookingFeeRevenue || 0) * ((stats?.commissionRate || 10) / 100));
               return (
-                <div key={referral.id || Math.random().toString()} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div key={referral?.id || `eligible-${index}`} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div>
-                    <p className="font-medium">{referral.doctorFullName || 'Unknown Doctor'}</p>
-                    <p className="text-sm text-gray-500">{referral.doctorSpecialization || 'General Practice'}</p>
+                    <p className="font-medium">{referral?.doctorFullName || 'Unknown Doctor'}</p>
+                    <p className="text-sm text-gray-500">{referral?.doctorSpecialization || 'General Practice'}</p>
                     <p className="text-xs text-gray-400">
-                      Monthly Bookings: {referral.monthlyBookings || 0} | Booking Fees: R{(referral.monthlyBookingFeeRevenue || 0).toLocaleString()}
+                      Monthly Bookings: {referral?.monthlyBookings || 0} | Booking Fees: R{((referral?.monthlyBookingFeeRevenue || 0)).toLocaleString()}
                     </p>
                   </div>
                   <div className="text-right">
                     <p className="font-bold text-green-600">R{commissionAmount.toLocaleString()}</p>
-                    <Badge className={referral.commissionPaid ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}>
-                      {referral.commissionPaid ? 'Paid' : 'Pending'}
+                    <Badge className={referral?.commissionPaid ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}>
+                      {referral?.commissionPaid ? 'Paid' : 'Pending'}
                     </Badge>
                   </div>
                 </div>
@@ -389,8 +389,8 @@ const OnboardingPendingScreen = ({ title, description, nextSteps, buttonText, bu
             <div className="bg-blue-50 p-4 rounded-lg text-left">
               <p className="text-sm font-medium text-blue-800 mb-2">Next Steps:</p>
               <ul className="text-sm text-blue-700 space-y-1">
-                {nextSteps.map((step: string, index: number) => (
-                  <li key={index} className="flex items-center gap-2">
+                {nextSteps.map((step: string, idx: number) => (
+                  <li key={idx} className="flex items-center gap-2">
                     <Clock className="w-4 h-4" />
                     {step}
                   </li>
@@ -477,14 +477,14 @@ const AmbassadorPortal = () => {
     const safeReferrals = Array.isArray(referrals) ? referrals : [];
     let filtered = safeReferrals;
     if (filterStatus !== 'all') {
-      filtered = filtered.filter((r: any) => r.status === filterStatus);
+      filtered = filtered.filter((r: any) => r?.status === filterStatus);
     }
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter((r: any) => 
-        (r.doctorFullName || '').toLowerCase().includes(term) ||
-        (r.doctorEmail || '').toLowerCase().includes(term) ||
-        (r.doctorSpecialization || '').toLowerCase().includes(term)
+        (r?.doctorFullName || '').toLowerCase().includes(term) ||
+        (r?.doctorEmail || '').toLowerCase().includes(term) ||
+        (r?.doctorSpecialization || '').toLowerCase().includes(term)
       );
     }
     return filtered;
@@ -555,18 +555,18 @@ const AmbassadorPortal = () => {
   }
 
   // ==================== ONBOARDING STEPS ====================
-  // Safely access properties with optional chaining and fallbacks
-  const step = ambassadorData?.onboardingStep ?? 1;
-  const psychometricPassed = ambassadorData?.psychometricTest?.passed ?? null;
-  const psychometricScore = ambassadorData?.psychometricTest?.score ?? null;
-  const nextAttemptDate = ambassadorData?.psychometricTest?.nextAttemptDate?.toDate?.() ?? null;
-  const trainingCompleted = ambassadorData?.trainingModule?.completed ?? false;
-  const interviewStatus = ambassadorData?.interviewStatus ?? 'pending';
-  const applicationStatus = ambassadorData?.applicationStatus ?? 'pending';
-  const knowledgeTestPassed = ambassadorData?.knowledgeTest?.passed ?? null;
-  const knowledgeTestAttempts = ambassadorData?.knowledgeTest?.attempts ?? 0;
-  const maxAttempts = ambassadorData?.knowledgeTest?.maxAttempts ?? 3;
-  const referralCode = ambassadorData?.referralCode ?? null;
+  // Safely extract all values with fallbacks
+  const step = ambassadorData.onboardingStep ?? 1;
+  const psychometricPassed = ambassadorData.psychometricTest?.passed ?? null;
+  const psychometricScore = ambassadorData.psychometricTest?.score ?? null;
+  const nextAttemptDate = ambassadorData.psychometricTest?.nextAttemptDate?.toDate?.() ?? null;
+  const trainingCompleted = ambassadorData.trainingModule?.completed ?? false;
+  const interviewStatus = ambassadorData.interviewStatus ?? 'pending';
+  const applicationStatus = ambassadorData.applicationStatus ?? 'pending';
+  const knowledgeTestPassed = ambassadorData.knowledgeTest?.passed ?? null;
+  const knowledgeTestAttempts = ambassadorData.knowledgeTest?.attempts ?? 0;
+  const maxAttempts = ambassadorData.knowledgeTest?.maxAttempts ?? 3;
+  const referralCode = ambassadorData.referralCode ?? null;
 
   console.log('🔍 Ambassador Portal Debug:', {
     step,
@@ -575,7 +575,7 @@ const AmbassadorPortal = () => {
     interviewStatus,
     applicationStatus,
     uid: user?.uid,
-    hasAmbassadorData: !!ambassadorData,
+    referralCode,
   });
 
   // Step 1: Take Psychometric Test (if not taken yet)
