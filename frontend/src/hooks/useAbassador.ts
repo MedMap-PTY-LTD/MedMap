@@ -1,3 +1,4 @@
+// hooks/useAmbassador.ts
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AmbassadorService } from '@/lib/services/ambassadorService';
 import { AmbassadorStatsCalculator } from '@/lib/utils/ambassadorStats';
@@ -16,12 +17,15 @@ export const useAmbassador = (uid: string) => {
     data: ambassadorData, 
     isLoading: isLoadingAmbassador,
     refetch: refetchAmbassador,
+    error,
   } = useQuery({
     queryKey: [QUERY_KEYS.ambassador, uid],
     queryFn: () => AmbassadorService.getAmbassadorData(uid),
     enabled: !!uid,
     staleTime: 2 * 60 * 1000,
     gcTime: 5 * 60 * 1000,
+    retry: 3,
+    retryDelay: 1000,
   });
 
   // Query: Get referrals
@@ -61,5 +65,6 @@ export const useAmbassador = (uid: string) => {
     refetch,
     updateTier: updateTier.mutate,
     isUpdatingTier: updateTier.isPending,
+    error,
   };
 };
