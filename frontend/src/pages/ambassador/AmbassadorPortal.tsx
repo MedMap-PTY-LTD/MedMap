@@ -1,5 +1,5 @@
 // pages/ambassador/AmbassadorPortal.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
@@ -30,6 +30,7 @@ import {
   Video,
   Sparkles,
   UserCheck,
+  ArrowRight,
 } from 'lucide-react';
 import TrainingModule from './TrainingModule';
 import KnowledgeTest from './KnowledgeTest';
@@ -53,7 +54,7 @@ const StatsCard = ({ title, value, icon: Icon, color, badge }: any) => (
 
 // ==================== OVERVIEW TAB ====================
 const OverviewTab = ({ 
-  referralCode,  // ✅ Pass referralCode directly
+  referralCode,
   referralsCount, 
   stats, 
   tierDisplay, 
@@ -155,7 +156,7 @@ const ReferralsTab = ({
   formatDate,
   onRefresh,
   onCopyCode,
-  referralCode, // ✅ Pass referralCode as a prop
+  referralCode,
 }: any) => {
   return (
     <Card>
@@ -360,6 +361,52 @@ const EarningsTab = ({ stats, referrals, tierDisplay, formatDate, getStatusBadge
   );
 };
 
+// ==================== ONBOARDING PENDING SCREEN ====================
+const OnboardingPendingScreen = () => {
+  const navigate = useNavigate();
+  
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <Card className="max-w-md w-full">
+        <CardHeader className="text-center">
+          <div className="mx-auto w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mb-4">
+            <Clock className="w-8 h-8 text-yellow-600" />
+          </div>
+          <CardTitle>Application Submitted</CardTitle>
+          <CardDescription>
+            Thank you for completing the initial steps!
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="text-center space-y-4">
+          <p className="text-gray-600">
+            Your application is being reviewed by our team. You will receive an email notification when there's an update.
+          </p>
+          <div className="bg-blue-50 p-4 rounded-lg text-left">
+            <p className="text-sm font-medium text-blue-800 mb-2">Next Steps:</p>
+            <ul className="text-sm text-blue-700 space-y-1">
+              <li className="flex items-center gap-2">
+                <Clock className="w-4 h-4" />
+                Wait for application review
+              </li>
+              <li className="flex items-center gap-2">
+                <UserCheck className="w-4 h-4" />
+                Interview scheduling (if selected)
+              </li>
+              <li className="flex items-center gap-2">
+                <Award className="w-4 h-4" />
+                Ambassador approval and onboarding
+              </li>
+            </ul>
+          </div>
+          <Button variant="outline" onClick={() => navigate('/')} className="w-full">
+            Return to Home
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
 // ==================== MAIN COMPONENT ====================
 const AmbassadorPortal = () => {
   const { user, profile, isLoading: authLoading } = useAuth();
@@ -367,6 +414,7 @@ const AmbassadorPortal = () => {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
 
   // ✅ USING THE CUSTOM HOOK
   const {
@@ -440,8 +488,16 @@ const AmbassadorPortal = () => {
     return filtered;
   };
 
+  // ==================== EFFECT ====================
+  useEffect(() => {
+    if (!authLoading && !user) {
+      navigate('/signin');
+      return;
+    }
+  }, [authLoading, user, navigate]);
+
   // ==================== LOADING ====================
-  if (authLoading || isLoading) {
+  if (authLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
         <div className="flex flex-col items-center gap-4">
@@ -464,6 +520,18 @@ const AmbassadorPortal = () => {
             <Button onClick={() => navigate('/signin')} className="w-full">Sign In</Button>
           </CardContent>
         </Card>
+      </div>
+    );
+  }
+
+  // ==================== WAIT FOR AMBASSADOR DATA ====================
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-12 h-12 text-purple-600 animate-spin" />
+          <p className="text-gray-600">Loading your ambassador profile...</p>
+        </div>
       </div>
     );
   }
@@ -493,8 +561,25 @@ const AmbassadorPortal = () => {
   const interviewStatus = ambassadorData?.interviewStatus;
   const applicationStatus = ambassadorData?.applicationStatus;
 
-  // Step 2: Failed psychometric
-  if (step === 2 && psychometricPassed === false) {
+  console.log('🔍 Ambassador Portal Debug:', {
+    step,
+    psychometricPassed,
+    trainingCompleted,
+    interviewStatus,
+    applicationStatus,
+    uid: user?.uid,
+    ambassadorData,
+  });
+
+  // Step 1: Take Psychometric Test (or show if failed/passed)
+  if (step === 1 && psychometricPassed === null) {
+    // Redirect to psychometric test
+    navigate('/ambassador/psychometric-test');
+    return null;
+  }
+
+  // Step 1: Psychometric test failed - cooldown
+  if (step === 1 && psychometricPassed === false) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
@@ -533,39 +618,60 @@ const AmbassadorPortal = () => {
     );
   }
 
-  // Step 3: Training Module
-  if (step === 2 || (step === 3 && !trainingCompleted)) {
+  // Step 2: Training Module (after psychometric passed)
+  if (step === 2 && psychometricPassed === true && !trainingCompleted) {
     return <TrainingModule />;
   }
 
   // Step 3: Knowledge Test (after training completed)
   if (step === 3 && trainingCompleted) {
-    return <KnowledgeTest />;
+    // Check if knowledge test was already passed or failed
+    const knowledgeTestPassed = ambassadorData?.knowledgeTest?.passed;
+    const knowledgeTestAttempts = ambassadorData?.knowledgeTest?.attempts || 0;
+    const maxAttempts = ambassadorData?.knowledgeTest?.maxAttempts || 3;
+
+    if (knowledgeTestPassed === true) {
+      // Already passed, move to interview stage
+      // This should already be updated in the database, but just in case
+      if (step < 4) {
+        // The knowledge test was passed but step wasn't updated
+        // This should be handled by the KnowledgeTest component
+        navigate('/ambassador/portal');
+        return null;
+      }
+    } else if (knowledgeTestAttempts >= maxAttempts && knowledgeTestPassed === false) {
+      // Failed all attempts
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+          <Card className="max-w-md w-full">
+            <CardHeader className="text-center">
+              <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <XCircle className="w-8 h-8 text-red-600" />
+              </div>
+              <CardTitle>Knowledge Test Not Passed</CardTitle>
+              <CardDescription>You have used all {maxAttempts} attempts.</CardDescription>
+            </CardHeader>
+            <CardContent className="text-center space-y-4">
+              <p className="text-gray-600">
+                You have completed all {maxAttempts} attempts for the knowledge test. 
+                Your application has been reviewed.
+              </p>
+              <Button variant="outline" onClick={() => navigate('/')} className="w-full">
+                Return to Home
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      );
+    } else {
+      // Take the knowledge test
+      return <KnowledgeTest />;
+    }
   }
 
-  // Step 4: Interview pending
+  // Step 4: Interview pending (waiting for admin action)
   if (step === 4 && interviewStatus === 'pending') {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <Card className="max-w-md w-full">
-          <CardHeader className="text-center">
-            <div className="mx-auto w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
-              <Clock className="w-8 h-8 text-blue-600" />
-            </div>
-            <CardTitle>Application Under Review</CardTitle>
-            <CardDescription>You have successfully passed the knowledge test!</CardDescription>
-          </CardHeader>
-          <CardContent className="text-center space-y-4">
-            <p className="text-gray-600">
-              Our team is reviewing your application. If selected, you will be contacted to schedule an interview.
-            </p>
-            <Button variant="outline" onClick={() => navigate('/')} className="w-full">
-              Return to Home
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
+    return <OnboardingPendingScreen />;
   }
 
   // Step 4: Interview scheduled
@@ -609,6 +715,38 @@ const AmbassadorPortal = () => {
             <p className="text-gray-600">
               While your application showed promise, we have decided to move forward with other candidates at this time.
             </p>
+            <Button variant="outline" onClick={() => navigate('/')} className="w-full">
+              Return to Home
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Step 4: Interview passed but not yet approved - show pending screen
+  if (step === 4 && interviewStatus === 'passed' && applicationStatus === 'pending') {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardHeader className="text-center">
+            <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
+              <CheckCircle className="w-8 h-8 text-green-600" />
+            </div>
+            <CardTitle>Interview Passed!</CardTitle>
+            <CardDescription>You have successfully passed the interview.</CardDescription>
+          </CardHeader>
+          <CardContent className="text-center space-y-4">
+            <p className="text-gray-600">
+              Your application is now pending final approval from our team. 
+              You will receive an email once you've been approved as an official MedMap Ambassador.
+            </p>
+            <div className="bg-yellow-50 p-4 rounded-lg">
+              <p className="text-sm text-yellow-800 flex items-center gap-2">
+                <Clock className="w-4 h-4" />
+                Approval typically takes 2-5 business days.
+              </p>
+            </div>
             <Button variant="outline" onClick={() => navigate('/')} className="w-full">
               Return to Home
             </Button>
@@ -673,11 +811,6 @@ const AmbassadorPortal = () => {
             <StatsCard title="Total Earnings" value={`R${(stats?.totalCommission || 0).toLocaleString()}`} icon={TrendingUp} color="green" />
           </div>
 
-          {/* Debug Info - Remove in production */}
-          <div className="mb-4 p-3 bg-gray-100 rounded-lg text-xs text-gray-600">
-            <p>Debug: {(referrals?.length || 0)} referrals found | Referral Code: {ambassadorData?.referralCode || 'None'}</p>
-          </div>
-
           {/* Tabs */}
           <Tabs defaultValue="overview" className="space-y-6">
             <TabsList className="grid w-full max-w-md grid-cols-3">
@@ -729,7 +862,7 @@ const AmbassadorPortal = () => {
     );
   }
 
-  // ==================== DEFAULT ONBOARDING VIEW ====================
+  // ==================== DEFAULT LOADING / FALLBACK ====================
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-blue-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto text-center">
