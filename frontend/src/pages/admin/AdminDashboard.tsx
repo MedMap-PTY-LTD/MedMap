@@ -200,11 +200,26 @@ interface Referral {
 
 // ==================== HELPER FUNCTIONS ====================
 const combineWithUserData = (roleData: any, userData: any): any => {
+  // If userData is missing or doesn't have required fields, return null
+  if (!userData || !userData.email) {
+    return null;
+  }
+  
+  const fullName = userData.fullName || 
+    `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 
+    roleData.fullName || 
+    '';
+  
+  // Don't create unknown user entries
+  if (!fullName || !userData.email) {
+    return null;
+  }
+  
   return {
     ...roleData,
     ...userData,
     uid: roleData.uid || userData.uid,
-    fullName: userData.fullName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || roleData.fullName || 'Unknown User',
+    fullName: fullName,
     firstName: userData.firstName || roleData.firstName || '',
     lastName: userData.lastName || roleData.lastName || '',
     email: userData.email || roleData.email || '',
@@ -239,77 +254,163 @@ const fetchDashboardData = async () => {
       getDocs(collection(db, 'referrals')),
     ]);
 
+    // Create a map of existing users
     const userMap: Record<string, any> = {};
+    const existingUserIds = new Set<string>();
+    
     usersSnapshot.docs.forEach((docSnap) => {
-      userMap[docSnap.id] = { uid: docSnap.id, ...docSnap.data() };
+      const data = docSnap.data();
+      // Only include users that actually exist and have valid data
+      if (docSnap.id && data.email) {
+        userMap[docSnap.id] = { uid: docSnap.id, ...data };
+        existingUserIds.add(docSnap.id);
+      }
     });
 
-    const usersData = usersSnapshot.docs.map((docSnap) => ({
-      uid: docSnap.id,
-      ...docSnap.data()
-    })) as UserProfile[];
+    // Filter users to only include those with valid profiles
+    const usersData = usersSnapshot.docs
+      .map((docSnap) => ({
+        uid: docSnap.id,
+        ...docSnap.data()
+      }))
+      .filter((user) => user.email && user.fullName) as UserProfile[];
 
-    const allDoctors = doctorsSnapshot.docs.map((docSnap) => {
-      const doctorData = docSnap.data();
-      const userData = userMap[docSnap.id] || {};
-      return combineWithUserData(
-        { uid: docSnap.id, ...doctorData },
-        userData
-      ) as DoctorProfile;
-    });
+    // Only include doctors that have corresponding user records
+    const allDoctors = doctorsSnapshot.docs
+      .map((docSnap) => {
+        const doctorData = docSnap.data();
+        const userData = userMap[docSnap.id];
+        
+        // Skip if user doesn't exist in users collection
+        if (!userData || !userData.email) {
+          console.log(`⚠️ Skipping doctor ${docSnap.id} - user record not found`);
+          return null;
+        }
+        
+        const combined = combineWithUserData(
+          { uid: docSnap.id, ...doctorData },
+          userData
+        );
+        
+        // Skip if combine returned null (missing required fields)
+        if (!combined) {
+          console.log(`⚠️ Skipping doctor ${docSnap.id} - missing required fields`);
+          return null;
+        }
+        
+        return combined as DoctorProfile;
+      })
+      .filter((doctor): doctor is DoctorProfile => doctor !== null);
 
-    const patientsData = patientsSnapshot.docs.map((docSnap) => {
-      const patientData = docSnap.data();
-      const userData = userMap[docSnap.id] || {};
-      return combineWithUserData(
-        { uid: docSnap.id, ...patientData },
-        userData
-      ) as PatientProfile;
-    });
+    // Only include patients that have corresponding user records
+    const patientsData = patientsSnapshot.docs
+      .map((docSnap) => {
+        const patientData = docSnap.data();
+        const userData = userMap[docSnap.id];
+        
+        if (!userData || !userData.email) {
+          console.log(`⚠️ Skipping patient ${docSnap.id} - user record not found`);
+          return null;
+        }
+        
+        const combined = combineWithUserData(
+          { uid: docSnap.id, ...patientData },
+          userData
+        );
+        
+        if (!combined) {
+          console.log(`⚠️ Skipping patient ${docSnap.id} - missing required fields`);
+          return null;
+        }
+        
+        return combined as PatientProfile;
+      })
+      .filter((patient): patient is PatientProfile => patient !== null);
 
-    const ambassadorsData = ambassadorsSnapshot.docs.map((docSnap) => {
-      const ambassadorData = docSnap.data();
-      const userData = userMap[docSnap.id] || {};
-      return combineWithUserData(
-        { uid: docSnap.id, ...ambassadorData },
-        userData
-      ) as AmbassadorProfile;
-    });
+    // Only include ambassadors that have corresponding user records
+    const ambassadorsData = ambassadorsSnapshot.docs
+      .map((docSnap) => {
+        const ambassadorData = docSnap.data();
+        const userData = userMap[docSnap.id];
+        
+        if (!userData || !userData.email) {
+          console.log(`⚠️ Skipping ambassador ${docSnap.id} - user record not found`);
+          return null;
+        }
+        
+        const combined = combineWithUserData(
+          { uid: docSnap.id, ...ambassadorData },
+          userData
+        );
+        
+        if (!combined) {
+          console.log(`⚠️ Skipping ambassador ${docSnap.id} - missing required fields`);
+          return null;
+        }
+        
+        return combined as AmbassadorProfile;
+      })
+      .filter((ambassador): ambassador is AmbassadorProfile => ambassador !== null);
 
-    // Filter pending doctors
+    // Filter pending doctors - only include those with valid user records
     const pendingDoctorsData = allDoctors.filter(
-      d => d.verificationStatus === 'pending'
+      d => d.verificationStatus === 'pending' && d.email && d.fullName
     );
 
-    // Filter pending ambassadors
+    // Filter pending ambassadors - only include those with valid user records
     const pendingAmbassadorsData = ambassadorsData.filter(
-      a => a.applicationStatus === 'pending'
+      a => a.applicationStatus === 'pending' && a.email && a.fullName
     );
 
-    const referralsData = referralsSnapshot.docs.map((docSnap) => ({
-      id: docSnap.id,
-      ...docSnap.data(),
-      referredAt: docSnap.data().referredAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-      verifiedAt: docSnap.data().verifiedAt?.toDate?.()?.toISOString(),
-    })) as Referral[];
+    // Only include referrals where both doctor and ambassador exist
+    const referralsData = referralsSnapshot.docs
+      .map((docSnap) => {
+        const data = docSnap.data();
+        const doctorId = data.doctorId;
+        const ambassadorId = data.ambassadorId;
+        
+        // Skip if doctor or ambassador doesn't exist in users collection
+        if (!existingUserIds.has(doctorId) || !existingUserIds.has(ambassadorId)) {
+          console.log(`⚠️ Skipping referral ${docSnap.id} - missing user records`);
+          return null;
+        }
+        
+        return {
+          id: docSnap.id,
+          ...data,
+          referredAt: data.referredAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+          verifiedAt: data.verifiedAt?.toDate?.()?.toISOString(),
+        } as Referral;
+      })
+      .filter((referral): referral is Referral => referral !== null);
 
+    // Calculate ready for approval count from valid ambassadors
     const readyForApproval = ambassadorsData.filter(
-      a => a.interviewStatus === 'passed' && a.applicationStatus === 'pending'
+      a => a.interviewStatus === 'passed' && 
+           a.applicationStatus === 'pending' &&
+           a.email &&
+           a.fullName
     ).length;
 
+    // Calculate stats based on valid users only
+    const validUsers = usersData.filter(u => u.email && u.fullName);
+    const validDoctors = allDoctors.filter(d => d.email && d.fullName);
+    const validPatients = patientsData.filter(p => p.email && p.fullName);
+    const validAmbassadors = ambassadorsData.filter(a => a.email && a.fullName);
+
     return {
-      users: usersData,
-      doctors: allDoctors,
-      patients: patientsData,
-      ambassadors: ambassadorsData,
+      users: validUsers,
+      doctors: validDoctors,
+      patients: validPatients,
+      ambassadors: validAmbassadors,
       pendingDoctors: pendingDoctorsData,
       pendingAmbassadors: pendingAmbassadorsData,
       referrals: referralsData,
       stats: {
-        totalUsers: usersData.length,
-        totalDoctors: allDoctors.filter(d => d.verificationStatus === 'verified').length,
-        totalPatients: usersData.filter(u => u.role === 'patient').length,
-        totalAmbassadors: usersData.filter(u => u.role === 'ambassador').length,
+        totalUsers: validUsers.length,
+        totalDoctors: validDoctors.filter(d => d.verificationStatus === 'verified').length,
+        totalPatients: validPatients.length,
+        totalAmbassadors: validAmbassadors.length,
         pendingDoctors: pendingDoctorsData.length,
         pendingAmbassadors: pendingAmbassadorsData.length,
         readyForApproval: readyForApproval,
