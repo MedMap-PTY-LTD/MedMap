@@ -200,7 +200,6 @@ interface Referral {
 
 // ==================== HELPER FUNCTIONS ====================
 const combineWithUserData = (roleData: any, userData: any): any => {
-  // If userData is missing or doesn't have required fields, return null
   if (!userData || !userData.email) {
     return null;
   }
@@ -210,7 +209,6 @@ const combineWithUserData = (roleData: any, userData: any): any => {
     roleData.fullName || 
     '';
   
-  // Don't create unknown user entries
   if (!fullName || !userData.email) {
     return null;
   }
@@ -238,8 +236,6 @@ const QUERY_KEYS = {
 // ==================== DATA FETCHING FUNCTIONS ====================
 const fetchDashboardData = async () => {
   try {
-    console.log('🔄 Fetching dashboard data...');
-    
     const [
       usersSnapshot,
       doctorsSnapshot,
@@ -254,20 +250,17 @@ const fetchDashboardData = async () => {
       getDocs(collection(db, 'referrals')),
     ]);
 
-    // Create a map of existing users
     const userMap: Record<string, any> = {};
     const existingUserIds = new Set<string>();
     
     usersSnapshot.docs.forEach((docSnap) => {
       const data = docSnap.data();
-      // Only include users that actually exist and have valid data
       if (docSnap.id && data.email) {
         userMap[docSnap.id] = { uid: docSnap.id, ...data };
         existingUserIds.add(docSnap.id);
       }
     });
 
-    // Filter users to only include those with valid profiles
     const usersData = usersSnapshot.docs
       .map((docSnap) => ({
         uid: docSnap.id,
@@ -275,15 +268,12 @@ const fetchDashboardData = async () => {
       }))
       .filter((user) => user.email && user.fullName) as UserProfile[];
 
-    // Only include doctors that have corresponding user records
     const allDoctors = doctorsSnapshot.docs
       .map((docSnap) => {
         const doctorData = docSnap.data();
         const userData = userMap[docSnap.id];
         
-        // Skip if user doesn't exist in users collection
         if (!userData || !userData.email) {
-          console.log(`⚠️ Skipping doctor ${docSnap.id} - user record not found`);
           return null;
         }
         
@@ -292,9 +282,7 @@ const fetchDashboardData = async () => {
           userData
         );
         
-        // Skip if combine returned null (missing required fields)
         if (!combined) {
-          console.log(`⚠️ Skipping doctor ${docSnap.id} - missing required fields`);
           return null;
         }
         
@@ -302,14 +290,12 @@ const fetchDashboardData = async () => {
       })
       .filter((doctor): doctor is DoctorProfile => doctor !== null);
 
-    // Only include patients that have corresponding user records
     const patientsData = patientsSnapshot.docs
       .map((docSnap) => {
         const patientData = docSnap.data();
         const userData = userMap[docSnap.id];
         
         if (!userData || !userData.email) {
-          console.log(`⚠️ Skipping patient ${docSnap.id} - user record not found`);
           return null;
         }
         
@@ -319,7 +305,6 @@ const fetchDashboardData = async () => {
         );
         
         if (!combined) {
-          console.log(`⚠️ Skipping patient ${docSnap.id} - missing required fields`);
           return null;
         }
         
@@ -327,14 +312,12 @@ const fetchDashboardData = async () => {
       })
       .filter((patient): patient is PatientProfile => patient !== null);
 
-    // Only include ambassadors that have corresponding user records
     const ambassadorsData = ambassadorsSnapshot.docs
       .map((docSnap) => {
         const ambassadorData = docSnap.data();
         const userData = userMap[docSnap.id];
         
         if (!userData || !userData.email) {
-          console.log(`⚠️ Skipping ambassador ${docSnap.id} - user record not found`);
           return null;
         }
         
@@ -344,7 +327,6 @@ const fetchDashboardData = async () => {
         );
         
         if (!combined) {
-          console.log(`⚠️ Skipping ambassador ${docSnap.id} - missing required fields`);
           return null;
         }
         
@@ -352,26 +334,21 @@ const fetchDashboardData = async () => {
       })
       .filter((ambassador): ambassador is AmbassadorProfile => ambassador !== null);
 
-    // Filter pending doctors - only include those with valid user records
     const pendingDoctorsData = allDoctors.filter(
       d => d.verificationStatus === 'pending' && d.email && d.fullName
     );
 
-    // Filter pending ambassadors - only include those with valid user records
     const pendingAmbassadorsData = ambassadorsData.filter(
       a => a.applicationStatus === 'pending' && a.email && a.fullName
     );
 
-    // Only include referrals where both doctor and ambassador exist
     const referralsData = referralsSnapshot.docs
       .map((docSnap) => {
         const data = docSnap.data();
         const doctorId = data.doctorId;
         const ambassadorId = data.ambassadorId;
         
-        // Skip if doctor or ambassador doesn't exist in users collection
         if (!existingUserIds.has(doctorId) || !existingUserIds.has(ambassadorId)) {
-          console.log(`⚠️ Skipping referral ${docSnap.id} - missing user records`);
           return null;
         }
         
@@ -384,7 +361,6 @@ const fetchDashboardData = async () => {
       })
       .filter((referral): referral is Referral => referral !== null);
 
-    // Calculate ready for approval count from valid ambassadors
     const readyForApproval = ambassadorsData.filter(
       a => a.interviewStatus === 'passed' && 
            a.applicationStatus === 'pending' &&
@@ -392,7 +368,6 @@ const fetchDashboardData = async () => {
            a.fullName
     ).length;
 
-    // Calculate stats based on valid users only
     const validUsers = usersData.filter(u => u.email && u.fullName);
     const validDoctors = allDoctors.filter(d => d.email && d.fullName);
     const validPatients = patientsData.filter(p => p.email && p.fullName);
@@ -424,7 +399,6 @@ const fetchDashboardData = async () => {
       },
     };
   } catch (error: any) {
-    console.error('❌ Error fetching dashboard data:', error);
     throw new Error(error.message || 'Failed to load dashboard data');
   }
 };
@@ -675,7 +649,6 @@ const AdminDashboard = () => {
     },
   });
 
-  // ✅ APPROVE AMBASSADOR MUTATION - Generates referral code
   const approveAmbassadorMutation = useMutation({
     mutationFn: async (ambassadorId: string) => {
       const result = await adminService.approveAmbassador(ambassadorId);
@@ -1534,7 +1507,6 @@ const AdminDashboard = () => {
 
             {/* ==================== AMBASSADORS TAB ==================== */}
             <TabsContent value="ambassadors" className="space-y-6">
-              {/* ✅ PENDING AMBASSADOR APPLICATIONS - WITH APPROVE BUTTON */}
               {pendingAmbassadors.length > 0 && (
                 <Card className="border-2 border-yellow-200">
                   <CardHeader className="bg-yellow-50 pb-3">
@@ -1595,7 +1567,6 @@ const AdminDashboard = () => {
                             )}
                           </div>
                           <div className="flex flex-row sm:flex-col gap-2 ml-0 sm:ml-4">
-                            {/* ✅ APPROVE BUTTON - Generates referral code */}
                             <Button
                               size="sm"
                               className="bg-green-600 hover:bg-green-700 text-sm whitespace-nowrap"
@@ -1641,7 +1612,6 @@ const AdminDashboard = () => {
                 </Card>
               )}
 
-              {/* Ready for Approval */}
               {readyForApproval.length > 0 && (
                 <Card className="border-2 border-green-200">
                   <CardHeader className="bg-green-50 pb-3">
@@ -1721,7 +1691,6 @@ const AdminDashboard = () => {
                 </Card>
               )}
 
-              {/* Pending Interview */}
               {pendingInterview.length > 0 && (
                 <Card className="border-2 border-blue-200">
                   <CardHeader className="bg-blue-50 pb-3">
@@ -1801,7 +1770,6 @@ const AdminDashboard = () => {
                 </Card>
               )}
 
-              {/* All Ambassadors */}
               <Card>
                 <CardHeader className="pb-3">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
