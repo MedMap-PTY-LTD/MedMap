@@ -36,13 +36,14 @@ import KnowledgeTest from './KnowledgeTest';
 
 // ==================== SUB-COMPONENTS ====================
 
-const StatsCard = ({ title, value, icon: Icon, color, badge }: any) => (
+const StatsCard = ({ title, value, icon: Icon, color, badge, subtitle }: any) => (
   <Card>
     <CardContent className="pt-4">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs text-gray-600">{title}</p>
           <p className="text-xl font-bold">{value}</p>
+          {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
           {badge && <div className={`w-3 h-3 rounded-full ${badge} mt-1`} />}
         </div>
         <Icon className={`w-6 h-6 text-${color}-600`} />
@@ -113,26 +114,46 @@ const OverviewTab = ({
         <CardContent>
           <div className="space-y-4">
             <div className="flex justify-between text-sm">
-              <span>Active Doctors: {stats?.activeDoctors || 0}</span>
+              <span>Total Referrals: {stats?.totalReferrals || 0}</span>
               <span className="font-semibold">
                 {stats?.tierProgress?.next 
-                  ? `${stats.activeDoctors}/${stats.tierProgress.next} for next tier`
+                  ? `${stats.totalReferrals}/${stats.tierProgress.next} for next tier`
                   : 'Max Tier Reached!'}
               </span>
             </div>
+            {/* Progress bar based on TOTAL referrals */}
             <Progress 
-              value={Math.min(((stats?.activeDoctors || 0) / (stats?.tierProgress?.next || 10)) * 100, 100)} 
+              value={Math.min(((stats?.totalReferrals || 0) / (stats?.tierProgress?.next || 10)) * 100, 100)} 
               className="h-2" 
             />
+            <div className="flex justify-between text-xs text-gray-500">
+              <span>Bronze</span>
+              <span>Silver (11)</span>
+              <span>Gold (51)</span>
+              <span>Diamond (100+)</span>
+            </div>
+            
+            {/* Active doctors info */}
+            <div className="bg-blue-50 p-3 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <strong>{stats?.activeDoctors || 0}</strong> active doctors generating commission
+                <span className="block text-xs text-blue-600 mt-1">
+                  Active doctors = Verified + Active + 50+ monthly bookings
+                </span>
+              </p>
+            </div>
+            
             <div className="bg-purple-50 p-4 rounded-lg">
               <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
                 <Info className="w-4 h-4 text-purple-600" />
-                How Commission Works:
+                How It Works:
               </h4>
               <ul className="text-xs text-gray-700 space-y-1">
-                <li>• MedMap charges a <strong>R10 booking fee</strong> per consultation</li>
-                <li>• You earn a percentage of the <strong>R10 booking fee</strong></li>
-                <li>• Only doctors with <strong>50+ bookings per month</strong> generate commission</li>
+                <li>• <strong>Total Referrals</strong> = All doctors you've referred (pending + verified)</li>
+                <li>• <strong>Active Doctors</strong> = Verified + Active + 50+ bookings/month</li>
+                <li>• <strong>Tier</strong> = Based on Active Doctors (quality over quantity)</li>
+                <li>• <strong>Progress</strong> = Based on Total Referrals (shows your effort)</li>
+                <li>• <strong>Commission</strong> = Earned from Active Doctors only</li>
               </ul>
             </div>
           </div>
@@ -157,10 +178,8 @@ const ReferralsTab = ({
   onCopyCode = () => {},
   referralCode = null,
 }: any) => {
-  // Ensure referrals is always an array
   const safeReferrals = Array.isArray(referrals) ? referrals : [];
   
-  // Filter referrals
   const filteredReferrals = safeReferrals.filter((r: any) => {
     if (filterStatus !== 'all' && r?.status !== filterStatus) return false;
     if (searchTerm) {
@@ -173,6 +192,9 @@ const ReferralsTab = ({
     return true;
   });
 
+  const verifiedCount = safeReferrals.filter((r: any) => r?.status === 'verified').length;
+  const activeCount = safeReferrals.filter((r: any) => r?.status === 'verified' && r?.eligibleForCommission).length;
+
   return (
     <Card>
       <CardHeader>
@@ -184,9 +206,10 @@ const ReferralsTab = ({
             </CardTitle>
             <CardDescription>Track the doctors who signed up using your referral code</CardDescription>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Badge className="bg-purple-100 text-purple-800">Total: {totalReferrals || 0}</Badge>
-            <Badge className="bg-green-100 text-green-800">Verified: {safeReferrals.filter((r: any) => r?.status === 'verified').length || 0}</Badge>
+            <Badge className="bg-green-100 text-green-800">Verified: {verifiedCount}</Badge>
+            <Badge className="bg-blue-100 text-blue-800">Active: {activeCount}</Badge>
             <Button variant="ghost" size="sm" onClick={onRefresh}>
               <RefreshCw className="w-4 h-4" />
             </Button>
@@ -239,49 +262,64 @@ const ReferralsTab = ({
           </div>
         ) : (
           <div className="space-y-4">
-            {filteredReferrals.map((referral: any, index: number) => (
-              <div key={referral?.id || `referral-${index}`} className="border rounded-lg p-4 bg-white">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                        <Stethoscope className="w-5 h-5 text-blue-600" />
+            {filteredReferrals.map((referral: any, index: number) => {
+              const isActive = referral?.status === 'verified' && referral?.eligibleForCommission;
+              return (
+                <div key={referral?.id || `referral-${index}`} className="border rounded-lg p-4 bg-white">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                          <Stethoscope className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <div>
+                          <p className="font-semibold">{referral?.doctorFullName || 'Unknown Doctor'}</p>
+                          <p className="text-sm text-gray-500">{referral?.doctorEmail || ''}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-semibold">{referral?.doctorFullName || 'Unknown Doctor'}</p>
-                        <p className="text-sm text-gray-500">{referral?.doctorEmail || ''}</p>
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <p className="text-gray-500">Specialization</p>
+                          <p className="font-medium">{referral?.doctorSpecialization || 'N/A'}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500">Referred</p>
+                          <p className="font-medium">{formatDate(referral?.referredAt)}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500">Status</p>
+                          <Badge className={getStatusBadge(referral?.status)}>
+                            {referral?.status || 'pending'}
+                          </Badge>
+                        </div>
+                        <div>
+                          <p className="text-gray-500">Active</p>
+                          <Badge className={isActive ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}>
+                            {isActive ? 'Yes' : 'No'}
+                          </Badge>
+                        </div>
                       </div>
+                      {referral?.verifiedAt && (
+                        <p className="text-xs text-gray-400 mt-2">
+                          Verified: {formatDate(referral.verifiedAt)}
+                        </p>
+                      )}
+                      {referral?.rejectionReason && (
+                        <p className="text-xs text-red-600 mt-2">
+                          Reason: {referral.rejectionReason}
+                        </p>
+                      )}
+                      {referral?.monthlyBookings !== undefined && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          Monthly Bookings: {referral.monthlyBookings || 0}
+                          {referral.eligibleForCommission ? ' ✅ Eligible for commission' : ' ❌ Not eligible (needs 50+ bookings)'}
+                        </p>
+                      )}
                     </div>
-                    <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
-                      <div>
-                        <p className="text-gray-500">Specialization</p>
-                        <p className="font-medium">{referral?.doctorSpecialization || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500">Referred</p>
-                        <p className="font-medium">{formatDate(referral?.referredAt)}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500">Status</p>
-                        <Badge className={getStatusBadge(referral?.status)}>
-                          {referral?.status || 'pending'}
-                        </Badge>
-                      </div>
-                    </div>
-                    {referral?.verifiedAt && (
-                      <p className="text-xs text-gray-400 mt-2">
-                        Verified: {formatDate(referral.verifiedAt)}
-                      </p>
-                    )}
-                    {referral?.rejectionReason && (
-                      <p className="text-xs text-red-600 mt-2">
-                        Reason: {referral.rejectionReason}
-                      </p>
-                    )}
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </CardContent>
@@ -303,12 +341,13 @@ const EarningsTab = ({ stats = {}, referrals = [], tierDisplay = { label: 'Bronz
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
           <div className="bg-green-50 p-4 rounded-lg text-center">
             <p className="text-sm text-gray-600">Total Earned</p>
             <p className="text-2xl font-bold text-green-700">
               R{(stats?.totalCommission || 0).toLocaleString()}
             </p>
+            <p className="text-xs text-gray-500">From {stats?.activeDoctors || 0} active doctors</p>
           </div>
           <div className="bg-yellow-50 p-4 rounded-lg text-center">
             <p className="text-sm text-gray-600">Pending Commission</p>
@@ -320,6 +359,12 @@ const EarningsTab = ({ stats = {}, referrals = [], tierDisplay = { label: 'Bronz
             <p className="text-sm text-gray-600">Paid Commission</p>
             <p className="text-2xl font-bold text-blue-700">
               R{(stats?.paidCommission || 0).toLocaleString()}
+            </p>
+          </div>
+          <div className="bg-purple-50 p-4 rounded-lg text-center">
+            <p className="text-sm text-gray-600">Total Referrals</p>
+            <p className="text-2xl font-bold text-purple-700">
+              {stats?.totalReferrals || 0}
             </p>
           </div>
         </div>
@@ -427,15 +472,16 @@ const AmbassadorPortal = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
-  // Get the UID safely
   const uid = user?.uid || '';
   
-  // USE THE HOOK
+  // Use TanStack Query hook
   const {
     ambassadorData,
     referrals,
     stats,
     isLoading,
+    isRefetching,
+    error,
     refetch,
   } = useAmbassador(uid);
 
@@ -535,6 +581,24 @@ const AmbassadorPortal = () => {
     );
   }
 
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardContent className="pt-6 text-center">
+            <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Error Loading Profile</h2>
+            <p className="text-gray-600 mb-4">{error.message || 'Failed to load ambassador profile. Please try again.'}</p>
+            <Button onClick={() => refetch()} className="w-full">
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (!ambassadorData) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -551,7 +615,6 @@ const AmbassadorPortal = () => {
   }
 
   // ==================== ONBOARDING STEPS ====================
-  // All values are now safely accessed from ambassadorData
   const step = ambassadorData.onboardingStep ?? 1;
   const psychometricPassed = ambassadorData.psychometricTest?.passed ?? null;
   const psychometricScore = ambassadorData.psychometricTest?.score ?? null;
@@ -563,16 +626,6 @@ const AmbassadorPortal = () => {
   const knowledgeTestAttempts = ambassadorData.knowledgeTest?.attempts ?? 0;
   const maxAttempts = ambassadorData.knowledgeTest?.maxAttempts ?? 3;
   const referralCode = ambassadorData.referralCode ?? null;
-
-  console.log('🔍 Ambassador Portal Debug:', {
-    step,
-    psychometricPassed,
-    trainingCompleted,
-    interviewStatus,
-    applicationStatus,
-    uid: user?.uid,
-    referralCode,
-  });
 
   // ==================== STEP 1: PSYCHOMETRIC TEST ====================
   if (step === 1 && psychometricPassed === null) {
@@ -743,7 +796,6 @@ const AmbassadorPortal = () => {
     const tierDisplay = getTierDisplay(stats?.currentTier || 'bronze');
     const safeReferrals = Array.isArray(referrals) ? referrals : [];
     
-    // Filter referrals client-side
     let filteredReferrals = safeReferrals;
     if (filterStatus !== 'all') {
       filteredReferrals = filteredReferrals.filter((r: any) => r?.status === filterStatus);
@@ -779,9 +831,10 @@ const AmbassadorPortal = () => {
                   size="sm" 
                   className="text-white hover:bg-white/20"
                   onClick={handleRefresh}
+                  disabled={isRefetching}
                 >
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Refresh
+                  <RefreshCw className={`w-4 h-4 mr-2 ${isRefetching ? 'animate-spin' : ''}`} />
+                  {isRefetching ? 'Refreshing...' : 'Refresh'}
                 </Button>
                 <div className="bg-white/20 rounded-lg px-4 py-2 text-center">
                   <p className="text-xs text-purple-200">Your Referral Code</p>
@@ -798,13 +851,43 @@ const AmbassadorPortal = () => {
         </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Stats Cards */}
+          {/* Stats Cards - Show both quality and quantity */}
           <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-            <StatsCard title="Total Referrals" value={stats?.totalReferrals || 0} icon={Users} color="purple" />
-            <StatsCard title="Active Doctors" value={stats?.activeDoctors || 0} icon={Heart} color="green" />
-            <StatsCard title="Eligible for Commission" value={stats?.eligibleDoctors || 0} icon={Target} color="blue" />
-            <StatsCard title="Current Tier" value={tierDisplay.label} icon={Award} color="amber" badge={tierDisplay.color} />
-            <StatsCard title="Total Earnings" value={`R${(stats?.totalCommission || 0).toLocaleString()}`} icon={TrendingUp} color="green" />
+            <StatsCard 
+              title="Total Referrals" 
+              value={stats?.totalReferrals || 0} 
+              icon={Users} 
+              color="purple" 
+            />
+            <StatsCard 
+              title="Active Doctors" 
+              value={stats?.activeDoctors || 0} 
+              icon={Heart} 
+              color="green"
+              subtitle="Verified + 50+ bookings" 
+            />
+            <StatsCard 
+              title="Eligible for Commission" 
+              value={stats?.eligibleDoctors || 0} 
+              icon={Target} 
+              color="blue"
+              subtitle="Verified & Active" 
+            />
+            <StatsCard 
+              title="Current Tier" 
+              value={tierDisplay.label} 
+              icon={Award} 
+              color="amber" 
+              badge={tierDisplay.color}
+              subtitle={`${stats?.activeDoctors || 0} active doctors`}
+            />
+            <StatsCard 
+              title="Total Earnings" 
+              value={`R${(stats?.totalCommission || 0).toLocaleString()}`} 
+              icon={TrendingUp} 
+              color="green"
+              subtitle="From active doctors only" 
+            />
           </div>
 
           {/* Tabs */}

@@ -3,51 +3,80 @@ import { ReferralDoctor, AmbassadorStats, TIERS, TierConfig } from '@/lib/types/
 
 export class AmbassadorStatsCalculator {
   static calculate(referrals: ReferralDoctor[]): AmbassadorStats {
-    // Always return stats, even if empty
-    const verifiedDoctors = referrals.filter(r => r.status === 'verified');
-    const activeDoctors = verifiedDoctors.filter(r => r.doctorIsActive);
-    const activeVerifiedCount = activeDoctors.length;
+    // Total referrals (all statuses)
+    const totalReferrals = referrals.length;
     
-    const currentTier = this.getCurrentTier(activeVerifiedCount);
-    const eligibleDoctors = referrals.filter(r => r.eligibleForCommission && r.status === 'verified');
+    // Count by status
+    const pendingReferrals = referrals.filter(r => r.status === 'pending').length;
+    const verifiedReferrals = referrals.filter(r => r.status === 'verified').length;
+    const rejectedReferrals = referrals.filter(r => r.status === 'rejected').length;
     
-    const totalEligibleBookingFeeRevenue = eligibleDoctors.reduce(
-      (sum, r) => sum + (r.monthlyBookingFeeRevenue || 0), 0
-    );
+    // QUALITY METRICS: Active doctors = verified + active + eligibleForCommission (50+ bookings)
+    const activeDoctors = referrals.filter(
+      r => r.status === 'verified' && r.doctorIsActive && r.eligibleForCommission
+    ).length;
     
+    // Eligible doctors = verified + active (regardless of bookings)
+    const eligibleDoctors = referrals.filter(
+      r => r.status === 'verified' && r.doctorIsActive
+    ).length;
+    
+    // TIER: Based on ACTIVE doctors (quality)
+    const currentTier = this.getCurrentTier(activeDoctors);
     const commissionRate = currentTier.commissionRate;
-    const totalCommission = totalEligibleBookingFeeRevenue * commissionRate;
     
-    const pendingCommission = referrals
-      .filter(r => r.status === 'verified' && !r.commissionPaid && r.eligibleForCommission)
-      .reduce((sum, r) => sum + ((r.monthlyBookingFeeRevenue || 0) * commissionRate), 0);
-    
-    const paidCommission = referrals
-      .filter(r => r.status === 'verified' && r.commissionPaid && r.eligibleForCommission)
-      .reduce((sum, r) => sum + ((r.monthlyBookingFeeRevenue || 0) * commissionRate), 0);
-    
+    // TIER PROGRESS: Based on TOTAL referrals (motivation)
     const tierIndex = TIERS.indexOf(currentTier);
     const nextTier = tierIndex < TIERS.length - 1 ? TIERS[tierIndex + 1] : null;
     
-    // Ensure we always return valid numbers
+    // COMMISSION: Only from active doctors with 50+ bookings
+    const activeDoctorsList = referrals.filter(
+      r => r.status === 'verified' && r.doctorIsActive && r.eligibleForCommission
+    );
+    
+    const eligibleBookingFeeRevenue = activeDoctorsList.reduce(
+      (sum, r) => sum + (r.monthlyBookingFeeRevenue || 0), 0
+    );
+    
+    const totalCommission = eligibleBookingFeeRevenue * commissionRate;
+    
+    // Pending commission = active doctors not yet paid
+    const pendingCommission = activeDoctorsList
+      .filter(r => !r.commissionPaid)
+      .reduce((sum, r) => sum + ((r.monthlyBookingFeeRevenue || 0) * commissionRate), 0);
+    
+    // Paid commission = active doctors already paid
+    const paidCommission = activeDoctorsList
+      .filter(r => r.commissionPaid)
+      .reduce((sum, r) => sum + ((r.monthlyBookingFeeRevenue || 0) * commissionRate), 0);
+    
     return {
-      totalReferrals: referrals.length,
-      pendingReferrals: referrals.filter(r => r.status === 'pending').length,
-      verifiedReferrals: referrals.filter(r => r.status === 'verified').length,
-      rejectedReferrals: referrals.filter(r => r.status === 'rejected').length,
-      totalCommission: totalCommission || 0,
-      activeDoctors: activeVerifiedCount,
-      eligibleDoctors: eligibleDoctors.length,
-      eligibleBookingFeeRevenue: totalEligibleBookingFeeRevenue || 0,
-      pendingCommission: pendingCommission || 0,
-      paidCommission: paidCommission || 0,
+      // All referrals
+      totalReferrals,
+      pendingReferrals,
+      verifiedReferrals,
+      rejectedReferrals,
+      
+      // Quality metrics
+      activeDoctors,
+      eligibleDoctors,
+      
+      // Tier (based on active doctors)
       currentTier: currentTier.name,
       commissionRate: commissionRate * 100,
+      
+      // Progress (based on total referrals)
       tierProgress: {
-        current: activeVerifiedCount,
+        current: totalReferrals,    // Show total referrals in progress bar
         next: nextTier ? nextTier.minDoctors : null,
         max: currentTier.maxDoctors,
       },
+      
+      // Commission (from active doctors only)
+      totalCommission: totalCommission || 0,
+      pendingCommission: pendingCommission || 0,
+      paidCommission: paidCommission || 0,
+      eligibleBookingFeeRevenue: eligibleBookingFeeRevenue || 0,
     };
   }
 

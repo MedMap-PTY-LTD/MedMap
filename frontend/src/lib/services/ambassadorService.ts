@@ -228,11 +228,12 @@ export class AmbassadorService {
     }
   }
 
-  // ==================== NEW METHODS ====================
+  // ==================== STATS UPDATE METHODS ====================
 
   /**
    * Update ambassador stats (total referrals, active doctors, earnings, tier)
-   * Call this whenever a referral status changes
+   * ✅ TIER based on ACTIVE doctors (quality)
+   * ✅ PROGRESS based on TOTAL referrals (motivation)
    */
   static async updateAmbassadorStats(ambassadorId: string): Promise<void> {
     try {
@@ -243,7 +244,11 @@ export class AmbassadorService {
       
       const totalReferredDoctors = referrals.length;
       const verifiedReferrals = referrals.filter(r => r.status === 'verified');
-      const activeReferredDoctors = verifiedReferrals.filter(r => r.doctorIsActive).length;
+      
+      // ✅ ACTIVE doctors = verified + doctorIsActive + eligibleForCommission (50+ bookings)
+      const activeReferredDoctors = verifiedReferrals.filter(
+        r => r.doctorIsActive && r.eligibleForCommission
+      ).length;
       
       // Calculate total earnings from verified referrals
       const totalEarnings = verifiedReferrals.reduce(
@@ -254,7 +259,7 @@ export class AmbassadorService {
         .filter(r => !r.commissionPaid)
         .reduce((sum, r) => sum + (r.commissionEarned || 0), 0);
       
-      // Determine tier based on active referred doctors
+      // ✅ TIER based on ACTIVE doctors (quality)
       let currentTier: 'bronze' | 'silver' | 'gold' | 'diamond' = 'bronze';
       if (activeReferredDoctors >= 100) currentTier = 'diamond';
       else if (activeReferredDoctors >= 51) currentTier = 'gold';

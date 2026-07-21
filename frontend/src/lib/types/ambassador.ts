@@ -1,3 +1,4 @@
+// lib/types/ambassador.ts
 export const MEDMAP_BOOKING_FEE = 10;
 
 export interface TierConfig {
@@ -30,23 +31,32 @@ export interface ReferralDoctor {
 }
 
 export interface AmbassadorStats {
+  // All referrals (pending + verified + rejected)
   totalReferrals: number;
   pendingReferrals: number;
   verifiedReferrals: number;
   rejectedReferrals: number;
-  totalCommission: number;
-  activeDoctors: number;
-  eligibleDoctors: number;
-  eligibleBookingFeeRevenue: number;
-  pendingCommission: number;
-  paidCommission: number;
+  
+  // Quality metrics
+  activeDoctors: number;           // Verified + Active + 50+ bookings/month
+  eligibleDoctors: number;         // Verified + Active (regardless of bookings)
+  
+  // Tier (based on ACTIVE doctors)
   currentTier: string;
   commissionRate: number;
+  
+  // Progress (based on TOTAL referrals)
   tierProgress: {
-    current: number;
-    next: number | null;
+    current: number;   // Total referrals
+    next: number | null;  // Next tier threshold
     max: number;
   };
+  
+  // Commission (from ACTIVE doctors only)
+  totalCommission: number;
+  pendingCommission: number;
+  paidCommission: number;
+  eligibleBookingFeeRevenue: number;
 }
 
 export interface AmbassadorData {
@@ -87,6 +97,7 @@ export interface AmbassadorData {
   phone?: string;
 }
 
+// TIERS based on ACTIVE doctors (quality)
 export const TIERS: TierConfig[] = [
   { 
     name: 'bronze', 
