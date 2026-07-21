@@ -1,5 +1,10 @@
 {
   "dependencies": {
+    "firebase-admin": "^14.2.0",
     "paystack": "^2.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "ts-node": "^10.9.2"
   }
 }
