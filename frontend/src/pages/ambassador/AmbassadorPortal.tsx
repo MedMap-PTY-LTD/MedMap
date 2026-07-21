@@ -30,7 +30,7 @@ import {
   Video,
   Sparkles,
   UserCheck,
-  ArrowRight,
+  CheckCircle,
 } from 'lucide-react';
 import TrainingModule from './TrainingModule';
 import KnowledgeTest from './KnowledgeTest';
@@ -362,9 +362,7 @@ const EarningsTab = ({ stats, referrals, tierDisplay, formatDate, getStatusBadge
 };
 
 // ==================== ONBOARDING PENDING SCREEN ====================
-const OnboardingPendingScreen = () => {
-  const navigate = useNavigate();
-  
+const OnboardingPendingScreen = ({ title, description, nextSteps, buttonText, buttonAction }: any) => {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <Card className="max-w-md w-full">
@@ -372,34 +370,30 @@ const OnboardingPendingScreen = () => {
           <div className="mx-auto w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mb-4">
             <Clock className="w-8 h-8 text-yellow-600" />
           </div>
-          <CardTitle>Application Submitted</CardTitle>
+          <CardTitle>{title || 'Application Submitted'}</CardTitle>
           <CardDescription>
-            Thank you for completing the initial steps!
+            {description || 'Thank you for completing the initial steps!'}
           </CardDescription>
         </CardHeader>
         <CardContent className="text-center space-y-4">
           <p className="text-gray-600">
             Your application is being reviewed by our team. You will receive an email notification when there's an update.
           </p>
-          <div className="bg-blue-50 p-4 rounded-lg text-left">
-            <p className="text-sm font-medium text-blue-800 mb-2">Next Steps:</p>
-            <ul className="text-sm text-blue-700 space-y-1">
-              <li className="flex items-center gap-2">
-                <Clock className="w-4 h-4" />
-                Wait for application review
-              </li>
-              <li className="flex items-center gap-2">
-                <UserCheck className="w-4 h-4" />
-                Interview scheduling (if selected)
-              </li>
-              <li className="flex items-center gap-2">
-                <Award className="w-4 h-4" />
-                Ambassador approval and onboarding
-              </li>
-            </ul>
-          </div>
-          <Button variant="outline" onClick={() => navigate('/')} className="w-full">
-            Return to Home
+          {nextSteps && (
+            <div className="bg-blue-50 p-4 rounded-lg text-left">
+              <p className="text-sm font-medium text-blue-800 mb-2">Next Steps:</p>
+              <ul className="text-sm text-blue-700 space-y-1">
+                {nextSteps.map((step: string, index: number) => (
+                  <li key={index} className="flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    {step}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <Button variant="outline" onClick={buttonAction || (() => window.location.href = '/')} className="w-full">
+            {buttonText || 'Return to Home'}
           </Button>
         </CardContent>
       </Card>
@@ -414,7 +408,6 @@ const AmbassadorPortal = () => {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
 
   // ✅ USING THE CUSTOM HOOK
   const {
@@ -553,13 +546,17 @@ const AmbassadorPortal = () => {
   }
 
   // ==================== ONBOARDING STEPS ====================
-  const step = ambassadorData?.onboardingStep || 1;
-  const psychometricPassed = ambassadorData?.psychometricTest?.passed;
-  const psychometricScore = ambassadorData?.psychometricTest?.score;
-  const nextAttemptDate = ambassadorData?.psychometricTest?.nextAttemptDate?.toDate?.();
-  const trainingCompleted = ambassadorData?.trainingModule?.completed;
-  const interviewStatus = ambassadorData?.interviewStatus;
-  const applicationStatus = ambassadorData?.applicationStatus;
+  // Safely access properties with optional chaining and fallbacks
+  const step = ambassadorData?.onboardingStep ?? 1;
+  const psychometricPassed = ambassadorData?.psychometricTest?.passed ?? null;
+  const psychometricScore = ambassadorData?.psychometricTest?.score ?? null;
+  const nextAttemptDate = ambassadorData?.psychometricTest?.nextAttemptDate?.toDate?.() ?? null;
+  const trainingCompleted = ambassadorData?.trainingModule?.completed ?? false;
+  const interviewStatus = ambassadorData?.interviewStatus ?? 'pending';
+  const applicationStatus = ambassadorData?.applicationStatus ?? 'pending';
+  const knowledgeTestPassed = ambassadorData?.knowledgeTest?.passed ?? null;
+  const knowledgeTestAttempts = ambassadorData?.knowledgeTest?.attempts ?? 0;
+  const maxAttempts = ambassadorData?.knowledgeTest?.maxAttempts ?? 3;
 
   console.log('🔍 Ambassador Portal Debug:', {
     step,
@@ -568,12 +565,11 @@ const AmbassadorPortal = () => {
     interviewStatus,
     applicationStatus,
     uid: user?.uid,
-    ambassadorData,
+    hasAmbassadorData: !!ambassadorData,
   });
 
-  // Step 1: Take Psychometric Test (or show if failed/passed)
+  // Step 1: Take Psychometric Test (if not taken yet)
   if (step === 1 && psychometricPassed === null) {
-    // Redirect to psychometric test
     navigate('/ambassador/psychometric-test');
     return null;
   }
@@ -625,16 +621,11 @@ const AmbassadorPortal = () => {
 
   // Step 3: Knowledge Test (after training completed)
   if (step === 3 && trainingCompleted) {
-    // Check if knowledge test was already passed or failed
-    const knowledgeTestPassed = ambassadorData?.knowledgeTest?.passed;
-    const knowledgeTestAttempts = ambassadorData?.knowledgeTest?.attempts || 0;
-    const maxAttempts = ambassadorData?.knowledgeTest?.maxAttempts || 3;
-
+    // Check if knowledge test was already passed
     if (knowledgeTestPassed === true) {
-      // Already passed, move to interview stage
-      // This should already be updated in the database, but just in case
+      // Already passed, but step might not have been updated
+      // The KnowledgeTest component should handle this, but just in case
       if (step < 4) {
-        // The knowledge test was passed but step wasn't updated
         // This should be handled by the KnowledgeTest component
         navigate('/ambassador/portal');
         return null;
@@ -671,7 +662,19 @@ const AmbassadorPortal = () => {
 
   // Step 4: Interview pending (waiting for admin action)
   if (step === 4 && interviewStatus === 'pending') {
-    return <OnboardingPendingScreen />;
+    return (
+      <OnboardingPendingScreen 
+        title="Application Under Review"
+        description="You have successfully passed the knowledge test!"
+        nextSteps={[
+          'Wait for application review',
+          'Interview scheduling (if selected)',
+          'Ambassador approval and onboarding'
+        ]}
+        buttonText="Return to Home"
+        buttonAction={() => navigate('/')}
+      />
+    );
   }
 
   // Step 4: Interview scheduled
@@ -727,36 +730,21 @@ const AmbassadorPortal = () => {
   // Step 4: Interview passed but not yet approved - show pending screen
   if (step === 4 && interviewStatus === 'passed' && applicationStatus === 'pending') {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <Card className="max-w-md w-full">
-          <CardHeader className="text-center">
-            <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
-              <CheckCircle className="w-8 h-8 text-green-600" />
-            </div>
-            <CardTitle>Interview Passed!</CardTitle>
-            <CardDescription>You have successfully passed the interview.</CardDescription>
-          </CardHeader>
-          <CardContent className="text-center space-y-4">
-            <p className="text-gray-600">
-              Your application is now pending final approval from our team. 
-              You will receive an email once you've been approved as an official MedMap Ambassador.
-            </p>
-            <div className="bg-yellow-50 p-4 rounded-lg">
-              <p className="text-sm text-yellow-800 flex items-center gap-2">
-                <Clock className="w-4 h-4" />
-                Approval typically takes 2-5 business days.
-              </p>
-            </div>
-            <Button variant="outline" onClick={() => navigate('/')} className="w-full">
-              Return to Home
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+      <OnboardingPendingScreen 
+        title="Interview Passed!"
+        description="You have successfully passed the interview."
+        nextSteps={[
+          'Awaiting final approval from the MedMap team',
+          'You will receive an email once approved',
+          'Approval typically takes 2-5 business days'
+        ]}
+        buttonText="Return to Home"
+        buttonAction={() => navigate('/')}
+      />
     );
   }
 
-  // ==================== APPROVED AMBASSADOR - FULL DASHBOARD ====================
+  // Step 5: Approved Ambassador - Full Dashboard
   if (step === 5 && applicationStatus === 'approved') {
     const tierDisplay = getTierDisplay(stats?.currentTier || 'bronze');
     const filteredReferrals = getFilteredReferrals();
@@ -862,7 +850,7 @@ const AmbassadorPortal = () => {
     );
   }
 
-  // ==================== DEFAULT LOADING / FALLBACK ====================
+  // ==================== FALLBACK - Should never reach here ====================
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-blue-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto text-center">
