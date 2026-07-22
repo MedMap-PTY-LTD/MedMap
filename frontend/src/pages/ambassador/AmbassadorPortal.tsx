@@ -65,6 +65,8 @@ const Sidebar = ({
   onTabChange 
 }: SidebarProps) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const sidebarVisibilityClass = isOpen ? 'translate-x-0' : '-translate-x-full';
+  const sidebarDesktopClass = 'lg:translate-x-0';
 
   const menuItems = [
     { id: 'overview', label: 'Overview', icon: BarChart3 },
@@ -88,7 +90,7 @@ const Sidebar = ({
       <div 
         className={`
           fixed top-0 left-0 h-full bg-white shadow-2xl z-50 transition-all duration-300
-          ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+          ${isOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0
           ${isCollapsed ? 'w-20' : 'w-64'}
           flex flex-col
         `}
@@ -815,8 +817,14 @@ const AmbassadorPortal = () => {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
   const [activeTab, setActiveTab] = useState('overview');
+
+  useEffect(() => {
+    if (window.innerWidth >= 1024) {
+      setSidebarOpen(true);
+    }
+  }, []);
 
   const uid = user?.uid || '';
   
