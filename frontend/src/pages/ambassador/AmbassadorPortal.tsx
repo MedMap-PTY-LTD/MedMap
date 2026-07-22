@@ -1,6 +1,6 @@
 // pages/ambassador/AmbassadorPortal.tsx
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { useAmbassador } from '@/hooks/useAmbassador';
@@ -38,6 +38,83 @@ import TrainingModule from './TrainingModule';
 import KnowledgeTest from './KnowledgeTest';
 
 // ==================== SUB-COMPONENTS ====================
+
+// ✅ NEW: Reusable Top Navigation Bar
+const TopNav = ({ 
+  title, 
+  referralCode, 
+  onCopyCode, 
+  onRefresh, 
+  onHome, 
+  onLogout, 
+  isRefetching,
+  showReferralCode = true,
+}: any) => {
+  const { toast } = useToast();
+
+  return (
+    <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold">{title}</h1>
+            <p className="text-purple-100 text-sm mt-1">Welcome to the MedMap Ambassador Program</p>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* Home Button */}
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="text-white hover:bg-white/20"
+              onClick={onHome}
+            >
+              <Home className="w-4 h-4 mr-2" />
+              Home
+            </Button>
+            
+            {/* Refresh Button - only if onRefresh provided */}
+            {onRefresh && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="text-white hover:bg-white/20"
+                onClick={onRefresh}
+                disabled={isRefetching}
+              >
+                <RefreshCw className={`w-4 h-4 mr-2 ${isRefetching ? 'animate-spin' : ''}`} />
+                {isRefetching ? 'Refreshing...' : 'Refresh'}
+              </Button>
+            )}
+            
+            {/* Referral Code - only if showReferralCode is true */}
+            {showReferralCode && referralCode && (
+              <div className="bg-white/20 rounded-lg px-4 py-2 text-center hidden sm:block">
+                <p className="text-xs text-purple-200">Your Referral Code</p>
+                <div className="flex items-center gap-2">
+                  <code className="text-lg sm:text-xl font-bold tracking-wider font-mono">{referralCode}</code>
+                  <button onClick={onCopyCode} className="p-1 hover:bg-white/20 rounded transition-colors">
+                    <Copy className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            {/* Logout Button */}
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="text-white hover:bg-red-500/20"
+              onClick={onLogout}
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Logout
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const StatsCard = ({ title, value, icon: Icon, color, badge, subtitle }: any) => (
   <Card>
@@ -124,7 +201,6 @@ const OverviewTab = ({
                   : 'Max Tier Reached!'}
               </span>
             </div>
-            {/* Progress bar based on TOTAL referrals */}
             <Progress 
               value={Math.min(((stats?.totalReferrals || 0) / (stats?.tierProgress?.next || 10)) * 100, 100)} 
               className="h-2" 
@@ -136,7 +212,6 @@ const OverviewTab = ({
               <span>Diamond (100+)</span>
             </div>
             
-            {/* Active doctors info */}
             <div className="bg-blue-50 p-3 rounded-lg">
               <p className="text-sm text-blue-800">
                 <strong>{stats?.activeDoctors || 0}</strong> active doctors generating commission
@@ -428,41 +503,57 @@ const EarningsTab = ({ stats = {}, referrals = [], tierDisplay = { label: 'Bronz
 };
 
 // ==================== ONBOARDING PENDING SCREEN ====================
-const OnboardingPendingScreen = ({ title, description, nextSteps, buttonText, buttonAction }: any) => {
+const OnboardingPendingScreen = ({ 
+  title, 
+  description, 
+  nextSteps, 
+  buttonText, 
+  buttonAction,
+  onLogout,
+  onHome,
+}: any) => {
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <Card className="max-w-md w-full">
-        <CardHeader className="text-center">
-          <div className="mx-auto w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mb-4">
-            <Clock className="w-8 h-8 text-yellow-600" />
-          </div>
-          <CardTitle>{title || 'Application Submitted'}</CardTitle>
-          <CardDescription>
-            {description || 'Thank you for completing the initial steps!'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="text-center space-y-4">
-          <p className="text-gray-600">
-            Your application is being reviewed by our team. You will receive an email notification when there's an update.
-          </p>
-          {nextSteps && nextSteps.length > 0 && (
-            <div className="bg-blue-50 p-4 rounded-lg text-left">
-              <p className="text-sm font-medium text-blue-800 mb-2">Next Steps:</p>
-              <ul className="text-sm text-blue-700 space-y-1">
-                {nextSteps.map((step: string, idx: number) => (
-                  <li key={idx} className="flex items-center gap-2">
-                    <Clock className="w-4 h-4" />
-                    {step}
-                  </li>
-                ))}
-              </ul>
+    <div className="min-h-screen bg-gray-50">
+      <TopNav 
+        title="Ambassador Onboarding"
+        onHome={onHome}
+        onLogout={onLogout}
+        showReferralCode={false}
+      />
+      <div className="flex items-center justify-center p-4 pt-8">
+        <Card className="max-w-md w-full">
+          <CardHeader className="text-center">
+            <div className="mx-auto w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mb-4">
+              <Clock className="w-8 h-8 text-yellow-600" />
             </div>
-          )}
-          <Button variant="outline" onClick={buttonAction || (() => window.location.href = '/')} className="w-full">
-            {buttonText || 'Return to Home'}
-          </Button>
-        </CardContent>
-      </Card>
+            <CardTitle>{title || 'Application Submitted'}</CardTitle>
+            <CardDescription>
+              {description || 'Thank you for completing the initial steps!'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-center space-y-4">
+            <p className="text-gray-600">
+              Your application is being reviewed by our team. You will receive an email notification when there's an update.
+            </p>
+            {nextSteps && nextSteps.length > 0 && (
+              <div className="bg-blue-50 p-4 rounded-lg text-left">
+                <p className="text-sm font-medium text-blue-800 mb-2">Next Steps:</p>
+                <ul className="text-sm text-blue-700 space-y-1">
+                  {nextSteps.map((step: string, idx: number) => (
+                    <li key={idx} className="flex items-center gap-2">
+                      <Clock className="w-4 h-4" />
+                      {step}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <Button variant="outline" onClick={buttonAction || onHome} className="w-full">
+              {buttonText || 'Return to Home'}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 };
@@ -505,7 +596,6 @@ const AmbassadorPortal = () => {
     toast({ title: 'Refreshed', description: `Found ${referrals?.length || 0} referrals.` });
   };
 
-  // ✅ NEW: Handle logout
   const handleLogout = async () => {
     try {
       await signOut();
@@ -520,7 +610,6 @@ const AmbassadorPortal = () => {
     }
   };
 
-  // ✅ NEW: Navigate to home
   const handleGoHome = () => {
     navigate('/');
   };
@@ -630,7 +719,10 @@ const AmbassadorPortal = () => {
             <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
             <h2 className="text-xl font-bold text-gray-900 mb-2">Profile Not Found</h2>
             <p className="text-gray-600 mb-4">Your ambassador profile could not be found. Please contact support.</p>
-            <Button onClick={() => navigate('/')} className="w-full">Go Home</Button>
+            <div className="flex flex-col gap-2">
+              <Button onClick={() => navigate('/')} className="w-full">Go Home</Button>
+              <Button variant="outline" onClick={handleLogout} className="w-full">Logout</Button>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -658,46 +750,72 @@ const AmbassadorPortal = () => {
 
   if (step === 1 && psychometricPassed === false) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <Card className="max-w-md w-full">
-          <CardHeader className="text-center">
-            <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-              <XCircle className="w-8 h-8 text-red-600" />
-            </div>
-            <CardTitle>Assessment Cooldown Period</CardTitle>
-            <CardDescription>Your psychometric assessment did not meet the required threshold.</CardDescription>
-          </CardHeader>
-          <CardContent className="text-center space-y-4">
-            {psychometricScore && (
-              <div className="bg-gray-100 p-4 rounded-lg">
-                <p className="text-sm text-gray-600">Your Score</p>
-                <p className="text-2xl font-bold text-gray-800">{psychometricScore}%</p>
-                <p className="text-xs text-gray-500 mt-1">Required: 70% to pass</p>
+      <div className="min-h-screen bg-gray-50">
+        <TopNav 
+          title="Ambassador Assessment"
+          onHome={handleGoHome}
+          onLogout={handleLogout}
+          showReferralCode={false}
+        />
+        <div className="flex items-center justify-center p-4 pt-8">
+          <Card className="max-w-md w-full">
+            <CardHeader className="text-center">
+              <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <XCircle className="w-8 h-8 text-red-600" />
               </div>
-            )}
-            {nextAttemptDate && nextAttemptDate > new Date() && (
-              <div className="bg-yellow-50 p-4 rounded-lg">
-                <p className="text-sm text-yellow-800">You can retake the assessment on:</p>
-                <p className="text-xl font-bold text-yellow-900 mt-1">
-                  {nextAttemptDate.toLocaleDateString('en-ZA', { day: '2-digit', month: 'long', year: 'numeric' })}
-                </p>
+              <CardTitle>Assessment Cooldown Period</CardTitle>
+              <CardDescription>Your psychometric assessment did not meet the required threshold.</CardDescription>
+            </CardHeader>
+            <CardContent className="text-center space-y-4">
+              {psychometricScore && (
+                <div className="bg-gray-100 p-4 rounded-lg">
+                  <p className="text-sm text-gray-600">Your Score</p>
+                  <p className="text-2xl font-bold text-gray-800">{psychometricScore}%</p>
+                  <p className="text-xs text-gray-500 mt-1">Required: 70% to pass</p>
+                </div>
+              )}
+              {nextAttemptDate && nextAttemptDate > new Date() && (
+                <div className="bg-yellow-50 p-4 rounded-lg">
+                  <p className="text-sm text-yellow-800">You can retake the assessment on:</p>
+                  <p className="text-xl font-bold text-yellow-900 mt-1">
+                    {nextAttemptDate.toLocaleDateString('en-ZA', { day: '2-digit', month: 'long', year: 'numeric' })}
+                  </p>
+                </div>
+              )}
+              <p className="text-sm text-gray-600">
+                Please use this time to prepare. You will receive an email notification when you can retake the assessment.
+              </p>
+              <div className="flex flex-col gap-2">
+                <Button variant="outline" onClick={handleGoHome} className="w-full">
+                  Return to Home
+                </Button>
+                <Button variant="ghost" onClick={handleLogout} className="w-full text-red-600 hover:text-red-700 hover:bg-red-50">
+                  <LogOut className="w-4 h-4 mr-2" /> Logout
+                </Button>
               </div>
-            )}
-            <p className="text-sm text-gray-600">
-              Please use this time to prepare. You will receive an email notification when you can retake the assessment.
-            </p>
-            <Button variant="outline" onClick={() => navigate('/')} className="w-full">
-              Return to Home
-            </Button>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     );
   }
 
   // ==================== STEP 2: TRAINING MODULE ====================
   if (step === 2 && psychometricPassed === true && !trainingCompleted) {
-    return <TrainingModule />;
+    // TrainingModule will have its own UI, but we wrap it with the nav
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <TopNav 
+          title="Training Module"
+          onHome={handleGoHome}
+          onLogout={handleLogout}
+          showReferralCode={false}
+        />
+        <div className="pt-4">
+          <TrainingModule />
+        </div>
+      </div>
+    );
   }
 
   // ==================== STEP 3: KNOWLEDGE TEST ====================
@@ -707,29 +825,55 @@ const AmbassadorPortal = () => {
       return null;
     } else if (knowledgeTestAttempts >= maxAttempts && knowledgeTestPassed === false) {
       return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-          <Card className="max-w-md w-full">
-            <CardHeader className="text-center">
-              <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                <XCircle className="w-8 h-8 text-red-600" />
-              </div>
-              <CardTitle>Knowledge Test Not Passed</CardTitle>
-              <CardDescription>You have used all {maxAttempts} attempts.</CardDescription>
-            </CardHeader>
-            <CardContent className="text-center space-y-4">
-              <p className="text-gray-600">
-                You have completed all {maxAttempts} attempts for the knowledge test. 
-                Your application has been reviewed.
-              </p>
-              <Button variant="outline" onClick={() => navigate('/')} className="w-full">
-                Return to Home
-              </Button>
-            </CardContent>
-          </Card>
+        <div className="min-h-screen bg-gray-50">
+          <TopNav 
+            title="Knowledge Test"
+            onHome={handleGoHome}
+            onLogout={handleLogout}
+            showReferralCode={false}
+          />
+          <div className="flex items-center justify-center p-4 pt-8">
+            <Card className="max-w-md w-full">
+              <CardHeader className="text-center">
+                <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                  <XCircle className="w-8 h-8 text-red-600" />
+                </div>
+                <CardTitle>Knowledge Test Not Passed</CardTitle>
+                <CardDescription>You have used all {maxAttempts} attempts.</CardDescription>
+              </CardHeader>
+              <CardContent className="text-center space-y-4">
+                <p className="text-gray-600">
+                  You have completed all {maxAttempts} attempts for the knowledge test. 
+                  Your application has been reviewed.
+                </p>
+                <div className="flex flex-col gap-2">
+                  <Button variant="outline" onClick={handleGoHome} className="w-full">
+                    Return to Home
+                  </Button>
+                  <Button variant="ghost" onClick={handleLogout} className="w-full text-red-600 hover:text-red-700 hover:bg-red-50">
+                    <LogOut className="w-4 h-4 mr-2" /> Logout
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       );
     } else {
-      return <KnowledgeTest />;
+      // KnowledgeTest will have its own UI
+      return (
+        <div className="min-h-screen bg-gray-50">
+          <TopNav 
+            title="Knowledge Test"
+            onHome={handleGoHome}
+            onLogout={handleLogout}
+            showReferralCode={false}
+          />
+          <div className="pt-4">
+            <KnowledgeTest />
+          </div>
+        </div>
+      );
     }
   }
 
@@ -745,55 +889,83 @@ const AmbassadorPortal = () => {
           'Ambassador approval and onboarding'
         ]}
         buttonText="Return to Home"
-        buttonAction={() => navigate('/')}
+        buttonAction={handleGoHome}
+        onLogout={handleLogout}
+        onHome={handleGoHome}
       />
     );
   }
 
   if (step === 4 && interviewStatus === 'scheduled') {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <Card className="max-w-md w-full">
-          <CardHeader className="text-center">
-            <div className="mx-auto w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4">
-              <Video className="w-8 h-8 text-purple-600" />
-            </div>
-            <CardTitle>Interview Scheduled</CardTitle>
-            <CardDescription>Your interview has been scheduled with our team.</CardDescription>
-          </CardHeader>
-          <CardContent className="text-center space-y-4">
-            <p className="text-gray-600">
-              You will receive an email with the interview details and link. Please check your inbox.
-            </p>
-            <Button variant="outline" onClick={() => navigate('/')} className="w-full">
-              Return to Home
-            </Button>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen bg-gray-50">
+        <TopNav 
+          title="Interview Scheduled"
+          onHome={handleGoHome}
+          onLogout={handleLogout}
+          showReferralCode={false}
+        />
+        <div className="flex items-center justify-center p-4 pt-8">
+          <Card className="max-w-md w-full">
+            <CardHeader className="text-center">
+              <div className="mx-auto w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4">
+                <Video className="w-8 h-8 text-purple-600" />
+              </div>
+              <CardTitle>Interview Scheduled</CardTitle>
+              <CardDescription>Your interview has been scheduled with our team.</CardDescription>
+            </CardHeader>
+            <CardContent className="text-center space-y-4">
+              <p className="text-gray-600">
+                You will receive an email with the interview details and link. Please check your inbox.
+              </p>
+              <div className="flex flex-col gap-2">
+                <Button variant="outline" onClick={handleGoHome} className="w-full">
+                  Return to Home
+                </Button>
+                <Button variant="ghost" onClick={handleLogout} className="w-full text-red-600 hover:text-red-700 hover:bg-red-50">
+                  <LogOut className="w-4 h-4 mr-2" /> Logout
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     );
   }
 
   if (step === 4 && interviewStatus === 'failed') {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <Card className="max-w-md w-full">
-          <CardHeader className="text-center">
-            <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-              <XCircle className="w-8 h-8 text-red-600" />
-            </div>
-            <CardTitle>Application Not Successful</CardTitle>
-            <CardDescription>Thank you for your interest in becoming a MedMap Ambassador.</CardDescription>
-          </CardHeader>
-          <CardContent className="text-center space-y-4">
-            <p className="text-gray-600">
-              While your application showed promise, we have decided to move forward with other candidates at this time.
-            </p>
-            <Button variant="outline" onClick={() => navigate('/')} className="w-full">
-              Return to Home
-            </Button>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen bg-gray-50">
+        <TopNav 
+          title="Application Status"
+          onHome={handleGoHome}
+          onLogout={handleLogout}
+          showReferralCode={false}
+        />
+        <div className="flex items-center justify-center p-4 pt-8">
+          <Card className="max-w-md w-full">
+            <CardHeader className="text-center">
+              <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <XCircle className="w-8 h-8 text-red-600" />
+              </div>
+              <CardTitle>Application Not Successful</CardTitle>
+              <CardDescription>Thank you for your interest in becoming a MedMap Ambassador.</CardDescription>
+            </CardHeader>
+            <CardContent className="text-center space-y-4">
+              <p className="text-gray-600">
+                While your application showed promise, we have decided to move forward with other candidates at this time.
+              </p>
+              <div className="flex flex-col gap-2">
+                <Button variant="outline" onClick={handleGoHome} className="w-full">
+                  Return to Home
+                </Button>
+                <Button variant="ghost" onClick={handleLogout} className="w-full text-red-600 hover:text-red-700 hover:bg-red-50">
+                  <LogOut className="w-4 h-4 mr-2" /> Logout
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     );
   }
@@ -809,7 +981,9 @@ const AmbassadorPortal = () => {
           'Approval typically takes 2-5 business days'
         ]}
         buttonText="Return to Home"
-        buttonAction={() => navigate('/')}
+        buttonAction={handleGoHome}
+        onLogout={handleLogout}
+        onHome={handleGoHome}
       />
     );
   }
@@ -834,73 +1008,32 @@ const AmbassadorPortal = () => {
 
     return (
       <div className="min-h-screen bg-gray-50">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-8">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <h1 className="text-3xl font-bold">Ambassador Dashboard</h1>
-                <p className="text-purple-100 mt-1">Welcome back, {profile?.firstName || 'Ambassador'}!</p>
-                {(safeReferrals.length || 0) > 0 && (
-                  <p className="text-purple-200 text-sm mt-1">
-                    <Users className="w-4 h-4 inline mr-1" />
-                    {safeReferrals.length} doctor{safeReferrals.length > 1 ? 's' : ''} referred
-                  </p>
-                )}
-              </div>
-              {/* ✅ NEW: Action buttons - Home, Refresh, Logout */}
-              <div className="flex items-center gap-3 flex-wrap">
-                {/* Home Button */}
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="text-white hover:bg-white/20"
-                  onClick={handleGoHome}
-                >
-                  <Home className="w-4 h-4 mr-2" />
-                  Home
-                </Button>
-                
-                {/* Refresh Button */}
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="text-white hover:bg-white/20"
-                  onClick={handleRefresh}
-                  disabled={isRefetching}
-                >
-                  <RefreshCw className={`w-4 h-4 mr-2 ${isRefetching ? 'animate-spin' : ''}`} />
-                  {isRefetching ? 'Refreshing...' : 'Refresh'}
-                </Button>
-                
-                {/* Logout Button */}
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="text-white hover:bg-red-500/20"
-                  onClick={handleLogout}
-                >
-                  <LogOut className="w-4 h-4 mr-2" />
-                  Logout
-                </Button>
-                
-                {/* Referral Code Display */}
-                <div className="bg-white/20 rounded-lg px-4 py-2 text-center">
-                  <p className="text-xs text-purple-200">Your Referral Code</p>
-                  <div className="flex items-center gap-2">
-                    <code className="text-xl font-bold tracking-wider font-mono">{referralCode || 'N/A'}</code>
-                    <button onClick={handleCopyReferralCode} className="p-1 hover:bg-white/20 rounded transition-colors">
-                      <Copy className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Header with TopNav */}
+        <TopNav 
+          title="Ambassador Dashboard"
+          referralCode={referralCode}
+          onCopyCode={handleCopyReferralCode}
+          onRefresh={handleRefresh}
+          onHome={handleGoHome}
+          onLogout={handleLogout}
+          isRefetching={isRefetching}
+          showReferralCode={true}
+        />
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Stats Cards - Show both quality and quantity */}
+          {/* Welcome Message */}
+          <div className="mb-6">
+            <p className="text-gray-600">
+              Welcome back, <strong>{profile?.firstName || 'Ambassador'}</strong>!
+              {safeReferrals.length > 0 && (
+                <span className="ml-2 text-purple-600">
+                  You've referred {safeReferrals.length} doctor{safeReferrals.length > 1 ? 's' : ''} 🎉
+                </span>
+              )}
+            </p>
+          </div>
+
+          {/* Stats Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
             <StatsCard 
               title="Total Referrals" 
@@ -1001,6 +1134,11 @@ const AmbassadorPortal = () => {
         <p className="text-gray-600 mt-2">Loading your onboarding progress...</p>
         <div className="mt-8 flex justify-center">
           <Loader2 className="w-8 h-8 text-purple-600 animate-spin" />
+        </div>
+        <div className="mt-4">
+          <Button variant="ghost" onClick={handleLogout} className="text-red-600 hover:text-red-700 hover:bg-red-50">
+            <LogOut className="w-4 h-4 mr-2" /> Logout
+          </Button>
         </div>
       </div>
     </div>
