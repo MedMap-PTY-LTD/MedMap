@@ -175,8 +175,12 @@ export const adminService = {
     }
   },
   
-  // Approve doctor with referral handling
+  // ✅ FIXED: Approve doctor with referral handling
   async approveDoctor(doctorId: string, notes?: string) {
+    if (!isFirebaseInitialized()) {
+      return { error: 'Firebase is not initialized.' };
+    }
+    
     try {
       const batch = writeBatch(db);
       
@@ -196,15 +200,15 @@ export const adminService = {
         updatedAt: serverTimestamp(),
       });
       
-      // Check if this doctor was referred
+      // ✅ Check if this doctor was referred
       const referralRef = doc(db, 'referrals', `doctor_${doctorId}`);
       const referralDoc = await getDoc(referralRef);
       
       if (referralDoc.exists()) {
-        // Update referral status to verified
         const referralData = referralDoc.data();
         const commissionAmount = 500; // Fixed commission amount
         
+        // ✅ UPDATE referral status to 'verified'
         batch.update(referralRef, {
           status: 'verified',
           verifiedAt: serverTimestamp(),
@@ -237,12 +241,17 @@ export const adminService = {
       
       return { error: null };
     } catch (error: any) {
+      console.error('Error approving doctor:', error);
       return { error: error.message };
     }
   },
   
-  // Reject doctor with referral handling
+  // ✅ FIXED: Reject doctor with referral handling
   async rejectDoctor(doctorId: string, reason: string) {
+    if (!isFirebaseInitialized()) {
+      return { error: 'Firebase is not initialized.' };
+    }
+    
     try {
       const batch = writeBatch(db);
       
@@ -262,12 +271,12 @@ export const adminService = {
         updatedAt: serverTimestamp(),
       });
       
-      // Check if this doctor was referred
+      // ✅ Check if this doctor was referred
       const referralRef = doc(db, 'referrals', `doctor_${doctorId}`);
       const referralDoc = await getDoc(referralRef);
       
       if (referralDoc.exists()) {
-        // Update referral status to rejected
+        // ✅ UPDATE referral status to 'rejected'
         batch.update(referralRef, {
           status: 'rejected',
           rejectionReason: reason,
@@ -282,6 +291,7 @@ export const adminService = {
       
       return { error: null };
     } catch (error: any) {
+      console.error('Error rejecting doctor:', error);
       return { error: error.message };
     }
   },
@@ -317,7 +327,7 @@ export const adminService = {
     }
   },
   
-  // ✅ FIXED: Approve ambassador with referral code generation
+  // Approve ambassador with referral code generation
   async approveAmbassador(ambassadorId: string) {
     if (!isFirebaseInitialized()) {
       return { error: 'Firebase is not initialized.', referralCode: null };
@@ -382,12 +392,51 @@ export const adminService = {
       
       await batch.commit();
       
+      // Log admin action
+      await this.logAdminAction('approve_ambassador', ambassadorId, { referralCode });
+      
       console.log(`✅ Ambassador ${ambassadorId} approved with referral code: ${referralCode}`);
       
       return { error: null, referralCode };
     } catch (error: any) {
       console.error('Error approving ambassador:', error);
       return { error: error.message, referralCode: null };
+    }
+  },
+  
+  // Reject ambassador
+  async rejectAmbassador(ambassadorId: string, reason: string) {
+    if (!isFirebaseInitialized()) {
+      return { error: 'Firebase is not initialized.' };
+    }
+
+    try {
+      const batch = writeBatch(db);
+      
+      const ambassadorRef = doc(db, 'ambassadors', ambassadorId);
+      batch.update(ambassadorRef, {
+        applicationStatus: 'rejected',
+        rejectionReason: reason,
+        rejectedAt: serverTimestamp(),
+        onboardingStep: 4,
+        updatedAt: serverTimestamp(),
+      });
+      
+      const userRef = doc(db, 'users', ambassadorId);
+      batch.update(userRef, {
+        isActive: false,
+        updatedAt: serverTimestamp(),
+      });
+      
+      await batch.commit();
+      
+      // Log admin action
+      await this.logAdminAction('reject_ambassador', ambassadorId, { reason });
+      
+      return { error: null };
+    } catch (error: any) {
+      console.error('Error rejecting ambassador:', error);
+      return { error: error.message };
     }
   },
   
@@ -941,6 +990,9 @@ export const adminService = {
         });
       }
       
+      // Log admin action
+      await this.logAdminAction('update_interview_status', ambassadorId, { status, notes });
+      
       return { error: null };
     } catch (error: any) {
       console.error('Error updating interview status:', error);
@@ -991,39 +1043,6 @@ export const adminService = {
       };
     } catch (error: any) {
       return { status: null, error: error.message };
-    }
-  },
-
-  // Reject ambassador
-  async rejectAmbassador(ambassadorId: string, reason: string) {
-    if (!isFirebaseInitialized()) {
-      return { error: 'Firebase is not initialized.' };
-    }
-
-    try {
-      const batch = writeBatch(db);
-      
-      const ambassadorRef = doc(db, 'ambassadors', ambassadorId);
-      batch.update(ambassadorRef, {
-        applicationStatus: 'rejected',
-        rejectionReason: reason,
-        rejectedAt: serverTimestamp(),
-        onboardingStep: 4,
-        updatedAt: serverTimestamp(),
-      });
-      
-      const userRef = doc(db, 'users', ambassadorId);
-      batch.update(userRef, {
-        isActive: false,
-        updatedAt: serverTimestamp(),
-      });
-      
-      await batch.commit();
-      
-      return { error: null };
-    } catch (error: any) {
-      console.error('Error rejecting ambassador:', error);
-      return { error: error.message };
     }
   },
 

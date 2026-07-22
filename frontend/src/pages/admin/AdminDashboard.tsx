@@ -2,21 +2,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import { db } from '@/lib/firebase';
-import { 
-  collection, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  updateDoc, 
-  query, 
-  where, 
-  orderBy, 
-  serverTimestamp,
-  writeBatch
-} from 'firebase/firestore';
-import { authService } from '@/lib/firebase';
 import { adminService } from '@/lib/admin-service';
+import { authService } from '@/lib/firebase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -199,6 +186,20 @@ interface Referral {
 }
 
 // ==================== HELPER FUNCTIONS ====================
+import { db } from '@/lib/firebase';
+import { 
+  collection, 
+  doc, 
+  getDoc, 
+  getDocs, 
+  updateDoc, 
+  query, 
+  where, 
+  orderBy, 
+  serverTimestamp,
+  writeBatch
+} from 'firebase/firestore';
+
 const combineWithUserData = (roleData: any, userData: any): any => {
   if (!userData || !userData.email) {
     return null;
@@ -485,54 +486,16 @@ const AdminDashboard = () => {
 
   // ==================== MUTATIONS ====================
   
+  // ✅ Uses adminService.approveDoctor (updates referral status)
   const approveDoctorMutation = useMutation({
     mutationFn: async (doctorId: string) => {
-      const batch = writeBatch(db);
-      
-      const doctorRef = doc(db, 'doctors', doctorId);
-      batch.update(doctorRef, {
-        verificationStatus: 'verified',
-        verifiedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      const userRef = doc(db, 'users', doctorId);
-      batch.update(userRef, {
-        isActive: true,
-        updatedAt: serverTimestamp(),
-      });
-
-      const referralRef = doc(db, 'referrals', `doctor_${doctorId}`);
-      const referralDocSnap = await getDoc(referralRef);
-      
-      if (referralDocSnap.exists()) {
-        const referralData = referralDocSnap.data();
-        const commissionAmount = 500;
-        
-        batch.update(referralRef, {
-          status: 'verified',
-          verifiedAt: serverTimestamp(),
-          commissionEarned: commissionAmount,
-          updatedAt: serverTimestamp(),
-        });
-        
-        const ambassadorRef = doc(db, 'ambassadors', referralData.ambassadorId);
-        const ambassadorDocSnap = await getDoc(ambassadorRef);
-        if (ambassadorDocSnap.exists()) {
-          const ambassadorData = ambassadorDocSnap.data();
-          batch.update(ambassadorRef, {
-            pendingEarnings: (ambassadorData.pendingEarnings || 0) + commissionAmount,
-            totalEarnings: (ambassadorData.totalEarnings || 0) + commissionAmount,
-            activeReferredDoctors: (ambassadorData.activeReferredDoctors || 0) + 1,
-            updatedAt: serverTimestamp(),
-          });
-        }
+      const result = await adminService.approveDoctor(doctorId);
+      if (result.error) {
+        throw new Error(result.error);
       }
-
-      await batch.commit();
     },
     onSuccess: () => {
-      toast({ title: 'Success', description: 'Doctor approved successfully.' });
+      toast({ title: 'Success', description: 'Doctor approved and referral verified.' });
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.dashboard] });
     },
     onError: (error: any) => {
@@ -544,36 +507,13 @@ const AdminDashboard = () => {
     },
   });
 
+  // ✅ Uses adminService.rejectDoctor (updates referral status)
   const rejectDoctorMutation = useMutation({
     mutationFn: async ({ doctorId, reason }: { doctorId: string; reason: string }) => {
-      const batch = writeBatch(db);
-      
-      const doctorRef = doc(db, 'doctors', doctorId);
-      batch.update(doctorRef, {
-        verificationStatus: 'rejected',
-        rejectedAt: serverTimestamp(),
-        rejectionReason: reason,
-        updatedAt: serverTimestamp(),
-      });
-
-      const userRef = doc(db, 'users', doctorId);
-      batch.update(userRef, {
-        isActive: false,
-        updatedAt: serverTimestamp(),
-      });
-
-      const referralRef = doc(db, 'referrals', `doctor_${doctorId}`);
-      const referralDocSnap = await getDoc(referralRef);
-      
-      if (referralDocSnap.exists()) {
-        batch.update(referralRef, {
-          status: 'rejected',
-          rejectionReason: reason,
-          updatedAt: serverTimestamp(),
-        });
+      const result = await adminService.rejectDoctor(doctorId, reason);
+      if (result.error) {
+        throw new Error(result.error);
       }
-
-      await batch.commit();
     },
     onSuccess: () => {
       toast({ title: 'Success', description: 'Doctor application rejected.' });
@@ -601,34 +541,9 @@ const AdminDashboard = () => {
       status: 'pending' | 'scheduled' | 'completed' | 'passed' | 'failed'; 
       notes?: string;
     }) => {
-      const ambassadorRef = doc(db, 'ambassadors', ambassadorId);
-      const updateData: any = {
-        interviewStatus: status,
-        updatedAt: serverTimestamp(),
-      };
-      
-      if (notes) {
-        updateData.interviewNotes = notes;
-      }
-      
-      if (status === 'passed') {
-        updateData.onboardingStep = 4;
-        updateData.applicationStatus = 'pending';
-      } else if (status === 'failed') {
-        updateData.applicationStatus = 'rejected';
-        updateData.rejectedAt = serverTimestamp();
-        updateData.isActive = false;
-        updateData.onboardingStep = 4;
-      }
-      
-      await updateDoc(ambassadorRef, updateData);
-      
-      if (status === 'failed') {
-        const userRef = doc(db, 'users', ambassadorId);
-        await updateDoc(userRef, {
-          isActive: false,
-          updatedAt: serverTimestamp(),
-        });
+      const result = await adminService.updateAmbassadorInterviewStatus(ambassadorId, status, notes);
+      if (result.error) {
+        throw new Error(result.error);
       }
     },
     onSuccess: () => {
@@ -677,24 +592,10 @@ const AdminDashboard = () => {
 
   const rejectAmbassadorMutation = useMutation({
     mutationFn: async ({ ambassadorId, reason }: { ambassadorId: string; reason: string }) => {
-      const batch = writeBatch(db);
-      
-      const ambassadorRef = doc(db, 'ambassadors', ambassadorId);
-      batch.update(ambassadorRef, {
-        applicationStatus: 'rejected',
-        rejectionReason: reason,
-        rejectedAt: serverTimestamp(),
-        onboardingStep: 4,
-        updatedAt: serverTimestamp(),
-      });
-      
-      const userRef = doc(db, 'users', ambassadorId);
-      batch.update(userRef, {
-        isActive: false,
-        updatedAt: serverTimestamp(),
-      });
-      
-      await batch.commit();
+      const result = await adminService.rejectAmbassador(ambassadorId, reason);
+      if (result.error) {
+        throw new Error(result.error);
+      }
     },
     onSuccess: () => {
       toast({ 
@@ -714,15 +615,9 @@ const AdminDashboard = () => {
 
   const deactivateUserMutation = useMutation({
     mutationFn: async (userId: string) => {
-      const userRef = doc(db, 'users', userId);
-      const userDocSnap = await getDoc(userRef);
-      
-      if (userDocSnap.exists()) {
-        const userData = userDocSnap.data();
-        await updateDoc(userRef, {
-          isActive: !userData.isActive,
-          updatedAt: serverTimestamp(),
-        });
+      const result = await adminService.deactivateUser(userId);
+      if (result.error) {
+        throw new Error(result.error);
       }
     },
     onSuccess: () => {
@@ -740,35 +635,11 @@ const AdminDashboard = () => {
 
   const deleteInactivePatientsMutation = useMutation({
     mutationFn: async () => {
-      const thresholdDate = new Date();
-      thresholdDate.setDate(thresholdDate.getDate() - 365);
-      
-      const q = query(
-        collection(db, 'users'),
-        where('role', '==', 'patient'),
-        where('isActive', '==', true)
-      );
-      
-      const snapshot = await getDocs(q);
-      const batch = writeBatch(db);
-      let deleteCount = 0;
-      
-      snapshot.docs.forEach((docSnap) => {
-        const userData = docSnap.data();
-        const lastLogin = userData.lastLogin?.toDate() || userData.createdAt?.toDate();
-        
-        if (lastLogin && lastLogin < thresholdDate) {
-          batch.delete(doc(db, 'users', docSnap.id));
-          batch.delete(doc(db, 'patients', docSnap.id));
-          deleteCount++;
-        }
-      });
-      
-      if (deleteCount > 0) {
-        await batch.commit();
+      const result = await adminService.deleteInactivePatients();
+      if (result.error) {
+        throw new Error(result.error);
       }
-      
-      return { deleteCount };
+      return { deleteCount: result.count };
     },
     onSuccess: (data) => {
       toast({ 
@@ -870,21 +741,6 @@ const AdminDashboard = () => {
       currentPassword: adminProfileData.currentPassword,
       newPassword: adminProfileData.newPassword,
     });
-  };
-
-  const generateReferralCode = (firstName?: string, lastName?: string): string => {
-    if (firstName && lastName && firstName.length >= 2 && lastName.length >= 2) {
-      const prefix = firstName.substring(0, 2).toUpperCase();
-      const suffix = lastName.substring(0, 2).toUpperCase();
-      const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-      return `${prefix}${suffix}${random}`;
-    }
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let code = 'MM';
-    for (let i = 0; i < 6; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return code;
   };
 
   const handleCopyReferralCode = () => {
