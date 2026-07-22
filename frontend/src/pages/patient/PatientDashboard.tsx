@@ -1,7 +1,6 @@
 // pages/patient/PatientDashboard.tsx
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { usePaystackPayment } from 'paystack-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -38,7 +37,9 @@ import {
   Lock,
   RefreshCw,
   Loader2,
-  Stethoscope
+  Stethoscope,
+  Menu,
+  X as CloseIcon
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { format } from 'date-fns';
@@ -46,6 +47,8 @@ import { doc, getDoc, getDocs, updateDoc, collection, query, where, orderBy, lim
 import { db } from '@/lib/firebase';
 import { serverTimestamp } from 'firebase/firestore';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 // ==================== TYPES ====================
 interface PatientProfile {
@@ -123,7 +126,6 @@ const fetchPatientProfile = async (uid: string): Promise<PatientProfile | null> 
   if (!uid) return null;
 
   try {
-    // Fetch from users collection
     const userRef = doc(db, 'users', uid);
     const userSnap = await getDoc(userRef);
     
@@ -133,7 +135,6 @@ const fetchPatientProfile = async (uid: string): Promise<PatientProfile | null> 
     
     const userData = userSnap.data();
     
-    // Fetch from patients collection
     const patientRef = doc(db, 'patients', uid);
     const patientSnap = await getDoc(patientRef);
     const patientData = patientSnap.exists() ? patientSnap.data() : {};
@@ -167,7 +168,6 @@ const fetchPatientBookings = async (uid: string): Promise<Booking[]> => {
   if (!uid) return [];
 
   try {
-    // Try to fetch bookings from the bookings collection
     const bookingsRef = collection(db, 'bookings');
     const q = query(
       bookingsRef,
@@ -182,7 +182,6 @@ const fetchPatientBookings = async (uid: string): Promise<Booking[]> => {
     for (const docSnap of bookingsSnap.docs) {
       const data = docSnap.data();
       
-      // Get doctor info
       let doctorName = 'Unknown Doctor';
       let doctorSpecialization = '';
       
@@ -192,7 +191,6 @@ const fetchPatientBookings = async (uid: string): Promise<Booking[]> => {
           const doctorSnap = await getDoc(doctorRef);
           if (doctorSnap.exists()) {
             const doctorData = doctorSnap.data();
-            // Get user data for the doctor
             const doctorUserRef = doc(db, 'users', data.doctorId);
             const doctorUserSnap = await getDoc(doctorUserRef);
             const doctorUserData = doctorUserSnap.exists() ? doctorUserSnap.data() : {};
@@ -229,7 +227,6 @@ const fetchPatientBookings = async (uid: string): Promise<Booking[]> => {
 
 const fetchAvailableDoctors = async (): Promise<Doctor[]> => {
   try {
-    // Fetch verified doctors
     const doctorsRef = collection(db, 'doctors');
     const q = query(
       doctorsRef,
@@ -242,7 +239,6 @@ const fetchAvailableDoctors = async (): Promise<Doctor[]> => {
     for (const docSnap of doctorsSnap.docs) {
       const data = docSnap.data();
       
-      // Get user data for the doctor
       const userRef = doc(db, 'users', docSnap.id);
       const userSnap = await getDoc(userRef);
       const userData = userSnap.exists() ? userSnap.data() : {};
@@ -295,6 +291,176 @@ const fetchMembership = async (uid: string): Promise<Membership | null> => {
   }
 };
 
+// ==================== SIDEBAR COMPONENT ====================
+const SidebarContent = ({ 
+  activeTab, 
+  setActiveTab, 
+  patientProfile, 
+  stats, 
+  membership, 
+  navigate, 
+  refetchProfile, 
+  isRefetchingProfile, 
+  signOut,
+  isMobile,
+  closeMobileMenu
+}: any) => {
+  const getInitials = (name: string) => {
+    if (!name) return 'P';
+    return name
+      .split(' ')
+      .map(n => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  return (
+    <div className="h-full flex flex-col bg-white">
+      {/* Logo */}
+      <div className="p-4 sm:p-6 border-b border-gray-100">
+        <h1 className="text-xl sm:text-2xl font-bold text-blue-600">MedMap</h1>
+        <p className="text-xs text-gray-500 mt-1">Patient Portal</p>
+      </div>
+      
+      {/* User Profile Summary */}
+      <div className="p-3 sm:p-4 border-b border-gray-100">
+        <div className="flex items-center gap-3">
+          <Avatar className="h-10 w-10 sm:h-12 sm:w-12">
+            <AvatarImage src={patientProfile?.photoURL} />
+            <AvatarFallback className="bg-blue-100 text-blue-600 text-sm font-bold">
+              {patientProfile ? getInitials(patientProfile.fullName) : 'P'}
+            </AvatarFallback>
+          </Avatar>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-gray-900 text-sm sm:text-base truncate">
+              {patientProfile?.fullName || 'Patient'}
+            </p>
+            <p className="text-xs text-gray-500 truncate">
+              {patientProfile?.email}
+            </p>
+          </div>
+        </div>
+      </div>
+      
+      {/* Navigation */}
+      <ScrollArea className="flex-1">
+        <nav className="p-3 sm:p-4 space-y-1">
+          <button
+            onClick={() => {
+              setActiveTab('overview');
+              if (isMobile && closeMobileMenu) closeMobileMenu();
+            }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'overview' 
+                ? 'bg-blue-50 text-blue-700' 
+                : 'text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            <Home className="w-5 h-5 flex-shrink-0" />
+            <span className="truncate">Dashboard</span>
+          </button>
+          
+          <button
+            onClick={() => {
+              setActiveTab('appointments');
+              if (isMobile && closeMobileMenu) closeMobileMenu();
+            }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'appointments' 
+                ? 'bg-blue-50 text-blue-700' 
+                : 'text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            <Calendar className="w-5 h-5 flex-shrink-0" />
+            <span className="truncate">Appointments</span>
+            {stats.upcomingBookings > 0 && (
+              <Badge className="ml-auto bg-blue-100 text-blue-800 text-xs flex-shrink-0">
+                {stats.upcomingBookings}
+              </Badge>
+            )}
+          </button>
+          
+          <button
+            onClick={() => {
+              setActiveTab('history');
+              if (isMobile && closeMobileMenu) closeMobileMenu();
+            }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'history' 
+                ? 'bg-blue-50 text-blue-700' 
+                : 'text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            <History className="w-5 h-5 flex-shrink-0" />
+            <span className="truncate">Medical History</span>
+          </button>
+          
+          <button
+            onClick={() => {
+              setActiveTab('profile');
+              if (isMobile && closeMobileMenu) closeMobileMenu();
+            }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'profile' 
+                ? 'bg-blue-50 text-blue-700' 
+                : 'text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            <UserCircle className="w-5 h-5 flex-shrink-0" />
+            <span className="truncate">My Profile</span>
+          </button>
+          
+          <button
+            onClick={() => {
+              navigate('/search');
+              if (isMobile && closeMobileMenu) closeMobileMenu();
+            }}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            <SearchIcon className="w-5 h-5 flex-shrink-0" />
+            <span className="truncate">Find Doctors</span>
+          </button>
+        </nav>
+      </ScrollArea>
+      
+      {/* Footer */}
+      <div className="p-3 sm:p-4 border-t border-gray-100 space-y-2">
+        <button
+          onClick={() => {
+            navigate('/memberships');
+            if (isMobile && closeMobileMenu) closeMobileMenu();
+          }}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+        >
+          <Shield className="w-5 h-5 flex-shrink-0" />
+          <span className="truncate">Membership</span>
+          {membership?.tier === 'premium' && (
+            <Badge className="ml-auto bg-purple-100 text-purple-800 text-xs flex-shrink-0">Premium</Badge>
+          )}
+        </button>
+        
+        <button
+          onClick={() => refetchProfile()}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+          disabled={isRefetchingProfile}
+        >
+          <RefreshCw className={`w-4 h-4 flex-shrink-0 ${isRefetchingProfile ? 'animate-spin' : ''}`} />
+          <span className="truncate">Refresh</span>
+        </button>
+        
+        <button
+          onClick={signOut}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
+        >
+          <LogOut className="w-5 h-5 flex-shrink-0" />
+          <span className="truncate">Sign Out</span>
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // ==================== PATIENT DASHBOARD COMPONENT ====================
 const PatientDashboard = () => {
   const navigate = useNavigate();
@@ -303,6 +469,7 @@ const PatientDashboard = () => {
   const queryClient = useQueryClient();
   
   const [activeTab, setActiveTab] = useState('overview');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
   // Profile editing states
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -313,7 +480,6 @@ const PatientDashboard = () => {
 
   // ==================== QUERIES ====================
   
-  // Patient Profile Query
   const {
     data: patientProfile,
     isLoading: isLoadingProfile,
@@ -324,14 +490,13 @@ const PatientDashboard = () => {
     queryKey: [QUERY_KEYS.patientProfile, user?.uid],
     queryFn: () => fetchPatientProfile(user!.uid),
     enabled: !!user && profile?.role === 'patient',
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     retry: 2,
   });
 
-  // Patient Bookings Query
   const {
     data: bookings = [],
     isLoading: isLoadingBookings,
@@ -340,27 +505,25 @@ const PatientDashboard = () => {
     queryKey: [QUERY_KEYS.patientBookings, user?.uid],
     queryFn: () => fetchPatientBookings(user!.uid),
     enabled: !!user && profile?.role === 'patient',
-    staleTime: 2 * 60 * 1000, // 2 minutes
-    gcTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 2 * 60 * 1000,
+    gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
-    refetchInterval: 30 * 1000, // Auto-refresh every 30 seconds
+    refetchInterval: 30 * 1000,
   });
 
-  // Available Doctors Query
   const {
     data: availableDoctors = [],
     isLoading: isLoadingDoctors,
   } = useQuery({
     queryKey: [QUERY_KEYS.availableDoctors],
     queryFn: fetchAvailableDoctors,
-    staleTime: 10 * 60 * 1000, // 10 minutes
-    gcTime: 15 * 60 * 1000, // 15 minutes
+    staleTime: 10 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   });
 
-  // Membership Query
   const {
     data: membership,
     isLoading: isLoadingMembership,
@@ -378,7 +541,6 @@ const PatientDashboard = () => {
     new Date(b.appointmentDate) >= now && b.status !== 'cancelled'
   );
   const completedBookings = bookings.filter(b => b.status === 'completed');
-  const cancelledBookings = bookings.filter(b => b.status === 'cancelled');
   const pendingBookings = bookings.filter(b => b.status === 'pending');
   
   const stats = {
@@ -386,8 +548,7 @@ const PatientDashboard = () => {
     upcomingBookings: upcomingBookings.length,
     pendingBookings: pendingBookings.length,
     completedBookings: completedBookings.length,
-    cancelledBookings: cancelledBookings.length,
-    favoriteDoctor: null,
+    cancelledBookings: bookings.filter(b => b.status === 'cancelled').length,
     membershipType: membership?.tier || 'basic',
     freeBookingsRemaining: Math.max(0, 3 - completedBookings.length)
   };
@@ -396,7 +557,6 @@ const PatientDashboard = () => {
 
   // ==================== MUTATIONS ====================
   
-  // Update Profile Mutation
   const updateProfileMutation = useMutation({
     mutationFn: async (data: {
       editedProfile: Partial<PatientProfile>;
@@ -408,7 +568,6 @@ const PatientDashboard = () => {
 
       const { editedProfile, allergiesList, conditionsList, medicationsList } = data;
       
-      // Update users collection
       const userRef = doc(db, 'users', user.uid);
       await updateDoc(userRef, {
         firstName: editedProfile.firstName,
@@ -418,7 +577,6 @@ const PatientDashboard = () => {
         updatedAt: serverTimestamp(),
       });
       
-      // Update patients collection
       const patientRef = doc(db, 'patients', user.uid);
       await updateDoc(patientRef, {
         dateOfBirth: editedProfile.dateOfBirth || '',
@@ -437,7 +595,6 @@ const PatientDashboard = () => {
         description: "Your profile information has been saved successfully.",
       });
       setIsEditingProfile(false);
-      // Invalidate and refetch profile
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.patientProfile] });
     },
     onError: (error: any) => {
@@ -455,7 +612,6 @@ const PatientDashboard = () => {
   const handleSaveProfile = async () => {
     if (!patientProfile) return;
     
-    // Parse medical information
     const allergiesList = allergiesInput
       .split(',')
       .map(item => item.trim())
@@ -554,13 +710,24 @@ const PatientDashboard = () => {
     }
   }, [profile, navigate]);
 
+  // Close mobile menu on resize to desktop
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024 && mobileMenuOpen) {
+        setMobileMenuOpen(false);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [mobileMenuOpen]);
+
   // ==================== LOADING STATE ====================
   if (isLoadingProfile || isLoadingBookings) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
+        <div className="flex flex-col items-center gap-4 px-4">
           <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-          <p className="text-gray-600">Loading your dashboard...</p>
+          <p className="text-gray-600 text-sm sm:text-base">Loading your dashboard...</p>
         </div>
       </div>
     );
@@ -587,856 +754,789 @@ const PatientDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Professional Sidebar */}
-      <div className="fixed left-0 top-0 h-full w-64 bg-white border-r border-gray-200 flex flex-col z-20">
-        {/* Logo */}
-        <div className="p-6 border-b border-gray-100">
-          <h1 className="text-2xl font-bold text-blue-600">MedMap</h1>
-          <p className="text-xs text-gray-500 mt-1">Patient Portal</p>
-        </div>
-        
-        {/* User Profile Summary */}
-        <div className="p-4 border-b border-gray-100">
-          <div className="flex items-center gap-3">
-            <Avatar className="h-12 w-12">
-              <AvatarImage src={patientProfile?.photoURL} />
-              <AvatarFallback className="bg-blue-100 text-blue-600 text-sm font-bold">
-                {patientProfile ? getInitials(patientProfile.fullName) : 'P'}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-gray-900 truncate">
-                {patientProfile?.fullName || 'Patient'}
-              </p>
-              <p className="text-xs text-gray-500 truncate">
-                {patientProfile?.email}
-              </p>
-            </div>
-          </div>
-        </div>
-        
-        {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              activeTab === 'overview' 
-                ? 'bg-blue-50 text-blue-700' 
-                : 'text-gray-600 hover:bg-gray-50'
-            }`}
-          >
-            <Home className="w-5 h-5" />
-            Dashboard
-          </button>
-          
-          <button
-            onClick={() => setActiveTab('appointments')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              activeTab === 'appointments' 
-                ? 'bg-blue-50 text-blue-700' 
-                : 'text-gray-600 hover:bg-gray-50'
-            }`}
-          >
-            <Calendar className="w-5 h-5" />
-            All Appointments
-            {stats.upcomingBookings > 0 && (
-              <Badge className="ml-auto bg-blue-100 text-blue-800 text-xs">
-                {stats.upcomingBookings}
-              </Badge>
-            )}
-          </button>
-          
-          <button
-            onClick={() => setActiveTab('history')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              activeTab === 'history' 
-                ? 'bg-blue-50 text-blue-700' 
-                : 'text-gray-600 hover:bg-gray-50'
-            }`}
-          >
-            <History className="w-5 h-5" />
-            Medical History
-          </button>
-          
-          <button
-            onClick={() => setActiveTab('profile')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              activeTab === 'profile' 
-                ? 'bg-blue-50 text-blue-700' 
-                : 'text-gray-600 hover:bg-gray-50'
-            }`}
-          >
-            <UserCircle className="w-5 h-5" />
-            My Profile
-          </button>
-          
-          <button
+      {/* ===== MOBILE HEADER ===== */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-30 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+        <h1 className="text-xl font-bold text-blue-600">MedMap</h1>
+        <div className="flex items-center gap-3">
+          <Button
+            size="sm"
+            className="bg-blue-600 hover:bg-blue-700 text-white"
             onClick={() => navigate('/search')}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
           >
-            <SearchIcon className="w-5 h-5" />
-            Find Doctors
-          </button>
-        </nav>
-        
-        {/* Footer */}
-        <div className="p-4 border-t border-gray-100 space-y-2">
-          <button
-            onClick={() => navigate('/memberships')}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            <Shield className="w-5 h-5" />
-            Membership
-            {membership?.tier === 'premium' && (
-              <Badge className="ml-auto bg-purple-100 text-purple-800 text-xs">Premium</Badge>
-            )}
-          </button>
-          
-          <button
-            onClick={() => refetchProfile()}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
-            disabled={isRefetchingProfile}
-          >
-            <RefreshCw className={`w-4 h-4 ${isRefetchingProfile ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-          
-          <button
-            onClick={handleSignOut}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
-          >
-            <LogOut className="w-5 h-5" />
-            Sign Out
-          </button>
+            <Plus className="h-4 w-4 mr-1" />
+            Book
+          </Button>
+          <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" className="lg:hidden">
+                <Menu className="h-6 w-6" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-72 p-0">
+              <SidebarContent
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                patientProfile={patientProfile}
+                stats={stats}
+                membership={membership}
+                navigate={navigate}
+                refetchProfile={refetchProfile}
+                isRefetchingProfile={isRefetchingProfile}
+                signOut={handleSignOut}
+                isMobile={true}
+                closeMobileMenu={() => setMobileMenuOpen(false)}
+              />
+            </SheetContent>
+          </Sheet>
         </div>
       </div>
+
+      {/* ===== DESKTOP SIDEBAR ===== */}
+      <div className="hidden lg:block fixed left-0 top-0 h-full w-64 bg-white border-r border-gray-200 flex flex-col z-20">
+        <SidebarContent
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          patientProfile={patientProfile}
+          stats={stats}
+          membership={membership}
+          navigate={navigate}
+          refetchProfile={refetchProfile}
+          isRefetchingProfile={isRefetchingProfile}
+          signOut={handleSignOut}
+          isMobile={false}
+        />
+      </div>
       
-      {/* Main Content */}
-      <div className="ml-64 p-4 sm:p-6 lg:p-8">
-        {/* Top Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 lg:mb-8">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">
-              {activeTab === 'overview' && `Welcome back, ${patientProfile?.firstName || 'Patient'}!`}
-              {activeTab === 'appointments' && 'All Appointments'}
-              {activeTab === 'history' && 'Medical History'}
-              {activeTab === 'profile' && 'My Profile'}
-            </h1>
-            <p className="text-gray-600 mt-1 text-sm">
-              {new Date().toLocaleDateString('en-ZA', { 
-                weekday: 'long', 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
-              })}
-            </p>
-          </div>
-          
-          <div className="flex items-center gap-3 mt-3 sm:mt-0">
-            {isLoadingBookings && (
-              <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
-            )}
-            <Button 
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-              onClick={() => navigate('/search')}
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Book Appointment
-            </Button>
-          </div>
-        </div>
-
-        {activeTab === 'overview' && (
-          <>
-            {/* Quick Stats */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6 mb-6 lg:mb-8">
-              <Card className="border-0 shadow-sm">
-                <CardContent className="p-4 sm:p-6">
-                  <div className="flex items-center gap-3 sm:gap-4">
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                      <Calendar className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs sm:text-sm text-gray-600">Total Bookings</p>
-                      <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.totalBookings}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-0 shadow-sm">
-                <CardContent className="p-4 sm:p-6">
-                  <div className="flex items-center gap-3 sm:gap-4">
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-green-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                      <Clock className="h-5 w-5 sm:h-6 sm:w-6 text-green-600" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs sm:text-sm text-gray-600">Upcoming</p>
-                      <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.upcomingBookings}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-0 shadow-sm">
-                <CardContent className="p-4 sm:p-6">
-                  <div className="flex items-center gap-3 sm:gap-4">
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-purple-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                      <Activity className="h-5 w-5 sm:h-6 sm:w-6 text-purple-600" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs sm:text-sm text-gray-600">Completed</p>
-                      <p className="text-xl sm:text-2xl font-bold text-gray-900">{stats.completedBookings}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-0 shadow-sm">
-                <CardContent className="p-4 sm:p-6">
-                  <div className="flex items-center gap-3 sm:gap-4">
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                      <Shield className="h-5 w-5 sm:h-6 sm:w-6 text-amber-600" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs sm:text-sm text-gray-600">Membership</p>
-                      <p className="text-base sm:text-lg font-bold text-gray-900 capitalize">{stats.membershipType}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+      {/* ===== MAIN CONTENT ===== */}
+      <div className="lg:ml-64 pt-16 lg:pt-0">
+        <div className="p-4 sm:p-6 lg:p-8">
+          {/* Top Bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 lg:mb-8">
+            <div>
+              <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900">
+                {activeTab === 'overview' && `Welcome back, ${patientProfile?.firstName || 'Patient'}!`}
+                {activeTab === 'appointments' && 'All Appointments'}
+                {activeTab === 'history' && 'Medical History'}
+                {activeTab === 'profile' && 'My Profile'}
+              </h1>
+              <p className="text-gray-600 mt-1 text-xs sm:text-sm">
+                {new Date().toLocaleDateString('en-ZA', { 
+                  weekday: 'long', 
+                  year: 'numeric', 
+                  month: 'long', 
+                  day: 'numeric' 
+                })}
+              </p>
             </div>
+            
+            <div className="flex items-center gap-3 mt-3 sm:mt-0">
+              {isLoadingBookings && (
+                <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+              )}
+              <Button 
+                className="bg-blue-600 hover:bg-blue-700 text-white text-sm sm:text-base"
+                onClick={() => navigate('/search')}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Book Appointment
+              </Button>
+            </div>
+          </div>
 
-            <div className="grid lg:grid-cols-3 gap-6">
-              {/* Recent Bookings */}
-              <div className="lg:col-span-2">
+          {activeTab === 'overview' && (
+            <>
+              {/* Quick Stats - Mobile Responsive Grid */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6 mb-6 lg:mb-8">
                 <Card className="border-0 shadow-sm">
-                  <CardHeader className="flex flex-row items-center justify-between pb-4">
-                    <CardTitle className="text-base sm:text-lg font-semibold text-gray-900">Recent Bookings</CardTitle>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setActiveTab('appointments')}
-                      className="text-blue-600 hover:text-blue-700"
-                    >
-                      View All
-                      <ArrowRight className="h-4 w-4 ml-1" />
-                    </Button>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {isLoadingBookings ? (
-                      <div className="flex justify-center py-8">
-                        <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-                      </div>
-                    ) : recentBookings.length === 0 ? (
-                      <div className="text-center py-8">
-                        <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                        <h3 className="text-lg font-semibold mb-2">No bookings yet</h3>
-                        <p className="text-gray-600 mb-4">
-                          Book your first appointment to get started
-                        </p>
-                        <Button
-                          className="bg-blue-600 hover:bg-blue-700"
-                          onClick={() => navigate('/search')}
-                        >
-                          Find Doctors
-                        </Button>
-                      </div>
-                    ) : (
-                      recentBookings.map((booking) => (
-                        <div key={booking.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-gray-50 rounded-lg gap-3">
-                          <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                              <Stethoscope className="h-5 w-5 text-blue-600" />
-                            </div>
-                            <div className="min-w-0">
-                              <h4 className="font-medium text-gray-900 truncate">
-                                {booking.doctorName || 'Unknown Doctor'}
-                              </h4>
-                              <p className="text-sm text-gray-600 truncate">{booking.doctorSpecialization}</p>
-                              <p className="text-xs text-gray-500">
-                                {formatDate(booking.appointmentDate)} at {formatTime(booking.appointmentTime)}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            {getStatusBadge(booking.status)}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Right Sidebar */}
-              <div className="space-y-6">
-                {/* Available Doctors */}
-                <Card className="border-0 shadow-sm">
-                  <CardHeader className="pb-4">
-                    <CardTitle className="text-base sm:text-lg font-semibold text-gray-900">Available Doctors</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {isLoadingDoctors ? (
-                      <div className="flex justify-center py-4">
-                        <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-                      </div>
-                    ) : availableDoctors.length === 0 ? (
-                      <p className="text-sm text-gray-600 text-center py-4">No doctors available right now.</p>
-                    ) : (
-                      availableDoctors.slice(0, 4).map((doctor) => (
-                        <div key={doctor.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <Avatar className="h-10 w-10 flex-shrink-0">
-                              <AvatarImage src={doctor.profileImage} />
-                              <AvatarFallback className="bg-blue-100 text-blue-600 text-xs font-medium">
-                                {getInitials(doctor.fullName)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div className="min-w-0">
-                              <h4 className="font-medium text-gray-900 text-sm truncate">Dr. {doctor.firstName} {doctor.lastName}</h4>
-                              <p className="text-xs text-gray-600 truncate">{doctor.specialization}</p>
-                            </div>
-                          </div>
-                          <Button 
-                            size="sm" 
-                            className="bg-blue-600 hover:bg-blue-700 flex-shrink-0 ml-2"
-                            onClick={() => navigate(`/book/${doctor.id}`)}
-                          >
-                            Book
-                          </Button>
-                        </div>
-                      ))
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* Membership Card */}
-                <Card className="border-0 shadow-sm bg-gradient-to-br from-blue-50 to-indigo-50">
-                  <CardContent className="p-4 sm:p-6">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center flex-shrink-0">
-                        <Shield className="h-5 w-5 text-white" />
+                  <CardContent className="p-3 sm:p-4 md:p-6">
+                    <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <Calendar className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-blue-600" />
                       </div>
                       <div className="min-w-0">
-                        <h3 className="font-semibold text-gray-900 text-sm sm:text-base">
-                          {stats.membershipType === 'premium' ? 'Premium Member' : 'Basic Member'}
-                        </h3>
-                        <p className="text-xs sm:text-sm text-gray-600 truncate">
-                          {stats.membershipType === 'premium' 
-                            ? 'Unlimited bookings • Priority support' 
-                            : `${stats.freeBookingsRemaining} free bookings remaining`}
-                        </p>
+                        <p className="text-[10px] sm:text-xs md:text-sm text-gray-600">Total Bookings</p>
+                        <p className="text-base sm:text-xl md:text-2xl font-bold text-gray-900">{stats.totalBookings}</p>
                       </div>
                     </div>
-                    
-                    {stats.membershipType === 'basic' && (
-                      <>
-                        <Progress 
-                          value={(stats.freeBookingsRemaining / 3) * 100} 
-                          className="h-2 mb-4"
-                        />
-                        <Button 
-                          className="w-full bg-blue-600 hover:bg-blue-700 text-sm"
-                          onClick={() => navigate('/memberships')}
-                        >
-                          Upgrade to Premium
-                        </Button>
-                      </>
-                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-sm">
+                  <CardContent className="p-3 sm:p-4 md:p-6">
+                    <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-green-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <Clock className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-green-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] sm:text-xs md:text-sm text-gray-600">Upcoming</p>
+                        <p className="text-base sm:text-xl md:text-2xl font-bold text-gray-900">{stats.upcomingBookings}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-sm">
+                  <CardContent className="p-3 sm:p-4 md:p-6">
+                    <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-purple-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <Activity className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-purple-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] sm:text-xs md:text-sm text-gray-600">Completed</p>
+                        <p className="text-base sm:text-xl md:text-2xl font-bold text-gray-900">{stats.completedBookings}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-0 shadow-sm">
+                  <CardContent className="p-3 sm:p-4 md:p-6">
+                    <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <Shield className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-amber-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] sm:text-xs md:text-sm text-gray-600">Membership</p>
+                        <p className="text-sm sm:text-base md:text-lg font-bold text-gray-900 capitalize">{stats.membershipType}</p>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               </div>
-            </div>
-          </>
-        )}
 
-        {activeTab === 'appointments' && (
-          <Card className="border-0 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-base sm:text-lg font-semibold text-gray-900">All Appointments</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {isLoadingBookings ? (
-                <div className="flex justify-center py-12">
-                  <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+              <div className="grid lg:grid-cols-3 gap-4 sm:gap-6">
+                {/* Recent Bookings */}
+                <div className="lg:col-span-2">
+                  <Card className="border-0 shadow-sm">
+                    <CardHeader className="flex flex-row items-center justify-between pb-3 sm:pb-4">
+                      <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">Recent Bookings</CardTitle>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setActiveTab('appointments')}
+                        className="text-blue-600 hover:text-blue-700 text-xs sm:text-sm"
+                      >
+                        View All
+                        <ArrowRight className="h-3 w-3 sm:h-4 sm:w-4 ml-1" />
+                      </Button>
+                    </CardHeader>
+                    <CardContent className="space-y-3 sm:space-y-4">
+                      {isLoadingBookings ? (
+                        <div className="flex justify-center py-8">
+                          <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+                        </div>
+                      ) : recentBookings.length === 0 ? (
+                        <div className="text-center py-8">
+                          <Calendar className="h-10 w-10 sm:h-12 sm:w-12 mx-auto mb-4 text-gray-400" />
+                          <h3 className="text-base sm:text-lg font-semibold mb-2">No bookings yet</h3>
+                          <p className="text-sm sm:text-base text-gray-600 mb-4">
+                            Book your first appointment to get started
+                          </p>
+                          <Button
+                            className="bg-blue-600 hover:bg-blue-700 text-sm sm:text-base"
+                            onClick={() => navigate('/search')}
+                          >
+                            Find Doctors
+                          </Button>
+                        </div>
+                      ) : (
+                        recentBookings.map((booking) => (
+                          <div key={booking.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 bg-gray-50 rounded-lg gap-2 sm:gap-3">
+                            <div className="flex items-center gap-3 sm:gap-4">
+                              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                                <Stethoscope className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600" />
+                              </div>
+                              <div className="min-w-0">
+                                <h4 className="font-medium text-gray-900 text-sm sm:text-base truncate">
+                                  {booking.doctorName || 'Unknown Doctor'}
+                                </h4>
+                                <p className="text-xs sm:text-sm text-gray-600 truncate">{booking.doctorSpecialization}</p>
+                                <p className="text-[10px] sm:text-xs text-gray-500">
+                                  {formatDate(booking.appointmentDate)} at {formatTime(booking.appointmentTime)}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-left sm:text-right flex-shrink-0">
+                              {getStatusBadge(booking.status)}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </CardContent>
+                  </Card>
                 </div>
-              ) : bookings.length === 0 ? (
-                <div className="text-center py-12">
-                  <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                  <h3 className="text-lg font-semibold mb-2">No appointments yet</h3>
-                  <p className="text-gray-600 mb-4">Book your first appointment to get started</p>
-                  <Button
-                    className="bg-blue-600 hover:bg-blue-700"
-                    onClick={() => navigate('/search')}
-                  >
-                    Find Doctors
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {bookings.map((booking) => (
-                    <div key={booking.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-gray-50 rounded-lg gap-3">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                          <Stethoscope className="h-6 w-6 text-blue-600" />
+
+                {/* Right Sidebar */}
+                <div className="space-y-4 sm:space-y-6">
+                  {/* Available Doctors */}
+                  <Card className="border-0 shadow-sm">
+                    <CardHeader className="pb-3 sm:pb-4">
+                      <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">Available Doctors</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {isLoadingDoctors ? (
+                        <div className="flex justify-center py-4">
+                          <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+                        </div>
+                      ) : availableDoctors.length === 0 ? (
+                        <p className="text-sm text-gray-600 text-center py-4">No doctors available right now.</p>
+                      ) : (
+                        availableDoctors.slice(0, 4).map((doctor) => (
+                          <div key={doctor.id} className="flex items-center justify-between p-2 sm:p-3 bg-gray-50 rounded-lg gap-2">
+                            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                              <Avatar className="h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0">
+                                <AvatarImage src={doctor.profileImage} />
+                                <AvatarFallback className="bg-blue-100 text-blue-600 text-[10px] sm:text-xs font-medium">
+                                  {getInitials(doctor.fullName)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="min-w-0">
+                                <h4 className="font-medium text-gray-900 text-xs sm:text-sm truncate">Dr. {doctor.firstName} {doctor.lastName}</h4>
+                                <p className="text-[10px] sm:text-xs text-gray-600 truncate">{doctor.specialization}</p>
+                              </div>
+                            </div>
+                            <Button 
+                              size="sm" 
+                              className="bg-blue-600 hover:bg-blue-700 flex-shrink-0 text-xs sm:text-sm"
+                              onClick={() => navigate(`/book/${doctor.id}`)}
+                            >
+                              Book
+                            </Button>
+                          </div>
+                        ))
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Membership Card */}
+                  <Card className="border-0 shadow-sm bg-gradient-to-br from-blue-50 to-indigo-50">
+                    <CardContent className="p-4 sm:p-6">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-8 h-8 sm:w-10 sm:h-10 bg-blue-600 rounded-xl flex items-center justify-center flex-shrink-0">
+                          <Shield className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
                         </div>
                         <div className="min-w-0">
-                          <h4 className="font-medium text-gray-900 truncate">
-                            {booking.doctorName || 'Unknown Doctor'}
-                          </h4>
-                          <p className="text-sm text-gray-600 truncate">{booking.doctorSpecialization}</p>
-                          <p className="text-xs text-gray-500">
-                            {formatDate(booking.appointmentDate)} at {formatTime(booking.appointmentTime)}
+                          <h3 className="font-semibold text-gray-900 text-sm sm:text-base">
+                            {stats.membershipType === 'premium' ? 'Premium Member' : 'Basic Member'}
+                          </h3>
+                          <p className="text-xs sm:text-sm text-gray-600 truncate">
+                            {stats.membershipType === 'premium' 
+                              ? 'Unlimited bookings • Priority support' 
+                              : `${stats.freeBookingsRemaining} free bookings remaining`}
                           </p>
                         </div>
                       </div>
-                      <div className="text-right flex-shrink-0">
-                        {getStatusBadge(booking.status)}
-                      </div>
-                    </div>
-                  ))}
+                      
+                      {stats.membershipType === 'basic' && (
+                        <>
+                          <Progress 
+                            value={(stats.freeBookingsRemaining / 3) * 100} 
+                            className="h-2 mb-4"
+                          />
+                          <Button 
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-sm"
+                            onClick={() => navigate('/memberships')}
+                          >
+                            Upgrade to Premium
+                          </Button>
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
+              </div>
+            </>
+          )}
 
-        {activeTab === 'history' && (
-          <div className="space-y-6">
+          {activeTab === 'appointments' && (
             <Card className="border-0 shadow-sm">
               <CardHeader>
-                <CardTitle className="text-base sm:text-lg font-semibold text-gray-900">Medical History</CardTitle>
+                <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">All Appointments</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-6">
-                {/* Allergies */}
-                <div>
-                  <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-                    <AlertCircle className="w-5 h-5 text-red-500" />
-                    Allergies
-                  </h4>
-                  {patientProfile?.allergies && patientProfile.allergies.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {patientProfile.allergies.map((allergy, i) => (
-                        <Badge key={i} className="bg-red-50 text-red-700 text-sm px-3 py-1">
-                          {allergy}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-gray-500">No allergies recorded</p>
-                  )}
-                </div>
-                
-                {/* Chronic Conditions */}
-                <div>
-                  <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-                    <Activity className="w-5 h-5 text-orange-500" />
-                    Chronic Conditions
-                  </h4>
-                  {patientProfile?.chronicConditions && patientProfile.chronicConditions.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {patientProfile.chronicConditions.map((condition, i) => (
-                        <Badge key={i} className="bg-orange-50 text-orange-700 text-sm px-3 py-1">
-                          {condition}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-gray-500">No chronic conditions recorded</p>
-                  )}
-                </div>
-                
-                {/* Medications */}
-                <div>
-                  <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-                    <Pill className="w-5 h-5 text-purple-500" />
-                    Current Medications
-                  </h4>
-                  {patientProfile?.medications && patientProfile.medications.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {patientProfile.medications.map((medication, i) => (
-                        <Badge key={i} className="bg-purple-50 text-purple-700 text-sm px-3 py-1">
-                          {medication}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-gray-500">No medications recorded</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {activeTab === 'profile' && patientProfile && (
-          <div className="space-y-6">
-            {/* Profile Header with Edit/Save buttons */}
-            <Card className="border-0 shadow-sm">
-              <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <CardTitle className="text-base sm:text-lg font-semibold text-gray-900">Personal Information</CardTitle>
-                {!isEditingProfile ? (
-                  <Button
-                    variant="outline"
-                    onClick={() => setIsEditingProfile(true)}
-                    size="sm"
-                  >
-                    <Edit className="w-4 h-4 mr-2" />
-                    Edit Profile
-                  </Button>
-                ) : (
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={handleCancelEdit}
-                      disabled={updateProfileMutation.isPending}
-                      size="sm"
-                    >
-                      <X className="w-4 h-4 mr-2" />
-                      Cancel
-                    </Button>
+              <CardContent>
+                {isLoadingBookings ? (
+                  <div className="flex justify-center py-12">
+                    <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                  </div>
+                ) : bookings.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                    <h3 className="text-lg font-semibold mb-2">No appointments yet</h3>
+                    <p className="text-gray-600 mb-4">Book your first appointment to get started</p>
                     <Button
                       className="bg-blue-600 hover:bg-blue-700"
-                      onClick={handleSaveProfile}
-                      disabled={updateProfileMutation.isPending}
-                      size="sm"
+                      onClick={() => navigate('/search')}
                     >
-                      {updateProfileMutation.isPending ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Saving...
-                        </>
-                      ) : (
-                        <>
-                          <Save className="w-4 h-4 mr-2" />
-                          Save Changes
-                        </>
-                      )}
+                      Find Doctors
                     </Button>
                   </div>
+                ) : (
+                  <div className="space-y-3">
+                    {bookings.map((booking) => (
+                      <div key={booking.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 bg-gray-50 rounded-lg gap-2 sm:gap-3">
+                        <div className="flex items-center gap-3 sm:gap-4">
+                          <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                            <Stethoscope className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600" />
+                          </div>
+                          <div className="min-w-0">
+                            <h4 className="font-medium text-gray-900 text-sm sm:text-base truncate">
+                              {booking.doctorName || 'Unknown Doctor'}
+                            </h4>
+                            <p className="text-xs sm:text-sm text-gray-600 truncate">{booking.doctorSpecialization}</p>
+                            <p className="text-[10px] sm:text-xs text-gray-500">
+                              {formatDate(booking.appointmentDate)} at {formatTime(booking.appointmentTime)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-left sm:text-right flex-shrink-0">
+                          {getStatusBadge(booking.status)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center gap-4 sm:gap-6 mb-6">
-                  <Avatar className="h-16 w-16 sm:h-20 sm:w-20">
-                    <AvatarImage src={patientProfile.photoURL} />
-                    <AvatarFallback className="bg-blue-100 text-blue-600 text-xl sm:text-2xl font-bold">
-                      {getInitials(patientProfile.fullName)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="min-w-0">
-                    <h3 className="text-lg sm:text-xl font-semibold text-gray-900 truncate">{patientProfile.fullName}</h3>
-                    <p className="text-sm text-gray-600 truncate">{patientProfile.email}</p>
-                  </div>
-                </div>
+              </CardContent>
+            </Card>
+          )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+          {activeTab === 'history' && (
+            <div className="space-y-4 sm:space-y-6">
+              <Card className="border-0 shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">Medical History</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4 sm:space-y-6">
+                  {/* Allergies */}
                   <div>
-                    <Label className="text-gray-500 text-sm">First Name</Label>
-                    {isEditingProfile ? (
-                      <Input
-                        value={editedProfile.firstName || ''}
-                        onChange={(e) => setEditedProfile({ ...editedProfile, firstName: e.target.value })}
-                        className="mt-1"
-                      />
+                    <h4 className="font-medium text-gray-900 mb-2 sm:mb-3 flex items-center gap-2 text-sm sm:text-base">
+                      <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-500" />
+                      Allergies
+                    </h4>
+                    {patientProfile?.allergies && patientProfile.allergies.length > 0 ? (
+                      <div className="flex flex-wrap gap-1 sm:gap-2">
+                        {patientProfile.allergies.map((allergy, i) => (
+                          <Badge key={i} className="bg-red-50 text-red-700 text-xs sm:text-sm px-2 sm:px-3 py-0.5 sm:py-1">
+                            {allergy}
+                          </Badge>
+                        ))}
+                      </div>
                     ) : (
-                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.firstName}</p>
+                      <p className="text-gray-500 text-sm">No allergies recorded</p>
                     )}
                   </div>
                   
+                  {/* Chronic Conditions */}
                   <div>
-                    <Label className="text-gray-500 text-sm">Last Name</Label>
-                    {isEditingProfile ? (
-                      <Input
-                        value={editedProfile.lastName || ''}
-                        onChange={(e) => setEditedProfile({ ...editedProfile, lastName: e.target.value })}
-                        className="mt-1"
-                      />
+                    <h4 className="font-medium text-gray-900 mb-2 sm:mb-3 flex items-center gap-2 text-sm sm:text-base">
+                      <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500" />
+                      Chronic Conditions
+                    </h4>
+                    {patientProfile?.chronicConditions && patientProfile.chronicConditions.length > 0 ? (
+                      <div className="flex flex-wrap gap-1 sm:gap-2">
+                        {patientProfile.chronicConditions.map((condition, i) => (
+                          <Badge key={i} className="bg-orange-50 text-orange-700 text-xs sm:text-sm px-2 sm:px-3 py-0.5 sm:py-1">
+                            {condition}
+                          </Badge>
+                        ))}
+                      </div>
                     ) : (
-                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.lastName}</p>
+                      <p className="text-gray-500 text-sm">No chronic conditions recorded</p>
                     )}
                   </div>
                   
+                  {/* Medications */}
                   <div>
-                    <Label className="text-gray-500 text-sm flex items-center gap-1">
-                      <Lock className="w-3 h-3" />
-                      ID Number
+                    <h4 className="font-medium text-gray-900 mb-2 sm:mb-3 flex items-center gap-2 text-sm sm:text-base">
+                      <Pill className="w-4 h-4 sm:w-5 sm:h-5 text-purple-500" />
+                      Current Medications
+                    </h4>
+                    {patientProfile?.medications && patientProfile.medications.length > 0 ? (
+                      <div className="flex flex-wrap gap-1 sm:gap-2">
+                        {patientProfile.medications.map((medication, i) => (
+                          <Badge key={i} className="bg-purple-50 text-purple-700 text-xs sm:text-sm px-2 sm:px-3 py-0.5 sm:py-1">
+                            {medication}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-gray-500 text-sm">No medications recorded</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {activeTab === 'profile' && patientProfile && (
+            <div className="space-y-4 sm:space-y-6">
+              {/* Profile Header with Edit/Save buttons */}
+              <Card className="border-0 shadow-sm">
+                <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">Personal Information</CardTitle>
+                  {!isEditingProfile ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => setIsEditingProfile(true)}
+                      size="sm"
+                      className="w-full sm:w-auto"
+                    >
+                      <Edit className="w-4 h-4 mr-2" />
+                      Edit Profile
+                    </Button>
+                  ) : (
+                    <div className="flex gap-2 w-full sm:w-auto">
+                      <Button
+                        variant="outline"
+                        onClick={handleCancelEdit}
+                        disabled={updateProfileMutation.isPending}
+                        size="sm"
+                        className="flex-1 sm:flex-none"
+                      >
+                        <X className="w-4 h-4 mr-2" />
+                        Cancel
+                      </Button>
+                      <Button
+                        className="bg-blue-600 hover:bg-blue-700 flex-1 sm:flex-none"
+                        onClick={handleSaveProfile}
+                        disabled={updateProfileMutation.isPending}
+                        size="sm"
+                      >
+                        {updateProfileMutation.isPending ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Saving...
+                          </>
+                        ) : (
+                          <>
+                            <Save className="w-4 h-4 mr-2" />
+                            Save
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-3 sm:gap-4 md:gap-6 mb-4 sm:mb-6">
+                    <Avatar className="h-14 w-14 sm:h-16 sm:w-16 md:h-20 md:w-20">
+                      <AvatarImage src={patientProfile.photoURL} />
+                      <AvatarFallback className="bg-blue-100 text-blue-600 text-lg sm:text-xl md:text-2xl font-bold">
+                        {getInitials(patientProfile.fullName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0">
+                      <h3 className="text-base sm:text-lg md:text-xl font-semibold text-gray-900 truncate">{patientProfile.fullName}</h3>
+                      <p className="text-xs sm:text-sm text-gray-600 truncate">{patientProfile.email}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
+                    <div>
+                      <Label className="text-gray-500 text-xs sm:text-sm">First Name</Label>
+                      {isEditingProfile ? (
+                        <Input
+                          value={editedProfile.firstName || ''}
+                          onChange={(e) => setEditedProfile({ ...editedProfile, firstName: e.target.value })}
+                          className="mt-1 text-sm"
+                        />
+                      ) : (
+                        <p className="font-medium text-gray-900 mt-1 text-sm sm:text-base truncate">{patientProfile.firstName}</p>
+                      )}
+                    </div>
+                    
+                    <div>
+                      <Label className="text-gray-500 text-xs sm:text-sm">Last Name</Label>
+                      {isEditingProfile ? (
+                        <Input
+                          value={editedProfile.lastName || ''}
+                          onChange={(e) => setEditedProfile({ ...editedProfile, lastName: e.target.value })}
+                          className="mt-1 text-sm"
+                        />
+                      ) : (
+                        <p className="font-medium text-gray-900 mt-1 text-sm sm:text-base truncate">{patientProfile.lastName}</p>
+                      )}
+                    </div>
+                    
+                    <div>
+                      <Label className="text-gray-500 text-xs sm:text-sm flex items-center gap-1">
+                        <Lock className="w-3 h-3" />
+                        ID Number
+                      </Label>
+                      <p className="font-medium text-gray-900 mt-1 text-sm sm:text-base truncate">{patientProfile.idNumber || 'Not provided'}</p>
+                      <p className="text-[10px] sm:text-xs text-gray-500 mt-1">ID number cannot be changed</p>
+                    </div>
+                    
+                    <div>
+                      <Label className="text-gray-500 text-xs sm:text-sm">Date of Birth</Label>
+                      {isEditingProfile ? (
+                        <Input
+                          type="date"
+                          value={editedProfile.dateOfBirth || ''}
+                          onChange={(e) => setEditedProfile({ ...editedProfile, dateOfBirth: e.target.value })}
+                          className="mt-1 text-sm"
+                        />
+                      ) : (
+                        <p className="font-medium text-gray-900 mt-1 text-sm sm:text-base truncate">{patientProfile.dateOfBirth || 'Not provided'}</p>
+                      )}
+                    </div>
+                    
+                    <div>
+                      <Label className="text-gray-500 text-xs sm:text-sm">Phone Number</Label>
+                      {isEditingProfile ? (
+                        <Input
+                          type="tel"
+                          value={editedProfile.phone || ''}
+                          onChange={(e) => setEditedProfile({ ...editedProfile, phone: e.target.value })}
+                          className="mt-1 text-sm"
+                        />
+                      ) : (
+                        <p className="font-medium text-gray-900 mt-1 text-sm sm:text-base truncate">{patientProfile.phone || 'Not provided'}</p>
+                      )}
+                    </div>
+                    
+                    <div>
+                      <Label className="text-gray-500 text-xs sm:text-sm">Email</Label>
+                      <p className="font-medium text-gray-900 mt-1 text-sm sm:text-base truncate">{patientProfile.email}</p>
+                      <p className="text-[10px] sm:text-xs text-gray-500 mt-1">Email cannot be changed</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Emergency Contact */}
+              <Card className="border-0 shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <Users className="w-4 h-4 sm:w-5 sm:h-5 text-red-500" />
+                    Emergency Contact
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
+                    <div>
+                      <Label className="text-gray-500 text-xs sm:text-sm">Full Name</Label>
+                      {isEditingProfile ? (
+                        <Input
+                          value={editedProfile.emergencyContact?.name || ''}
+                          onChange={(e) => setEditedProfile({
+                            ...editedProfile,
+                            emergencyContact: { 
+                              ...editedProfile.emergencyContact, 
+                              name: e.target.value, 
+                              relationship: editedProfile.emergencyContact?.relationship || '', 
+                              phone: editedProfile.emergencyContact?.phone || '' 
+                            }
+                          })}
+                          className="mt-1 text-sm"
+                        />
+                      ) : (
+                        <p className="font-medium text-gray-900 mt-1 text-sm sm:text-base truncate">{patientProfile.emergencyContact?.name || 'Not provided'}</p>
+                      )}
+                    </div>
+                    
+                    <div>
+                      <Label className="text-gray-500 text-xs sm:text-sm">Relationship</Label>
+                      {isEditingProfile ? (
+                        <Select
+                          value={editedProfile.emergencyContact?.relationship || ''}
+                          onValueChange={(value) => setEditedProfile({
+                            ...editedProfile,
+                            emergencyContact: { 
+                              ...editedProfile.emergencyContact, 
+                              relationship: value, 
+                              name: editedProfile.emergencyContact?.name || '', 
+                              phone: editedProfile.emergencyContact?.phone || '' 
+                            }
+                          })}
+                        >
+                          <SelectTrigger className="mt-1 text-sm">
+                            <SelectValue placeholder="Select relationship" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Spouse">Spouse</SelectItem>
+                            <SelectItem value="Parent">Parent</SelectItem>
+                            <SelectItem value="Child">Child</SelectItem>
+                            <SelectItem value="Sibling">Sibling</SelectItem>
+                            <SelectItem value="Partner">Partner</SelectItem>
+                            <SelectItem value="Friend">Friend</SelectItem>
+                            <SelectItem value="Other">Other</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <p className="font-medium text-gray-900 mt-1 text-sm sm:text-base truncate">{patientProfile.emergencyContact?.relationship || 'Not provided'}</p>
+                      )}
+                    </div>
+                    
+                    <div>
+                      <Label className="text-gray-500 text-xs sm:text-sm">Contact Number</Label>
+                      {isEditingProfile ? (
+                        <Input
+                          type="tel"
+                          value={editedProfile.emergencyContact?.phone || ''}
+                          onChange={(e) => setEditedProfile({
+                            ...editedProfile,
+                            emergencyContact: { 
+                              ...editedProfile.emergencyContact, 
+                              phone: e.target.value, 
+                              name: editedProfile.emergencyContact?.name || '', 
+                              relationship: editedProfile.emergencyContact?.relationship || '' 
+                            }
+                          })}
+                          className="mt-1 text-sm"
+                        />
+                      ) : (
+                        <p className="font-medium text-gray-900 mt-1 text-sm sm:text-base truncate">{patientProfile.emergencyContact?.phone || 'Not provided'}</p>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Medical Aid */}
+              <Card className="border-0 shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <Building2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-500" />
+                    Medical Aid
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
+                    <div>
+                      <Label className="text-gray-500 text-xs sm:text-sm">Provider</Label>
+                      {isEditingProfile ? (
+                        <Select
+                          value={editedProfile.medicalAidProvider || ''}
+                          onValueChange={(value) => setEditedProfile({ ...editedProfile, medicalAidProvider: value })}
+                        >
+                          <SelectTrigger className="mt-1 text-sm">
+                            <SelectValue placeholder="Select provider" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Discovery Health">Discovery Health</SelectItem>
+                            <SelectItem value="Momentum Health">Momentum Health</SelectItem>
+                            <SelectItem value="Bonitas">Bonitas</SelectItem>
+                            <SelectItem value="Fedhealth">Fedhealth</SelectItem>
+                            <SelectItem value="Medshield">Medshield</SelectItem>
+                            <SelectItem value="Bestmed">Bestmed</SelectItem>
+                            <SelectItem value="Sizwe">Sizwe</SelectItem>
+                            <SelectItem value="GEMS">GEMS</SelectItem>
+                            <SelectItem value="Polmed">Polmed</SelectItem>
+                            <SelectItem value="Other">Other</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <p className="font-medium text-gray-900 mt-1 text-sm sm:text-base truncate">{patientProfile.medicalAidProvider || 'None'}</p>
+                      )}
+                    </div>
+                    
+                    <div>
+                      <Label className="text-gray-500 text-xs sm:text-sm">Membership Number</Label>
+                      {isEditingProfile ? (
+                        <Input
+                          value={editedProfile.medicalAidNumber || ''}
+                          onChange={(e) => setEditedProfile({ ...editedProfile, medicalAidNumber: e.target.value })}
+                          className="mt-1 text-sm"
+                        />
+                      ) : (
+                        <p className="font-medium text-gray-900 mt-1 text-sm sm:text-base truncate">{patientProfile.medicalAidNumber || 'Not provided'}</p>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Medical Information */}
+              <Card className="border-0 shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <Pill className="w-4 h-4 sm:w-5 sm:h-5 text-purple-500" />
+                    Medical Information
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4 sm:space-y-6">
+                  <div>
+                    <Label className="text-gray-500 text-xs sm:text-sm flex items-center gap-2">
+                      <AlertCircle className="w-3 h-3 sm:w-4 sm:h-4 text-red-500" />
+                      Allergies
                     </Label>
-                    <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.idNumber || 'Not provided'}</p>
-                    <p className="text-xs text-gray-500 mt-1">ID number cannot be changed</p>
-                  </div>
-                  
-                  <div>
-                    <Label className="text-gray-500 text-sm">Date of Birth</Label>
                     {isEditingProfile ? (
-                      <Input
-                        type="date"
-                        value={editedProfile.dateOfBirth || ''}
-                        onChange={(e) => setEditedProfile({ ...editedProfile, dateOfBirth: e.target.value })}
-                        className="mt-1"
+                      <Textarea
+                        value={allergiesInput}
+                        onChange={(e) => setAllergiesInput(e.target.value)}
+                        placeholder="e.g., Penicillin, Peanuts, Latex (separate with commas)"
+                        className="mt-2 text-sm"
+                        rows={2}
                       />
                     ) : (
-                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.dateOfBirth || 'Not provided'}</p>
+                      <div className="flex flex-wrap gap-1 sm:gap-2 mt-2">
+                        {patientProfile.allergies?.length ? (
+                          patientProfile.allergies.map((a, i) => (
+                            <Badge key={i} className="bg-red-50 text-red-700 text-xs sm:text-sm">{a}</Badge>
+                          ))
+                        ) : (
+                          <p className="text-gray-500 text-sm">None reported</p>
+                        )}
+                      </div>
                     )}
                   </div>
                   
                   <div>
-                    <Label className="text-gray-500 text-sm">Phone Number</Label>
+                    <Label className="text-gray-500 text-xs sm:text-sm flex items-center gap-2">
+                      <Activity className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500" />
+                      Chronic Conditions
+                    </Label>
                     {isEditingProfile ? (
-                      <Input
-                        type="tel"
-                        value={editedProfile.phone || ''}
-                        onChange={(e) => setEditedProfile({ ...editedProfile, phone: e.target.value })}
-                        className="mt-1"
+                      <Textarea
+                        value={conditionsInput}
+                        onChange={(e) => setConditionsInput(e.target.value)}
+                        placeholder="e.g., Diabetes, Hypertension, Asthma (separate with commas)"
+                        className="mt-2 text-sm"
+                        rows={2}
                       />
                     ) : (
-                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.phone || 'Not provided'}</p>
+                      <div className="flex flex-wrap gap-1 sm:gap-2 mt-2">
+                        {patientProfile.chronicConditions?.length ? (
+                          patientProfile.chronicConditions.map((c, i) => (
+                            <Badge key={i} className="bg-orange-50 text-orange-700 text-xs sm:text-sm">{c}</Badge>
+                          ))
+                        ) : (
+                          <p className="text-gray-500 text-sm">None reported</p>
+                        )}
+                      </div>
                     )}
                   </div>
                   
                   <div>
-                    <Label className="text-gray-500 text-sm">Email</Label>
-                    <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.email}</p>
-                    <p className="text-xs text-gray-500 mt-1">Email cannot be changed</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Emergency Contact */}
-            <Card className="border-0 shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-base sm:text-lg font-semibold text-gray-900 flex items-center gap-2">
-                  <Users className="w-5 h-5 text-red-500" />
-                  Emergency Contact
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
-                  <div>
-                    <Label className="text-gray-500 text-sm">Full Name</Label>
+                    <Label className="text-gray-500 text-xs sm:text-sm flex items-center gap-2">
+                      <Pill className="w-3 h-3 sm:w-4 sm:h-4 text-purple-500" />
+                      Current Medications
+                    </Label>
                     {isEditingProfile ? (
-                      <Input
-                        value={editedProfile.emergencyContact?.name || ''}
-                        onChange={(e) => setEditedProfile({
-                          ...editedProfile,
-                          emergencyContact: { 
-                            ...editedProfile.emergencyContact, 
-                            name: e.target.value, 
-                            relationship: editedProfile.emergencyContact?.relationship || '', 
-                            phone: editedProfile.emergencyContact?.phone || '' 
-                          }
-                        })}
-                        className="mt-1"
+                      <Textarea
+                        value={medicationsInput}
+                        onChange={(e) => setMedicationsInput(e.target.value)}
+                        placeholder="e.g., Insulin, Blood pressure medication (separate with commas)"
+                        className="mt-2 text-sm"
+                        rows={2}
                       />
                     ) : (
-                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.emergencyContact?.name || 'Not provided'}</p>
+                      <div className="flex flex-wrap gap-1 sm:gap-2 mt-2">
+                        {patientProfile.medications?.length ? (
+                          patientProfile.medications.map((m, i) => (
+                            <Badge key={i} className="bg-purple-50 text-purple-700 text-xs sm:text-sm">{m}</Badge>
+                          ))
+                        ) : (
+                          <p className="text-gray-500 text-sm">None reported</p>
+                        )}
+                      </div>
                     )}
                   </div>
-                  
-                  <div>
-                    <Label className="text-gray-500 text-sm">Relationship</Label>
-                    {isEditingProfile ? (
-                      <Select
-                        value={editedProfile.emergencyContact?.relationship || ''}
-                        onValueChange={(value) => setEditedProfile({
-                          ...editedProfile,
-                          emergencyContact: { 
-                            ...editedProfile.emergencyContact, 
-                            relationship: value, 
-                            name: editedProfile.emergencyContact?.name || '', 
-                            phone: editedProfile.emergencyContact?.phone || '' 
-                          }
-                        })}
-                      >
-                        <SelectTrigger className="mt-1">
-                          <SelectValue placeholder="Select relationship" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Spouse">Spouse</SelectItem>
-                          <SelectItem value="Parent">Parent</SelectItem>
-                          <SelectItem value="Child">Child</SelectItem>
-                          <SelectItem value="Sibling">Sibling</SelectItem>
-                          <SelectItem value="Partner">Partner</SelectItem>
-                          <SelectItem value="Friend">Friend</SelectItem>
-                          <SelectItem value="Other">Other</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.emergencyContact?.relationship || 'Not provided'}</p>
-                    )}
-                  </div>
-                  
-                  <div>
-                    <Label className="text-gray-500 text-sm">Contact Number</Label>
-                    {isEditingProfile ? (
-                      <Input
-                        type="tel"
-                        value={editedProfile.emergencyContact?.phone || ''}
-                        onChange={(e) => setEditedProfile({
-                          ...editedProfile,
-                          emergencyContact: { 
-                            ...editedProfile.emergencyContact, 
-                            phone: e.target.value, 
-                            name: editedProfile.emergencyContact?.name || '', 
-                            relationship: editedProfile.emergencyContact?.relationship || '' 
-                          }
-                        })}
-                        className="mt-1"
-                      />
-                    ) : (
-                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.emergencyContact?.phone || 'Not provided'}</p>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Medical Aid */}
-            <Card className="border-0 shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-base sm:text-lg font-semibold text-gray-900 flex items-center gap-2">
-                  <Building2 className="w-5 h-5 text-green-500" />
-                  Medical Aid
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-                  <div>
-                    <Label className="text-gray-500 text-sm">Provider</Label>
-                    {isEditingProfile ? (
-                      <Select
-                        value={editedProfile.medicalAidProvider || ''}
-                        onValueChange={(value) => setEditedProfile({ ...editedProfile, medicalAidProvider: value })}
-                      >
-                        <SelectTrigger className="mt-1">
-                          <SelectValue placeholder="Select provider" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Discovery Health">Discovery Health</SelectItem>
-                          <SelectItem value="Momentum Health">Momentum Health</SelectItem>
-                          <SelectItem value="Bonitas">Bonitas</SelectItem>
-                          <SelectItem value="Fedhealth">Fedhealth</SelectItem>
-                          <SelectItem value="Medshield">Medshield</SelectItem>
-                          <SelectItem value="Bestmed">Bestmed</SelectItem>
-                          <SelectItem value="Sizwe">Sizwe</SelectItem>
-                          <SelectItem value="GEMS">GEMS</SelectItem>
-                          <SelectItem value="Polmed">Polmed</SelectItem>
-                          <SelectItem value="Other">Other</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.medicalAidProvider || 'None'}</p>
-                    )}
-                  </div>
-                  
-                  <div>
-                    <Label className="text-gray-500 text-sm">Membership Number</Label>
-                    {isEditingProfile ? (
-                      <Input
-                        value={editedProfile.medicalAidNumber || ''}
-                        onChange={(e) => setEditedProfile({ ...editedProfile, medicalAidNumber: e.target.value })}
-                        className="mt-1"
-                      />
-                    ) : (
-                      <p className="font-medium text-gray-900 mt-1 truncate">{patientProfile.medicalAidNumber || 'Not provided'}</p>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Medical Information */}
-            <Card className="border-0 shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-base sm:text-lg font-semibold text-gray-900 flex items-center gap-2">
-                  <Pill className="w-5 h-5 text-purple-500" />
-                  Medical Information
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div>
-                  <Label className="text-gray-500 text-sm flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 text-red-500" />
-                    Allergies
-                  </Label>
-                  {isEditingProfile ? (
-                    <Textarea
-                      value={allergiesInput}
-                      onChange={(e) => setAllergiesInput(e.target.value)}
-                      placeholder="e.g., Penicillin, Peanuts, Latex (separate with commas)"
-                      className="mt-2"
-                      rows={2}
-                    />
-                  ) : (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {patientProfile.allergies?.length ? (
-                        patientProfile.allergies.map((a, i) => (
-                          <Badge key={i} className="bg-red-50 text-red-700">{a}</Badge>
-                        ))
-                      ) : (
-                        <p className="text-gray-500">None reported</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-                
-                <div>
-                  <Label className="text-gray-500 text-sm flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-orange-500" />
-                    Chronic Conditions
-                  </Label>
-                  {isEditingProfile ? (
-                    <Textarea
-                      value={conditionsInput}
-                      onChange={(e) => setConditionsInput(e.target.value)}
-                      placeholder="e.g., Diabetes, Hypertension, Asthma (separate with commas)"
-                      className="mt-2"
-                      rows={2}
-                    />
-                  ) : (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {patientProfile.chronicConditions?.length ? (
-                        patientProfile.chronicConditions.map((c, i) => (
-                          <Badge key={i} className="bg-orange-50 text-orange-700">{c}</Badge>
-                        ))
-                      ) : (
-                        <p className="text-gray-500">None reported</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-                
-                <div>
-                  <Label className="text-gray-500 text-sm flex items-center gap-2">
-                    <Pill className="w-4 h-4 text-purple-500" />
-                    Current Medications
-                  </Label>
-                  {isEditingProfile ? (
-                    <Textarea
-                      value={medicationsInput}
-                      onChange={(e) => setMedicationsInput(e.target.value)}
-                      placeholder="e.g., Insulin, Blood pressure medication (separate with commas)"
-                      className="mt-2"
-                      rows={2}
-                    />
-                  ) : (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {patientProfile.medications?.length ? (
-                        patientProfile.medications.map((m, i) => (
-                          <Badge key={i} className="bg-purple-50 text-purple-700">{m}</Badge>
-                        ))
-                      ) : (
-                        <p className="text-gray-500">None reported</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
