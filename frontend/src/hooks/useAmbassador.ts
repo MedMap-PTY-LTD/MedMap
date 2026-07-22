@@ -1,7 +1,7 @@
 // hooks/useAmbassador.ts
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AmbassadorService } from '@/lib/services/ambassadorService';
-import { AmbassadorStatsCalculator } from '@/lib/services/ambassadorStats';
+import { AmbassadorStatsCalculator } from '@/lib/utils/ambassadorStats';
 import { AmbassadorData, ReferralDoctor, AmbassadorStats } from '@/lib/types/ambassador';
 
 // Query keys for cache management
