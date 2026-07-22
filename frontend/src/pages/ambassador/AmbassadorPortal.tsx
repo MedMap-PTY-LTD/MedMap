@@ -770,7 +770,7 @@ const OnboardingPendingScreen = ({
         activeTab="overview"
         onTabChange={() => {}}
       />
-      <div className="lg:ml-20 flex items-center justify-center p-4 pt-8">
+      <div className="lg:ml-64 flex items-center justify-center p-4 pt-8">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
             <div className="mx-auto w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mb-4">
@@ -1030,7 +1030,7 @@ const AmbassadorPortal = () => {
           activeTab={activeTab}
           onTabChange={handleTabChange}
         />
-        <div className="flex items-center justify-center p-4 pt-8 lg:ml-20">
+        <div className="flex items-center justify-center p-4 pt-8 lg:ml-64">
           <Card className="max-w-md w-full">
             <CardHeader className="text-center">
               <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
@@ -1085,7 +1085,7 @@ const AmbassadorPortal = () => {
           activeTab={activeTab}
           onTabChange={handleTabChange}
         />
-        <div className="lg:ml-20">
+        <div className="lg:ml-64">
           <TrainingModule />
         </div>
       </div>
@@ -1113,7 +1113,7 @@ const AmbassadorPortal = () => {
             activeTab={activeTab}
             onTabChange={handleTabChange}
           />
-          <div className="flex items-center justify-center p-4 pt-8 lg:ml-20">
+          <div className="flex items-center justify-center p-4 pt-8 lg:ml-64">
             <Card className="max-w-md w-full">
               <CardHeader className="text-center">
                 <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
@@ -1151,7 +1151,7 @@ const AmbassadorPortal = () => {
             activeTab={activeTab}
             onTabChange={handleTabChange}
           />
-          <div className="lg:ml-20">
+          <div className="lg:ml-64">
             <KnowledgeTest />
           </div>
         </div>
@@ -1194,7 +1194,7 @@ const AmbassadorPortal = () => {
           activeTab={activeTab}
           onTabChange={handleTabChange}
         />
-        <div className="flex items-center justify-center p-4 pt-8 lg:ml-20">
+        <div className="flex items-center justify-center p-4 pt-8 lg:ml-64">
           <Card className="max-w-md w-full">
             <CardHeader className="text-center">
               <div className="mx-auto w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4">
@@ -1233,7 +1233,7 @@ const AmbassadorPortal = () => {
           activeTab={activeTab}
           onTabChange={handleTabChange}
         />
-        <div className="flex items-center justify-center p-4 pt-8 lg:ml-20">
+        <div className="flex items-center justify-center p-4 pt-8 lg:ml-64">
           <Card className="max-w-md w-full">
             <CardHeader className="text-center">
               <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
@@ -1384,7 +1384,7 @@ const AmbassadorPortal = () => {
         />
 
         {/* Main Content */}
-        <div className="lg:ml-20 transition-all duration-300">
+        <div className="lg:ml-64 transition-all duration-300">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 lg:py-8">
             {/* Welcome Message */}
             <div className="mb-6 hidden lg:block">
