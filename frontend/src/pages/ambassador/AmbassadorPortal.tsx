@@ -651,7 +651,7 @@ const ProfileTab = ({ profile, ambassadorData }: any) => {
           <div>
             <p className="text-sm text-gray-500">Current Tier</p>
             <Badge className="bg-purple-100 text-purple-800">
-              {ambassadorData?.tier || 'Bronze'}
+              {ambassadorData?.currentTier || 'Bronze'}
             </Badge>
           </div>
           <div>
@@ -761,7 +761,16 @@ const OnboardingPendingScreen = ({
         onMenuClick={() => {}} 
         showReferralCode={false}
       />
-      <div className="flex items-center justify-center p-4 pt-8">
+      {/* ✅ Sidebar for onboarding too */}
+      <Sidebar
+        isOpen={false}
+        onClose={() => {}}
+        onLogout={onLogout || (() => {})}
+        userProfile={{}}
+        activeTab="overview"
+        onTabChange={() => {}}
+      />
+      <div className="lg:ml-20 flex items-center justify-center p-4 pt-8">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
             <div className="mx-auto w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mb-4">
@@ -1266,7 +1275,9 @@ const AmbassadorPortal = () => {
   }
 
   // ==================== STEP 5: APPROVED - DASHBOARD ====================
-  if (step === 5 && applicationStatus === 'approved') {
+  // ✅ FIX: Show dashboard if step is 5 OR applicationStatus is 'approved'
+  // This handles ambassadors who were verified before the new UI
+  if (step === 5 || applicationStatus === 'approved') {
     const tierDisplay = getTierDisplay(stats?.currentTier || 'bronze');
     const safeReferrals = Array.isArray(referrals) ? referrals : [];
     
