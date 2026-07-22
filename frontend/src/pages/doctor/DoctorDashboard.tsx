@@ -423,6 +423,7 @@ const DoctorDashboard = () => {
 
   // ==================== REDIRECTS ====================
   useEffect(() => {
+    // Only redirect if profile is loaded and role is not doctor
     if (profile && profile.role !== 'doctor') {
       navigate('/dashboard');
       return;
