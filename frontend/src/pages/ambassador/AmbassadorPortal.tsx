@@ -39,6 +39,21 @@ import KnowledgeTest from './KnowledgeTest';
 
 // ==================== SUB-COMPONENTS ====================
 
+// ✅ NEW: Floating Logout Button - Shows on EVERY screen
+const FloatingLogout = ({ onLogout }: { onLogout: () => void }) => {
+  return (
+    <div className="fixed bottom-6 right-6 z-50">
+      <Button
+        onClick={onLogout}
+        className="bg-red-600 hover:bg-red-700 text-white shadow-lg rounded-full px-6 py-3 flex items-center gap-2 transition-all duration-200 hover:scale-105"
+      >
+        <LogOut className="w-5 h-5" />
+        <span className="font-medium">Sign Out</span>
+      </Button>
+    </div>
+  );
+};
+
 // ✅ NEW: Reusable Top Navigation Bar
 const TopNav = ({ 
   title, 
@@ -72,7 +87,7 @@ const TopNav = ({
               Home
             </Button>
             
-            {/* Refresh Button - only if onRefresh provided */}
+            {/* Refresh Button */}
             {onRefresh && (
               <Button 
                 variant="ghost" 
@@ -86,7 +101,7 @@ const TopNav = ({
               </Button>
             )}
             
-            {/* Referral Code - only if showReferralCode is true */}
+            {/* Referral Code */}
             {showReferralCode && referralCode && (
               <div className="bg-white/20 rounded-lg px-4 py-2 text-center hidden sm:block">
                 <p className="text-xs text-purple-200">Your Referral Code</p>
@@ -99,15 +114,15 @@ const TopNav = ({
               </div>
             )}
             
-            {/* Logout Button */}
+            {/* Logout Button in Header */}
             <Button 
-              variant="ghost" 
+              variant="outline" 
               size="sm" 
-              className="text-white hover:bg-red-500/20"
+              className="border-white/30 text-white hover:bg-red-500 hover:border-red-500 hover:text-white transition-all duration-200"
               onClick={onLogout}
             >
               <LogOut className="w-4 h-4 mr-2" />
-              Logout
+              Sign Out
             </Button>
           </div>
         </div>
@@ -520,6 +535,8 @@ const OnboardingPendingScreen = ({
         onLogout={onLogout}
         showReferralCode={false}
       />
+      {/* ✅ FLOATING LOGOUT - Also shows here */}
+      <FloatingLogout onLogout={onLogout} />
       <div className="flex items-center justify-center p-4 pt-8">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
@@ -757,6 +774,8 @@ const AmbassadorPortal = () => {
           onLogout={handleLogout}
           showReferralCode={false}
         />
+        {/* ✅ FLOATING LOGOUT */}
+        <FloatingLogout onLogout={handleLogout} />
         <div className="flex items-center justify-center p-4 pt-8">
           <Card className="max-w-md w-full">
             <CardHeader className="text-center">
@@ -785,14 +804,9 @@ const AmbassadorPortal = () => {
               <p className="text-sm text-gray-600">
                 Please use this time to prepare. You will receive an email notification when you can retake the assessment.
               </p>
-              <div className="flex flex-col gap-2">
-                <Button variant="outline" onClick={handleGoHome} className="w-full">
-                  Return to Home
-                </Button>
-                <Button variant="ghost" onClick={handleLogout} className="w-full text-red-600 hover:text-red-700 hover:bg-red-50">
-                  <LogOut className="w-4 h-4 mr-2" /> Logout
-                </Button>
-              </div>
+              <Button variant="outline" onClick={handleGoHome} className="w-full">
+                Return to Home
+              </Button>
             </CardContent>
           </Card>
         </div>
@@ -802,7 +816,6 @@ const AmbassadorPortal = () => {
 
   // ==================== STEP 2: TRAINING MODULE ====================
   if (step === 2 && psychometricPassed === true && !trainingCompleted) {
-    // TrainingModule will have its own UI, but we wrap it with the nav
     return (
       <div className="min-h-screen bg-gray-50">
         <TopNav 
@@ -811,6 +824,8 @@ const AmbassadorPortal = () => {
           onLogout={handleLogout}
           showReferralCode={false}
         />
+        {/* ✅ FLOATING LOGOUT */}
+        <FloatingLogout onLogout={handleLogout} />
         <div className="pt-4">
           <TrainingModule />
         </div>
@@ -832,6 +847,8 @@ const AmbassadorPortal = () => {
             onLogout={handleLogout}
             showReferralCode={false}
           />
+          {/* ✅ FLOATING LOGOUT */}
+          <FloatingLogout onLogout={handleLogout} />
           <div className="flex items-center justify-center p-4 pt-8">
             <Card className="max-w-md w-full">
               <CardHeader className="text-center">
@@ -846,21 +863,15 @@ const AmbassadorPortal = () => {
                   You have completed all {maxAttempts} attempts for the knowledge test. 
                   Your application has been reviewed.
                 </p>
-                <div className="flex flex-col gap-2">
-                  <Button variant="outline" onClick={handleGoHome} className="w-full">
-                    Return to Home
-                  </Button>
-                  <Button variant="ghost" onClick={handleLogout} className="w-full text-red-600 hover:text-red-700 hover:bg-red-50">
-                    <LogOut className="w-4 h-4 mr-2" /> Logout
-                  </Button>
-                </div>
+                <Button variant="outline" onClick={handleGoHome} className="w-full">
+                  Return to Home
+                </Button>
               </CardContent>
             </Card>
           </div>
         </div>
       );
     } else {
-      // KnowledgeTest will have its own UI
       return (
         <div className="min-h-screen bg-gray-50">
           <TopNav 
@@ -869,6 +880,8 @@ const AmbassadorPortal = () => {
             onLogout={handleLogout}
             showReferralCode={false}
           />
+          {/* ✅ FLOATING LOGOUT */}
+          <FloatingLogout onLogout={handleLogout} />
           <div className="pt-4">
             <KnowledgeTest />
           </div>
@@ -905,6 +918,8 @@ const AmbassadorPortal = () => {
           onLogout={handleLogout}
           showReferralCode={false}
         />
+        {/* ✅ FLOATING LOGOUT */}
+        <FloatingLogout onLogout={handleLogout} />
         <div className="flex items-center justify-center p-4 pt-8">
           <Card className="max-w-md w-full">
             <CardHeader className="text-center">
@@ -918,14 +933,9 @@ const AmbassadorPortal = () => {
               <p className="text-gray-600">
                 You will receive an email with the interview details and link. Please check your inbox.
               </p>
-              <div className="flex flex-col gap-2">
-                <Button variant="outline" onClick={handleGoHome} className="w-full">
-                  Return to Home
-                </Button>
-                <Button variant="ghost" onClick={handleLogout} className="w-full text-red-600 hover:text-red-700 hover:bg-red-50">
-                  <LogOut className="w-4 h-4 mr-2" /> Logout
-                </Button>
-              </div>
+              <Button variant="outline" onClick={handleGoHome} className="w-full">
+                Return to Home
+              </Button>
             </CardContent>
           </Card>
         </div>
@@ -942,6 +952,8 @@ const AmbassadorPortal = () => {
           onLogout={handleLogout}
           showReferralCode={false}
         />
+        {/* ✅ FLOATING LOGOUT */}
+        <FloatingLogout onLogout={handleLogout} />
         <div className="flex items-center justify-center p-4 pt-8">
           <Card className="max-w-md w-full">
             <CardHeader className="text-center">
@@ -955,14 +967,9 @@ const AmbassadorPortal = () => {
               <p className="text-gray-600">
                 While your application showed promise, we have decided to move forward with other candidates at this time.
               </p>
-              <div className="flex flex-col gap-2">
-                <Button variant="outline" onClick={handleGoHome} className="w-full">
-                  Return to Home
-                </Button>
-                <Button variant="ghost" onClick={handleLogout} className="w-full text-red-600 hover:text-red-700 hover:bg-red-50">
-                  <LogOut className="w-4 h-4 mr-2" /> Logout
-                </Button>
-              </div>
+              <Button variant="outline" onClick={handleGoHome} className="w-full">
+                Return to Home
+              </Button>
             </CardContent>
           </Card>
         </div>
@@ -1019,6 +1026,9 @@ const AmbassadorPortal = () => {
           isRefetching={isRefetching}
           showReferralCode={true}
         />
+
+        {/* ✅ FLOATING LOGOUT - Shows on dashboard too */}
+        <FloatingLogout onLogout={handleLogout} />
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Welcome Message */}
@@ -1135,11 +1145,8 @@ const AmbassadorPortal = () => {
         <div className="mt-8 flex justify-center">
           <Loader2 className="w-8 h-8 text-purple-600 animate-spin" />
         </div>
-        <div className="mt-4">
-          <Button variant="ghost" onClick={handleLogout} className="text-red-600 hover:text-red-700 hover:bg-red-50">
-            <LogOut className="w-4 h-4 mr-2" /> Logout
-          </Button>
-        </div>
+        {/* ✅ FLOATING LOGOUT - Shows on fallback too */}
+        <FloatingLogout onLogout={handleLogout} />
       </div>
     </div>
   );
