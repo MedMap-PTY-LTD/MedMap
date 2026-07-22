@@ -10,6 +10,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { LoadingSpinner } from "./components/LoadingSpinner";
 import { HelpWidget } from "./components/HelpWidget";
 import InitialAdminSetup from './pages/InitialAdminSetup';
+import RoleBasedDashboard from "./pages/RoleBasedDashboard";
 
 // ==================== QUERY CLIENT ====================
 const queryClient = new QueryClient({
@@ -71,7 +72,6 @@ const AmbassadorPortal = lazy(() => import("./pages/ambassador/AmbassadorPortal"
 const PsychometricTest = lazy(() => import("./pages/ambassador/PsychometricTest"));
 
 // ==================== LOADING SPINNER COMPONENT ====================
-// If you don't have LoadingSpinner yet, use this inline component
 const PageLoader = () => (
   <div className="flex items-center justify-center min-h-screen bg-gray-50">
     <div className="flex flex-col items-center gap-4">
@@ -90,6 +90,11 @@ const ProtectedRoute = () => {
   }
 
   if (!user) {
+    return <Navigate to="/signin" replace />;
+  }
+
+  // If user has no profile, redirect to signin
+  if (!profile) {
     return <Navigate to="/signin" replace />;
   }
 
@@ -154,7 +159,8 @@ const App = () => {
                     <Route path="/practice-management" element={<PracticeManagement />} />
                     
                     {/* Patient Routes */}
-                    <Route path="/dashboard" element={<PatientDashboard />} />
+                    <Route path="/patient" element={<PatientDashboard />} />
+                    <Route path="/dashboard" element={<RoleBasedDashboard />} />
                     <Route path="/book/:doctorId" element={<BookAppointment />} />
                     <Route path="/bookings" element={<BookingHistory />} />
                     <Route path="/booking-history" element={<BookingHistory />} />
