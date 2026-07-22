@@ -962,7 +962,7 @@ const DoctorDashboard = () => {
         </div>
       </div>
 
-      {/* Edit Profile Dialog - Same as before but using mutations */}
+      {/* Edit Profile Dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
