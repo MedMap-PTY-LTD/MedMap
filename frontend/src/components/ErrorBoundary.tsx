@@ -1,130 +1,93 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+// frontend/src/components/ErrorBoundary.tsx
+import React from 'react';
+import { captureSentryError } from '@/integrations/sentry';
 import { Button } from '@/components/ui/button';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 
-interface Props {
-  children: ReactNode;
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+  fallback?: React.ReactNode;
+  onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
 }
 
-interface State {
+interface ErrorBoundaryState {
   hasError: boolean;
-  error?: Error;
-  errorInfo?: ErrorInfo;
+  error: Error | null;
 }
 
-export class ErrorBoundary extends Component<Props, State> {
-  constructor(props: Props) {
+export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, error: null };
   }
 
-  public static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
-    this.setState({
-      error,
-      errorInfo,
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Send to Sentry using our helper
+    captureSentryError(error, {
+      componentStack: errorInfo.componentStack,
+      ...errorInfo,
     });
+
+    // Call custom error handler if provided
+    if (this.props.onError) {
+      this.props.onError(error, errorInfo);
+    }
+
+    // Log to console for debugging
+    console.error('💥 Error caught by ErrorBoundary:', error);
+    console.error('Component stack:', errorInfo.componentStack);
   }
 
-  private handleReload = () => {
+  handleReset = () => {
+    this.setState({ hasError: false, error: null });
     window.location.reload();
   };
 
-  private handleGoHome = () => {
-    window.location.href = '/';
-  };
-
-  private handleRetry = () => {
-    this.setState({ hasError: false, error: undefined, errorInfo: undefined });
-  };
-
-  public render() {
+  render() {
     if (this.state.hasError) {
+      if (this.props.fallback) {
+        return this.props.fallback;
+      }
+
       return (
-        <div className="min-h-screen bg-background flex items-center justify-center p-4">
-          <Card className="w-full max-w-2xl medical-card">
-            <CardHeader className="text-center">
-              <div className="w-16 h-16 mx-auto mb-4 bg-destructive/10 rounded-full flex items-center justify-center">
-                <AlertTriangle className="h-8 w-8 text-destructive" />
-              </div>
-              <CardTitle className="text-2xl text-medical-gradient">
-                Oops! Something went wrong
-              </CardTitle>
-            </CardHeader>
-            
-            <CardContent className="space-y-6">
-              <Alert variant="destructive">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertDescription>
-                  We encountered an unexpected error. Our team has been notified and is working to fix this issue.
-                </AlertDescription>
-              </Alert>
-
-              {process.env.NODE_ENV === 'development' && this.state.error && (
-                <details className="bg-muted/50 p-4 rounded-lg">
-                  <summary className="cursor-pointer font-medium text-sm mb-2">
-                    Error Details (Development Only)
-                  </summary>
-                  <div className="text-xs space-y-2">
-                    <div>
-                      <strong>Error:</strong>
-                      <pre className="mt-1 overflow-x-auto">{this.state.error.message}</pre>
-                    </div>
-                    <div>
-                      <strong>Stack:</strong>
-                      <pre className="mt-1 overflow-x-auto text-xs">{this.state.error.stack}</pre>
-                    </div>
-                    {this.state.errorInfo && (
-                      <div>
-                        <strong>Component Stack:</strong>
-                        <pre className="mt-1 overflow-x-auto text-xs">{this.state.errorInfo.componentStack}</pre>
-                      </div>
-                    )}
-                  </div>
-                </details>
-              )}
-
-              <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                <Button 
-                  onClick={this.handleRetry}
-                  className="btn-medical-primary"
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Try Again
-                </Button>
-                
-                <Button 
-                  onClick={this.handleReload}
-                  variant="outline"
-                  className="btn-medical-secondary"
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Reload Page
-                </Button>
-                
-                <Button 
-                  onClick={this.handleGoHome}
-                  variant="outline"
-                  className="btn-medical-secondary"
-                >
-                  <Home className="h-4 w-4 mr-2" />
-                  Go Home
-                </Button>
-              </div>
-
-              <div className="text-center">
-                <p className="text-sm text-muted-foreground">
-                  If this problem persists, please contact our support team.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+          <div className="max-w-md w-full text-center">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <AlertCircle className="w-8 h-8 text-red-600" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">
+              Something went wrong
+            </h2>
+            <p className="text-gray-600 text-sm mb-4">
+              We've been notified about this issue and will fix it as soon as possible.
+            </p>
+            {this.state.error && import.meta.env.DEV && (
+              <details className="text-left text-xs text-gray-500 bg-gray-100 p-3 rounded-lg mb-4">
+                <summary>Error Details (Development Only)</summary>
+                <pre className="mt-2 whitespace-pre-wrap break-all">
+                  {this.state.error.message}
+                  {'\n\n'}
+                  {this.state.error.stack}
+                </pre>
+              </details>
+            )}
+            <div className="flex flex-col sm:flex-row gap-2 justify-center">
+              <Button onClick={this.handleReset} className="gap-2">
+                <RefreshCw className="w-4 h-4" />
+                Try Again
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => window.location.href = '/'}
+              >
+                Go Home
+              </Button>
+            </div>
+          </div>
         </div>
       );
     }

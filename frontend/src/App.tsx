@@ -36,7 +36,7 @@ const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
 const PAIAManual = lazy(() => import("./pages/PAIAManual"));
 const DoctorEnrollment = lazy(() => import("./pages/doctor/DoctorEnrollmentForm"));
 const AmbassadorProgramme = lazy(() => import("./pages/AmbassadorProgramme"));
-const DoctorSearch = lazy(() => import("./pages/DoctorSearch"));
+const DoctorSearch = lazy(() => import("./pages/doctor/components/DoctorSearch"));
 const DoctorProfile = lazy(() => import("./pages/DoctorProfile"));
 const BookAppointment = lazy(() => import("./pages/BookAppointment"));
 const Telemedicine = lazy(() => import("./pages/Telemedicine"));

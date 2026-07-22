@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import Header from '@/components/Header';
 import HeroSection from '@/components/HeroSection';
-import DoctorCard from '@/components/DoctorCard';
+import DoctorCard from '@/pages/doctor/components/DoctorCard';
 import { useNavigate, Link } from 'react-router-dom';
 import Footer from '@/components/Footer';
 

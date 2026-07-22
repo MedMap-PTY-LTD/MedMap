@@ -22,9 +22,10 @@ import {
   Stethoscope,
   Save,
   X,
-  RefreshCw
+  RefreshCw,
+  Activity
 } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -34,6 +35,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { DoctorCalendar } from './DoctorCalendar';
 import {
   BarChart,
   Bar,
@@ -110,7 +112,6 @@ const fetchDoctorProfile = async (uid: string): Promise<DoctorProfile | null> =>
 
     const doctorData = doctorSnap.data();
     
-    // Get user data
     const userRef = doc(db, 'users', uid);
     const userSnap = await getDoc(userRef);
     const userData = userSnap.exists() ? userSnap.data() : {};
@@ -167,7 +168,6 @@ const fetchDoctorBookings = async (doctorId: string): Promise<BookingData[]> => 
     for (const docSnap of bookingsSnap.docs) {
       const data = docSnap.data();
       
-      // Get patient info
       let patientName = 'Unknown Patient';
       
       if (data.patientId) {
@@ -210,13 +210,13 @@ const DoctorDashboard = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
+  const [activeTab, setActiveTab] = useState('overview');
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<any>({});
 
   // ==================== QUERIES ====================
   
-  // Doctor Profile Query
   const {
     data: doctor,
     isLoading: isLoadingProfile,
@@ -227,14 +227,13 @@ const DoctorDashboard = () => {
     queryKey: [QUERY_KEYS.doctorProfile, user?.uid],
     queryFn: () => fetchDoctorProfile(user!.uid),
     enabled: !!user && profile?.role === 'doctor',
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     retry: 2,
   });
 
-  // Doctor Bookings Query
   const {
     data: bookings = [],
     isLoading: isLoadingBookings,
@@ -243,11 +242,11 @@ const DoctorDashboard = () => {
     queryKey: [QUERY_KEYS.doctorBookings, doctor?.uid],
     queryFn: () => fetchDoctorBookings(doctor!.uid),
     enabled: !!doctor && doctor.enrollmentCompleted,
-    staleTime: 2 * 60 * 1000, // 2 minutes
-    gcTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 2 * 60 * 1000,
+    gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
-    refetchInterval: 30 * 1000, // Auto-refresh every 30 seconds
+    refetchInterval: 30 * 1000,
   });
 
   // ==================== DERIVED DATA ====================
@@ -269,7 +268,6 @@ const DoctorDashboard = () => {
     totalPatients: new Set(bookings.map(b => b.patientId)).size,
   };
 
-  // Analytics Data
   const statusCounts = bookings.reduce((acc: any, curr) => {
     acc[curr.status] = (acc[curr.status] || 0) + 1;
     return acc;
@@ -279,7 +277,8 @@ const DoctorDashboard = () => {
     pending: '#F59E0B',
     confirmed: '#10B981',
     completed: '#3B82F6',
-    cancelled: '#EF4444'
+    cancelled: '#EF4444',
+    'no-show': '#6B7280'
   };
 
   const bookingStatusData = Object.keys(statusCounts).map(status => ({
@@ -290,7 +289,6 @@ const DoctorDashboard = () => {
 
   // ==================== MUTATIONS ====================
   
-  // Update Booking Status Mutation
   const updateBookingStatusMutation = useMutation({
     mutationFn: async ({ bookingId, status }: { bookingId: string; status: string }) => {
       const bookingRef = doc(db, 'bookings', bookingId);
@@ -306,7 +304,6 @@ const DoctorDashboard = () => {
           ? 'The appointment has been confirmed.' 
           : 'The appointment has been cancelled.',
       });
-      // Invalidate and refetch bookings
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.doctorBookings] });
     },
     onError: (error: any) => {
@@ -318,7 +315,6 @@ const DoctorDashboard = () => {
     },
   });
 
-  // Update Doctor Profile Mutation
   const updateDoctorProfileMutation = useMutation({
     mutationFn: async (formData: any) => {
       if (!user) throw new Error('User not authenticated');
@@ -326,7 +322,6 @@ const DoctorDashboard = () => {
       const doctorRef = doc(db, 'doctors', user.uid);
       const userRef = doc(db, 'users', user.uid);
       
-      // Update doctor profile
       const doctorUpdateData = {
         practiceName: formData.practiceName,
         practiceAddress: formData.practiceAddress,
@@ -345,7 +340,6 @@ const DoctorDashboard = () => {
       
       await updateDoc(doctorRef, doctorUpdateData);
       
-      // Update user profile
       await updateDoc(userRef, {
         firstName: formData.firstName,
         lastName: formData.lastName,
@@ -359,7 +353,6 @@ const DoctorDashboard = () => {
         description: 'Your profile has been updated successfully.',
       });
       setEditOpen(false);
-      // Invalidate and refetch profile
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.doctorProfile] });
     },
     onError: (error: any) => {
@@ -417,25 +410,24 @@ const DoctorDashboard = () => {
       confirmed: 'bg-blue-100 text-blue-800',
       completed: 'bg-green-100 text-green-800',
       cancelled: 'bg-red-100 text-red-800',
+      'no-show': 'bg-gray-100 text-gray-800',
+      rescheduled: 'bg-purple-100 text-purple-800',
     };
     return variants[status] || 'bg-gray-100 text-gray-800';
   };
 
   // ==================== REDIRECTS ====================
   useEffect(() => {
-    // Only redirect if profile is loaded and role is not doctor
     if (profile && profile.role !== 'doctor') {
       navigate('/dashboard');
       return;
     }
     
-    // If doctor profile exists but enrollment is not completed, redirect to enrollment
     if (doctor && !doctor.enrollmentCompleted) {
       navigate('/doctor-enrollment');
     }
   }, [profile, doctor, navigate]);
 
-  // Set edit form when doctor data loads
   useEffect(() => {
     if (doctor) {
       setEditForm(doctor);
@@ -667,10 +659,18 @@ const DoctorDashboard = () => {
 
         {/* Main Content */}
         <div className="mt-8">
-          <Tabs defaultValue="appointments" className="space-y-6">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
             <TabsList className="flex flex-wrap gap-1">
-              <TabsTrigger value="appointments" className="flex items-center gap-2">
+              <TabsTrigger value="overview" className="flex items-center gap-2">
+                <Activity className="w-4 h-4" />
+                Overview
+              </TabsTrigger>
+              <TabsTrigger value="calendar" className="flex items-center gap-2">
                 <Calendar className="w-4 h-4" />
+                Calendar
+              </TabsTrigger>
+              <TabsTrigger value="appointments" className="flex items-center gap-2">
+                <Clock className="w-4 h-4" />
                 Appointments
               </TabsTrigger>
               <TabsTrigger value="profile" className="flex items-center gap-2">
@@ -683,8 +683,8 @@ const DoctorDashboard = () => {
               </TabsTrigger>
             </TabsList>
 
-            {/* Appointments Tab */}
-            <TabsContent value="appointments">
+            {/* Overview Tab */}
+            <TabsContent value="overview">
               <div className="grid md:grid-cols-2 gap-6">
                 <Card>
                   <CardHeader>
@@ -788,6 +788,52 @@ const DoctorDashboard = () => {
               </div>
             </TabsContent>
 
+            {/* Calendar Tab */}
+            <TabsContent value="calendar">
+              <DoctorCalendar 
+                doctorId={doctor.uid} 
+                consultationDuration={doctor.consultationDuration || 30}
+              />
+            </TabsContent>
+
+            {/* Appointments Tab */}
+            <TabsContent value="appointments">
+              <Card>
+                <CardHeader>
+                  <CardTitle>All Appointments</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {bookings.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                      <p>No appointments yet</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {bookings.map((booking) => (
+                        <div key={booking.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-gray-50 rounded-lg gap-2">
+                          <div>
+                            <p className="font-medium text-gray-900">{booking.patientName}</p>
+                            <p className="text-sm text-gray-600">
+                              {formatDate(booking.appointmentDate)} at {booking.appointmentTime}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge className={getStatusBadge(booking.status)}>
+                              {booking.status}
+                            </Badge>
+                            <span className="text-sm font-medium text-gray-700">
+                              {formatCurrency(booking.consultationFee)}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
             {/* Profile Tab */}
             <TabsContent value="profile">
               <Card>
@@ -833,6 +879,10 @@ const DoctorDashboard = () => {
                       <div>
                         <h3 className="text-sm font-medium text-gray-500">Consultation Fee</h3>
                         <p className="text-lg font-semibold text-gray-900">{formatCurrency(doctor.consultationFee)}</p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">Consultation Duration</h3>
+                        <p className="text-lg font-semibold text-gray-900">{doctor.consultationDuration || 30} minutes</p>
                       </div>
                     </div>
                     <div className="space-y-4">

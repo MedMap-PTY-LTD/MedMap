@@ -24,7 +24,7 @@ import {
   updateDoc, 
   query, 
   where, 
-  orderBy,
+  orderBy, 
   limit,
   Timestamp,
   serverTimestamp,
@@ -32,7 +32,9 @@ import {
   persistentLocalCache,
   initializeFirestore,
   CACHE_SIZE_UNLIMITED,
-  deleteDoc
+  deleteDoc,
+  runTransaction,
+  onSnapshot
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
@@ -69,7 +71,6 @@ if (validateConfig()) {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     auth = getAuth(app);
     
-    // Use the new persistentLocalCache API instead of deprecated enableIndexedDbPersistence
     db = initializeFirestore(app, {
       localCache: persistentLocalCache({
         cacheSizeBytes: CACHE_SIZE_UNLIMITED
@@ -89,9 +90,10 @@ if (validateConfig()) {
   storage = {} as any;
 }
 
-export { auth, db, storage };
+export { auth, db, storage, app };
 
-// Types
+// ==================== USER TYPES ====================
+
 export interface UserProfile {
   uid: string;
   email: string;
@@ -115,11 +117,50 @@ export interface DoctorProfile extends UserProfile {
   practiceName?: string;
   practiceAddress?: string;
   consultationFee?: number;
+  consultationDuration?: number;
   verificationStatus: 'pending' | 'verified' | 'rejected';
   verifiedAt?: Timestamp;
   rejectionReason?: string;
   referralCodeUsed?: string;
   referredBy?: string;
+  bio?: string;
+  qualifications?: string[];
+  operatingHours?: OperatingHours;
+  rating?: number;
+  reviewCount?: number;
+}
+
+export interface OperatingHours {
+  monday?: DayHours;
+  tuesday?: DayHours;
+  wednesday?: DayHours;
+  thursday?: DayHours;
+  friday?: DayHours;
+  saturday?: DayHours;
+  sunday?: DayHours;
+}
+
+export interface DayHours {
+  isOpen: boolean;
+  startTime: string;
+  endTime: string;
+}
+
+export interface PatientProfile extends UserProfile {
+  role: 'patient';
+  idNumber?: string;
+  dateOfBirth?: string;
+  medicalAidProvider?: string;
+  medicalAidNumber?: string;
+  emergencyContact?: {
+    name: string;
+    relationship: string;
+    phone: string;
+  };
+  allergies?: string[];
+  chronicConditions?: string[];
+  medications?: string[];
+  bloodType?: string;
 }
 
 export interface AmbassadorProfile extends UserProfile {
@@ -161,23 +202,6 @@ export interface AmbassadorProfile extends UserProfile {
   pendingEarnings: number;
 }
 
-export interface PatientProfile extends UserProfile {
-  role: 'patient';
-  idNumber?: string;
-  dateOfBirth?: string;
-  medicalAidProvider?: string;
-  medicalAidNumber?: string;
-  emergencyContact?: {
-    name: string;
-    relationship: string;
-    phone: string;
-  };
-  allergies?: string[];
-  chronicConditions?: string[];
-  medications?: string[];
-  bloodType?: string;
-}
-
 export interface AdminProfile extends UserProfile {
   role: 'admin';
   adminLevel: 'super' | 'standard' | 'support';
@@ -199,6 +223,61 @@ export interface ReferralData {
   verifiedAt?: Timestamp;
   rejectionReason?: string;
 }
+
+// ==================== BOOKING TYPES ====================
+
+export interface BookingSlot {
+  date: string; // YYYY-MM-DD
+  startTime: string; // HH:MM
+  endTime: string; // HH:MM
+  isAvailable: boolean;
+  doctorId: string;
+  bookingId?: string;
+}
+
+export interface RescheduleHistory {
+  fromDate: string;
+  fromTime: string;
+  toDate: string;
+  toTime: string;
+  rescheduledAt: any;
+  reason?: string;
+}
+
+export interface Booking {
+  id: string;
+  doctorId: string;
+  patientId: string;
+  patientName: string;
+  patientEmail: string;
+  patientPhone?: string;
+  doctorName: string;
+  doctorSpecialization: string;
+  appointmentDate: string;
+  appointmentTime: string;
+  endTime: string;
+  status: 'pending' | 'confirmed' | 'rescheduled' | 'completed' | 'cancelled' | 'no-show';
+  notes?: string;
+  consultationFee: number;
+  rescheduleCount: number;
+  maxReschedules: number;
+  rescheduleHistory: RescheduleHistory[];
+  createdAt: any;
+  updatedAt: any;
+  cancelledAt?: any;
+  cancellationReason?: string;
+  confirmedAt?: any;
+  completedAt?: any;
+}
+
+export interface DoctorAvailability {
+  doctorId: string;
+  date: string;
+  slots: BookingSlot[];
+  updatedAt: any;
+}
+
+// ==================== HELPER FUNCTIONS ====================
 
 // Helper function to generate referral code
 function generateReferralCode(firstName?: string, lastName?: string): string {
@@ -222,7 +301,8 @@ const isFirebaseInitialized = () => {
   return !!(auth && db && storage);
 };
 
-// Auth service functions
+// ==================== AUTH SERVICE ====================
+
 export const authService = {
   // Update admin password
   updateAdminPassword: async (currentPassword: string, newPassword: string) => {
@@ -232,13 +312,9 @@ export const authService = {
     }
     
     try {
-      // Re-authenticate user
       const credential = EmailAuthProvider.credential(user.email!, currentPassword);
       await reauthenticateWithCredential(user, credential);
-      
-      // Update password
       await updatePassword(user, newPassword);
-      
       return { error: null };
     } catch (error: any) {
       return { error: error.message };
@@ -261,7 +337,6 @@ export const authService = {
       await sendEmailVerification(user);
       console.log('✅ Verification email sent');
       
-      // Create user profile WITHOUT undefined values
       const userProfile = {
         uid: user.uid,
         email: user.email!,
@@ -292,12 +367,10 @@ export const authService = {
       
       switch (role) {
         case 'doctor':
-          // Store referral code if provided
           let referralData = null;
           if (referralCode) {
             console.log(`🔍 Checking referral code: ${referralCode}`);
             
-            // Find the ambassador with this referral code
             const ambassadorsQuery = query(
               collection(db, 'ambassadors'),
               where('referralCode', '==', referralCode),
@@ -326,10 +399,8 @@ export const authService = {
               
               console.log(`✅ Referral found from ambassador: ${referralData.ambassadorName}`);
               
-              // Save referral data with the correct document ID
               await setDoc(doc(db, 'referrals', `doctor_${user.uid}`), referralData);
               
-              // ✅ CRITICAL: Update ambassador's totalReferredDoctors count
               console.log(`📊 Updating ambassador ${ambassadorId} total referrals...`);
               await updateDoc(doc(db, 'ambassadors', ambassadorId), {
                 totalReferredDoctors: (ambassadorData.totalReferredDoctors || 0) + 1,
@@ -348,6 +419,7 @@ export const authService = {
             role: 'doctor',
             specialization: profileData.specialization || '',
             verificationStatus: 'pending',
+            consultationDuration: profileData.consultationDuration || 30,
             ...(profileData.hpcsaNumber ? { hpcsaNumber: profileData.hpcsaNumber } : {}),
             ...(profileData.practiceName ? { practiceName: profileData.practiceName } : {}),
             ...(profileData.practiceAddress ? { practiceAddress: profileData.practiceAddress } : {}),
@@ -463,11 +535,9 @@ export const authService = {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       
-      // Get user profile from Firestore
       const profileDoc = await getDoc(doc(db, 'users', user.uid));
       
       if (!profileDoc.exists()) {
-        // Check if this is an admin created during setup
         const adminDoc = await getDoc(doc(db, 'admins', user.uid));
         
         if (adminDoc.exists()) {
@@ -498,7 +568,6 @@ export const authService = {
       
       const profile = profileDoc.data() as UserProfile;
       
-      // Skip email verification check for admin accounts
       if (!user.emailVerified && profile.role !== 'admin') {
         await signOut(auth);
         return { 
@@ -628,7 +697,8 @@ export const authService = {
   },
 };
 
-// Admin service functions
+// ==================== ADMIN SERVICE ====================
+
 export const adminService = {
   // Get all ambassadors
   getAllAmbassadors: async () => {
@@ -704,7 +774,6 @@ export const adminService = {
       }
       
       if (status === 'passed') {
-        // Move to approval pending stage
         updateData.onboardingStep = 4;
         updateData.applicationStatus = 'pending';
       } else if (status === 'failed') {
@@ -716,7 +785,6 @@ export const adminService = {
       
       await updateDoc(ambassadorRef, updateData);
       
-      // Also update the user's isActive status if rejected
       if (status === 'failed') {
         const userRef = doc(db, 'users', ambassadorId);
         await updateDoc(userRef, {
@@ -739,7 +807,6 @@ export const adminService = {
     }
 
     try {
-      // Get ambassador data first to generate personalized code
       const ambassadorRef = doc(db, 'ambassadors', ambassadorId);
       const ambassadorDoc = await getDoc(ambassadorRef);
       
@@ -749,7 +816,6 @@ export const adminService = {
       
       const ambassadorData = ambassadorDoc.data();
       
-      // Generate personalized referral code using name
       const userDoc = await getDoc(doc(db, 'users', ambassadorId));
       const userData = userDoc.data();
       const firstName = userData?.firstName || '';
@@ -774,8 +840,6 @@ export const adminService = {
       
       await batch.commit();
       
-      // TODO: Send email with referral code
-      // You would integrate an email service here (e.g., SendGrid, AWS SES, etc.)
       console.log(`✅ Ambassador ${ambassadorId} approved with referral code: ${referralCode}`);
       
       return { error: null, referralCode };
@@ -987,14 +1051,12 @@ export const adminService = {
         where('applicationStatus', '==', 'pending')
       ));
       
-      // Count ambassadors who passed interview and are ready for approval
       const readyForApprovalSnapshot = await getDocs(query(
         collection(db, 'ambassadors'),
         where('interviewStatus', '==', 'passed'),
         where('applicationStatus', '==', 'pending')
       ));
       
-      // Get referral stats
       const referralsSnapshot = await getDocs(collection(db, 'referrals'));
       const referrals = referralsSnapshot.docs.map(doc => doc.data());
       
@@ -1121,14 +1183,12 @@ export const adminService = {
         updatedAt: serverTimestamp(),
       });
       
-      // Check if this doctor was referred
       const referralRef = doc(db, 'referrals', `doctor_${doctorId}`);
       const referralDoc = await getDoc(referralRef);
       
       if (referralDoc.exists()) {
-        // Update referral status to verified
         const referralData = referralDoc.data();
-        const commissionAmount = 500; // Fixed commission amount
+        const commissionAmount = 500;
         
         batch.update(referralRef, {
           status: 'verified',
@@ -1137,7 +1197,6 @@ export const adminService = {
           updatedAt: serverTimestamp(),
         });
         
-        // Update ambassador's earnings
         const ambassadorRef = doc(db, 'ambassadors', referralData.ambassadorId);
         const ambassadorDoc = await getDoc(ambassadorRef);
         if (ambassadorDoc.exists()) {
@@ -1186,12 +1245,10 @@ export const adminService = {
         updatedAt: serverTimestamp(),
       });
       
-      // Check if this doctor was referred
       const referralRef = doc(db, 'referrals', `doctor_${doctorId}`);
       const referralDoc = await getDoc(referralRef);
       
       if (referralDoc.exists()) {
-        // Update referral status to rejected
         batch.update(referralRef, {
           status: 'rejected',
           rejectionReason: reason,
@@ -1253,7 +1310,7 @@ export const adminService = {
     }
   },
 
-  // ============== REFERRAL FUNCTIONS ==============
+  // ====================== REFERRAL FUNCTIONS ======================
   
   // Get all referrals
   getReferrals: async (filters?: { status?: string; ambassadorId?: string }) => {
@@ -1292,12 +1349,12 @@ export const adminService = {
     return adminService.getReferrals({ ambassadorId });
   },
 
-  // Get pending referrals (doctors waiting for verification)
+  // Get pending referrals
   getPendingReferrals: async () => {
     return adminService.getReferrals({ status: 'pending' });
   },
 
-  // Update referral status when doctor is verified
+  // Update referral status
   updateReferralStatus: async (doctorId: string, status: 'verified' | 'rejected', rejectionReason?: string) => {
     if (!isFirebaseInitialized()) {
       return { error: 'Firebase is not initialized.' };
@@ -1314,7 +1371,6 @@ export const adminService = {
       const referralData = referralDoc.data();
       const batch = writeBatch(db);
       
-      // Update referral
       batch.update(referralRef, {
         status: status,
         ...(status === 'verified' ? { verifiedAt: serverTimestamp() } : {}),
@@ -1323,14 +1379,12 @@ export const adminService = {
       });
       
       if (status === 'verified') {
-        // Calculate commission (e.g., R500 for a verified doctor)
         const commissionAmount = 500;
         
         batch.update(referralRef, {
           commissionEarned: commissionAmount,
         });
         
-        // Update ambassador's earnings
         const ambassadorRef = doc(db, 'ambassadors', referralData.ambassadorId);
         const ambassadorDoc = await getDoc(ambassadorRef);
         if (ambassadorDoc.exists()) {
