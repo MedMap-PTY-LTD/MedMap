@@ -37,24 +37,23 @@ import {
 import TrainingModule from './TrainingModule';
 import KnowledgeTest from './KnowledgeTest';
 
-// ==================== SUB-COMPONENTS ====================
-
-// ✅ NEW: Floating Logout Button - Shows on EVERY screen
+// ==================== FLOATING LOGOUT COMPONENT ====================
+// ✅ This shows on EVERY screen - bottom right corner
 const FloatingLogout = ({ onLogout }: { onLogout: () => void }) => {
   return (
-    <div className="fixed bottom-6 right-6 z-50">
+    <div className="fixed bottom-6 right-6 z-[9999]">
       <Button
         onClick={onLogout}
-        className="bg-red-600 hover:bg-red-700 text-white shadow-lg rounded-full px-6 py-3 flex items-center gap-2 transition-all duration-200 hover:scale-105"
+        className="bg-red-600 hover:bg-red-700 text-white shadow-2xl rounded-full px-6 py-3 flex items-center gap-2 transition-all duration-200 hover:scale-105 border border-red-500"
       >
         <LogOut className="w-5 h-5" />
-        <span className="font-medium">Sign Out</span>
+        <span className="font-medium text-sm">Sign Out</span>
       </Button>
     </div>
   );
 };
 
-// ✅ NEW: Reusable Top Navigation Bar
+// ==================== TOP NAV COMPONENT ====================
 const TopNav = ({ 
   title, 
   referralCode, 
@@ -113,17 +112,6 @@ const TopNav = ({
                 </div>
               </div>
             )}
-            
-            {/* Logout Button in Header */}
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="border-white/30 text-white hover:bg-red-500 hover:border-red-500 hover:text-white transition-all duration-200"
-              onClick={onLogout}
-            >
-              <LogOut className="w-4 h-4 mr-2" />
-              Sign Out
-            </Button>
           </div>
         </div>
       </div>
@@ -131,6 +119,7 @@ const TopNav = ({
   );
 };
 
+// ==================== STATS CARD ====================
 const StatsCard = ({ title, value, icon: Icon, color, badge, subtitle }: any) => (
   <Card>
     <CardContent className="pt-4">
@@ -535,8 +524,6 @@ const OnboardingPendingScreen = ({
         onLogout={onLogout}
         showReferralCode={false}
       />
-      {/* ✅ FLOATING LOGOUT - Also shows here */}
-      <FloatingLogout onLogout={onLogout} />
       <div className="flex items-center justify-center p-4 pt-8">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
@@ -571,6 +558,8 @@ const OnboardingPendingScreen = ({
           </CardContent>
         </Card>
       </div>
+      {/* ✅ FLOATING LOGOUT */}
+      <FloatingLogout onLogout={onLogout} />
     </div>
   );
 };
@@ -613,6 +602,7 @@ const AmbassadorPortal = () => {
     toast({ title: 'Refreshed', description: `Found ${referrals?.length || 0} referrals.` });
   };
 
+  // ✅ LOGOUT HANDLER - Progress is saved automatically in Firestore
   const handleLogout = async () => {
     try {
       await signOut();
@@ -680,6 +670,8 @@ const AmbassadorPortal = () => {
           <Loader2 className="w-12 h-12 text-purple-600 animate-spin" />
           <p className="text-gray-600">Loading...</p>
         </div>
+        {/* ✅ FLOATING LOGOUT - Shows on loading */}
+        <FloatingLogout onLogout={handleLogout} />
       </div>
     );
   }
@@ -706,6 +698,8 @@ const AmbassadorPortal = () => {
           <Loader2 className="w-12 h-12 text-purple-600 animate-spin" />
           <p className="text-gray-600">Loading your ambassador profile...</p>
         </div>
+        {/* ✅ FLOATING LOGOUT - Shows on loading */}
+        <FloatingLogout onLogout={handleLogout} />
       </div>
     );
   }
@@ -724,6 +718,8 @@ const AmbassadorPortal = () => {
             </Button>
           </CardContent>
         </Card>
+        {/* ✅ FLOATING LOGOUT - Shows on error */}
+        <FloatingLogout onLogout={handleLogout} />
       </div>
     );
   }
@@ -738,10 +734,11 @@ const AmbassadorPortal = () => {
             <p className="text-gray-600 mb-4">Your ambassador profile could not be found. Please contact support.</p>
             <div className="flex flex-col gap-2">
               <Button onClick={() => navigate('/')} className="w-full">Go Home</Button>
-              <Button variant="outline" onClick={handleLogout} className="w-full">Logout</Button>
             </div>
           </CardContent>
         </Card>
+        {/* ✅ FLOATING LOGOUT */}
+        <FloatingLogout onLogout={handleLogout} />
       </div>
     );
   }
@@ -774,8 +771,6 @@ const AmbassadorPortal = () => {
           onLogout={handleLogout}
           showReferralCode={false}
         />
-        {/* ✅ FLOATING LOGOUT */}
-        <FloatingLogout onLogout={handleLogout} />
         <div className="flex items-center justify-center p-4 pt-8">
           <Card className="max-w-md w-full">
             <CardHeader className="text-center">
@@ -810,6 +805,8 @@ const AmbassadorPortal = () => {
             </CardContent>
           </Card>
         </div>
+        {/* ✅ FLOATING LOGOUT */}
+        <FloatingLogout onLogout={handleLogout} />
       </div>
     );
   }
@@ -824,11 +821,11 @@ const AmbassadorPortal = () => {
           onLogout={handleLogout}
           showReferralCode={false}
         />
-        {/* ✅ FLOATING LOGOUT */}
-        <FloatingLogout onLogout={handleLogout} />
         <div className="pt-4">
           <TrainingModule />
         </div>
+        {/* ✅ FLOATING LOGOUT */}
+        <FloatingLogout onLogout={handleLogout} />
       </div>
     );
   }
@@ -847,8 +844,6 @@ const AmbassadorPortal = () => {
             onLogout={handleLogout}
             showReferralCode={false}
           />
-          {/* ✅ FLOATING LOGOUT */}
-          <FloatingLogout onLogout={handleLogout} />
           <div className="flex items-center justify-center p-4 pt-8">
             <Card className="max-w-md w-full">
               <CardHeader className="text-center">
@@ -869,6 +864,8 @@ const AmbassadorPortal = () => {
               </CardContent>
             </Card>
           </div>
+          {/* ✅ FLOATING LOGOUT */}
+          <FloatingLogout onLogout={handleLogout} />
         </div>
       );
     } else {
@@ -880,11 +877,11 @@ const AmbassadorPortal = () => {
             onLogout={handleLogout}
             showReferralCode={false}
           />
-          {/* ✅ FLOATING LOGOUT */}
-          <FloatingLogout onLogout={handleLogout} />
           <div className="pt-4">
             <KnowledgeTest />
           </div>
+          {/* ✅ FLOATING LOGOUT */}
+          <FloatingLogout onLogout={handleLogout} />
         </div>
       );
     }
@@ -918,8 +915,6 @@ const AmbassadorPortal = () => {
           onLogout={handleLogout}
           showReferralCode={false}
         />
-        {/* ✅ FLOATING LOGOUT */}
-        <FloatingLogout onLogout={handleLogout} />
         <div className="flex items-center justify-center p-4 pt-8">
           <Card className="max-w-md w-full">
             <CardHeader className="text-center">
@@ -939,6 +934,8 @@ const AmbassadorPortal = () => {
             </CardContent>
           </Card>
         </div>
+        {/* ✅ FLOATING LOGOUT */}
+        <FloatingLogout onLogout={handleLogout} />
       </div>
     );
   }
@@ -952,8 +949,6 @@ const AmbassadorPortal = () => {
           onLogout={handleLogout}
           showReferralCode={false}
         />
-        {/* ✅ FLOATING LOGOUT */}
-        <FloatingLogout onLogout={handleLogout} />
         <div className="flex items-center justify-center p-4 pt-8">
           <Card className="max-w-md w-full">
             <CardHeader className="text-center">
@@ -973,6 +968,8 @@ const AmbassadorPortal = () => {
             </CardContent>
           </Card>
         </div>
+        {/* ✅ FLOATING LOGOUT */}
+        <FloatingLogout onLogout={handleLogout} />
       </div>
     );
   }
@@ -995,7 +992,7 @@ const AmbassadorPortal = () => {
     );
   }
 
-  // ==================== STEP 5: APPROVED ====================
+  // ==================== STEP 5: APPROVED - DASHBOARD ====================
   if (step === 5 && applicationStatus === 'approved') {
     const tierDisplay = getTierDisplay(stats?.currentTier || 'bronze');
     const safeReferrals = Array.isArray(referrals) ? referrals : [];
@@ -1026,9 +1023,6 @@ const AmbassadorPortal = () => {
           isRefetching={isRefetching}
           showReferralCode={true}
         />
-
-        {/* ✅ FLOATING LOGOUT - Shows on dashboard too */}
-        <FloatingLogout onLogout={handleLogout} />
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Welcome Message */}
@@ -1129,6 +1123,9 @@ const AmbassadorPortal = () => {
             </TabsContent>
           </Tabs>
         </div>
+
+        {/* ✅ FLOATING LOGOUT - Shows on dashboard */}
+        <FloatingLogout onLogout={handleLogout} />
       </div>
     );
   }
@@ -1145,9 +1142,9 @@ const AmbassadorPortal = () => {
         <div className="mt-8 flex justify-center">
           <Loader2 className="w-8 h-8 text-purple-600 animate-spin" />
         </div>
-        {/* ✅ FLOATING LOGOUT - Shows on fallback too */}
-        <FloatingLogout onLogout={handleLogout} />
       </div>
+      {/* ✅ FLOATING LOGOUT - Shows on fallback */}
+      <FloatingLogout onLogout={handleLogout} />
     </div>
   );
 };
