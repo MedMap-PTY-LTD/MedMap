@@ -53,11 +53,14 @@ const TopNav = ({
     <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold">{title}</h1>
-            <p className="text-purple-100 text-sm mt-1">Welcome to the MedMap Ambassador Program</p>
+          {/* Left side - Title */}
+          <div className="flex-1 min-w-0">
+            <h1 className="text-2xl sm:text-3xl font-bold truncate">{title}</h1>
+            <p className="text-purple-100 text-sm mt-1 hidden sm:block">Welcome to the MedMap Ambassador Program</p>
           </div>
-          <div className="flex items-center gap-3 flex-wrap">
+          
+          {/* Right side - Buttons */}
+          <div className="flex items-center gap-2 flex-wrap flex-shrink-0">
             {/* Home Button */}
             <Button 
               variant="ghost" 
@@ -65,8 +68,8 @@ const TopNav = ({
               className="text-white hover:bg-white/20"
               onClick={onHome}
             >
-              <Home className="w-4 h-4 mr-2" />
-              Home
+              <Home className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Home</span>
             </Button>
             
             {/* Refresh Button */}
@@ -78,38 +81,57 @@ const TopNav = ({
                 onClick={onRefresh}
                 disabled={isRefetching}
               >
-                <RefreshCw className={`w-4 h-4 mr-2 ${isRefetching ? 'animate-spin' : ''}`} />
-                {isRefetching ? 'Refreshing...' : 'Refresh'}
+                <RefreshCw className={`w-4 h-4 sm:mr-2 ${isRefetching ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">{isRefetching ? 'Refreshing...' : 'Refresh'}</span>
               </Button>
             )}
             
-            {/* Logout Button */}
-            {onLogout && (
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="text-white hover:bg-red-500/30"
-                onClick={onLogout}
-              >
-                <LogOut className="w-4 h-4 mr-2" />
-                Sign Out
-              </Button>
-            )}
-            
-            {/* Referral Code */}
+            {/* Referral Code - Only show on desktop if showReferralCode is true */}
             {showReferralCode && referralCode && (
-              <div className="bg-white/20 rounded-lg px-4 py-2 text-center hidden sm:block">
+              <div className="bg-white/20 rounded-lg px-3 py-1.5 text-center hidden lg:block">
                 <p className="text-xs text-purple-200">Your Referral Code</p>
-                <div className="flex items-center gap-2">
-                  <code className="text-lg sm:text-xl font-bold tracking-wider font-mono">{referralCode}</code>
-                  <button onClick={onCopyCode} className="p-1 hover:bg-white/20 rounded transition-colors">
-                    <Copy className="w-4 h-4" />
+                <div className="flex items-center gap-1.5">
+                  <code className="text-base font-bold tracking-wider font-mono">{referralCode}</code>
+                  <button 
+                    onClick={onCopyCode} 
+                    className="p-1 hover:bg-white/20 rounded transition-colors"
+                    aria-label="Copy referral code"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
             )}
+            
+            {/* ✅ LOGOUT BUTTON - ALWAYS VISIBLE */}
+            {onLogout && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="text-white hover:bg-red-500/30 border border-white/20"
+                onClick={onLogout}
+              >
+                <LogOut className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Sign Out</span>
+              </Button>
+            )}
           </div>
         </div>
+        
+        {/* Mobile referral code - shown below on small screens */}
+        {showReferralCode && referralCode && (
+          <div className="mt-3 bg-white/20 rounded-lg px-3 py-1.5 text-center lg:hidden flex items-center justify-center gap-2">
+            <span className="text-xs text-purple-200">Your Code:</span>
+            <code className="text-sm font-bold tracking-wider font-mono">{referralCode}</code>
+            <button 
+              onClick={onCopyCode} 
+              className="p-1 hover:bg-white/20 rounded transition-colors"
+              aria-label="Copy referral code"
+            >
+              <Copy className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
