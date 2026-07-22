@@ -36,53 +36,6 @@ import {
 import TrainingModule from './TrainingModule';
 import KnowledgeTest from './KnowledgeTest';
 
-// ==================== GLOBAL LOGOUT BUTTON ====================
-// This uses plain HTML with inline styles for maximum reliability
-const LogoutButton = ({ onLogout }: { onLogout: () => void }) => {
-  return (
-    <div style={{
-      position: 'fixed',
-      bottom: '24px',
-      right: '24px',
-      zIndex: 999999,
-    }}>
-      <button
-        onClick={onLogout}
-        style={{
-          backgroundColor: '#dc2626',
-          color: 'white',
-          padding: '12px 24px',
-          borderRadius: '9999px',
-          border: 'none',
-          cursor: 'pointer',
-          fontSize: '14px',
-          fontWeight: '600',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          boxShadow: '0 10px 25px rgba(220, 38, 38, 0.4)',
-          transition: 'all 0.2s ease',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.backgroundColor = '#b91c1c';
-          e.currentTarget.style.transform = 'scale(1.05)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.backgroundColor = '#dc2626';
-          e.currentTarget.style.transform = 'scale(1)';
-        }}
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-          <polyline points="16 17 21 12 16 7" />
-          <line x1="21" y1="12" x2="9" y2="12" />
-        </svg>
-        Sign Out
-      </button>
-    </div>
-  );
-};
-
 // ==================== TOP NAV COMPONENT ====================
 const TopNav = ({ 
   title, 
@@ -92,6 +45,7 @@ const TopNav = ({
   onHome, 
   isRefetching,
   showReferralCode = true,
+  onLogout,
 }: any) => {
   const { toast } = useToast();
 
@@ -126,6 +80,19 @@ const TopNav = ({
               >
                 <RefreshCw className={`w-4 h-4 mr-2 ${isRefetching ? 'animate-spin' : ''}`} />
                 {isRefetching ? 'Refreshing...' : 'Refresh'}
+              </Button>
+            )}
+            
+            {/* Logout Button */}
+            {onLogout && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="text-white hover:bg-red-500/30"
+                onClick={onLogout}
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                Sign Out
               </Button>
             )}
             
@@ -543,12 +510,14 @@ const OnboardingPendingScreen = ({
   buttonText, 
   buttonAction,
   onHome,
+  onLogout,
 }: any) => {
   return (
     <div className="min-h-screen bg-gray-50">
       <TopNav 
         title="Ambassador Onboarding"
         onHome={onHome}
+        onLogout={onLogout}
         showReferralCode={false}
       />
       <div className="flex items-center justify-center p-4 pt-8">
@@ -690,88 +659,73 @@ const AmbassadorPortal = () => {
   // ==================== LOADING STATES ====================
   if (authLoading) {
     return (
-      <>
-        <div className="flex items-center justify-center min-h-screen bg-gray-50">
-          <div className="flex flex-col items-center gap-4">
-            <Loader2 className="w-12 h-12 text-purple-600 animate-spin" />
-            <p className="text-gray-600">Loading...</p>
-          </div>
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-12 h-12 text-purple-600 animate-spin" />
+          <p className="text-gray-600">Loading...</p>
         </div>
-        <LogoutButton onLogout={handleLogout} />
-      </>
+      </div>
     );
   }
 
   if (!user) {
     return (
-      <>
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-          <Card className="max-w-md w-full">
-            <CardContent className="pt-6 text-center">
-              <AlertCircle className="w-12 h-12 text-yellow-600 mx-auto mb-4" />
-              <h2 className="text-xl font-bold text-gray-900 mb-2">Not Signed In</h2>
-              <p className="text-gray-600 mb-4">Please sign in to access your ambassador dashboard.</p>
-              <Button onClick={() => navigate('/signin')} className="w-full">Sign In</Button>
-            </CardContent>
-          </Card>
-        </div>
-        <LogoutButton onLogout={handleLogout} />
-      </>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardContent className="pt-6 text-center">
+            <AlertCircle className="w-12 h-12 text-yellow-600 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Not Signed In</h2>
+            <p className="text-gray-600 mb-4">Please sign in to access your ambassador dashboard.</p>
+            <Button onClick={() => navigate('/signin')} className="w-full">Sign In</Button>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
   if (isLoading) {
     return (
-      <>
-        <div className="flex items-center justify-center min-h-screen bg-gray-50">
-          <div className="flex flex-col items-center gap-4">
-            <Loader2 className="w-12 h-12 text-purple-600 animate-spin" />
-            <p className="text-gray-600">Loading your ambassador profile...</p>
-          </div>
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-12 h-12 text-purple-600 animate-spin" />
+          <p className="text-gray-600">Loading your ambassador profile...</p>
         </div>
-        <LogoutButton onLogout={handleLogout} />
-      </>
+      </div>
     );
   }
 
   if (error) {
     return (
-      <>
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-          <Card className="max-w-md w-full">
-            <CardContent className="pt-6 text-center">
-              <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
-              <h2 className="text-xl font-bold text-gray-900 mb-2">Error Loading Profile</h2>
-              <p className="text-gray-600 mb-4">{error.message || 'Failed to load ambassador profile. Please try again.'}</p>
-              <Button onClick={() => refetch()} className="w-full">
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Retry
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-        <LogoutButton onLogout={handleLogout} />
-      </>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardContent className="pt-6 text-center">
+            <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Error Loading Profile</h2>
+            <p className="text-gray-600 mb-4">{error.message || 'Failed to load ambassador profile. Please try again.'}</p>
+            <Button onClick={() => refetch()} className="w-full">
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
   if (!ambassadorData) {
     return (
-      <>
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-          <Card className="max-w-md w-full">
-            <CardContent className="pt-6 text-center">
-              <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
-              <h2 className="text-xl font-bold text-gray-900 mb-2">Profile Not Found</h2>
-              <p className="text-gray-600 mb-4">Your ambassador profile could not be found. Please contact support.</p>
-              <div className="flex flex-col gap-2">
-                <Button onClick={() => navigate('/')} className="w-full">Go Home</Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-        <LogoutButton onLogout={handleLogout} />
-      </>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardContent className="pt-6 text-center">
+            <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Profile Not Found</h2>
+            <p className="text-gray-600 mb-4">Your ambassador profile could not be found. Please contact support.</p>
+            <div className="flex flex-col gap-2">
+              <Button onClick={() => navigate('/')} className="w-full">Go Home</Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
@@ -796,69 +750,65 @@ const AmbassadorPortal = () => {
 
   if (step === 1 && psychometricPassed === false) {
     return (
-      <>
-        <div className="min-h-screen bg-gray-50">
-          <TopNav 
-            title="Ambassador Assessment"
-            onHome={handleGoHome}
-            showReferralCode={false}
-          />
-          <div className="flex items-center justify-center p-4 pt-8">
-            <Card className="max-w-md w-full">
-              <CardHeader className="text-center">
-                <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                  <XCircle className="w-8 h-8 text-red-600" />
+      <div className="min-h-screen bg-gray-50">
+        <TopNav 
+          title="Ambassador Assessment"
+          onHome={handleGoHome}
+          onLogout={handleLogout}
+          showReferralCode={false}
+        />
+        <div className="flex items-center justify-center p-4 pt-8">
+          <Card className="max-w-md w-full">
+            <CardHeader className="text-center">
+              <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <XCircle className="w-8 h-8 text-red-600" />
+              </div>
+              <CardTitle>Assessment Cooldown Period</CardTitle>
+              <CardDescription>Your psychometric assessment did not meet the required threshold.</CardDescription>
+            </CardHeader>
+            <CardContent className="text-center space-y-4">
+              {psychometricScore && (
+                <div className="bg-gray-100 p-4 rounded-lg">
+                  <p className="text-sm text-gray-600">Your Score</p>
+                  <p className="text-2xl font-bold text-gray-800">{psychometricScore}%</p>
+                  <p className="text-xs text-gray-500 mt-1">Required: 70% to pass</p>
                 </div>
-                <CardTitle>Assessment Cooldown Period</CardTitle>
-                <CardDescription>Your psychometric assessment did not meet the required threshold.</CardDescription>
-              </CardHeader>
-              <CardContent className="text-center space-y-4">
-                {psychometricScore && (
-                  <div className="bg-gray-100 p-4 rounded-lg">
-                    <p className="text-sm text-gray-600">Your Score</p>
-                    <p className="text-2xl font-bold text-gray-800">{psychometricScore}%</p>
-                    <p className="text-xs text-gray-500 mt-1">Required: 70% to pass</p>
-                  </div>
-                )}
-                {nextAttemptDate && nextAttemptDate > new Date() && (
-                  <div className="bg-yellow-50 p-4 rounded-lg">
-                    <p className="text-sm text-yellow-800">You can retake the assessment on:</p>
-                    <p className="text-xl font-bold text-yellow-900 mt-1">
-                      {nextAttemptDate.toLocaleDateString('en-ZA', { day: '2-digit', month: 'long', year: 'numeric' })}
-                    </p>
-                  </div>
-                )}
-                <p className="text-sm text-gray-600">
-                  Please use this time to prepare. You will receive an email notification when you can retake the assessment.
-                </p>
-                <Button variant="outline" onClick={handleGoHome} className="w-full">
-                  Return to Home
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
+              )}
+              {nextAttemptDate && nextAttemptDate > new Date() && (
+                <div className="bg-yellow-50 p-4 rounded-lg">
+                  <p className="text-sm text-yellow-800">You can retake the assessment on:</p>
+                  <p className="text-xl font-bold text-yellow-900 mt-1">
+                    {nextAttemptDate.toLocaleDateString('en-ZA', { day: '2-digit', month: 'long', year: 'numeric' })}
+                  </p>
+                </div>
+              )}
+              <p className="text-sm text-gray-600">
+                Please use this time to prepare. You will receive an email notification when you can retake the assessment.
+              </p>
+              <Button variant="outline" onClick={handleGoHome} className="w-full">
+                Return to Home
+              </Button>
+            </CardContent>
+          </Card>
         </div>
-        <LogoutButton onLogout={handleLogout} />
-      </>
+      </div>
     );
   }
 
   // ==================== STEP 2: TRAINING MODULE ====================
   if (step === 2 && psychometricPassed === true && !trainingCompleted) {
     return (
-      <>
-        <div className="min-h-screen bg-gray-50">
-          <TopNav 
-            title="Training Module"
-            onHome={handleGoHome}
-            showReferralCode={false}
-          />
-          <div className="pt-4">
-            <TrainingModule />
-          </div>
+      <div className="min-h-screen bg-gray-50">
+        <TopNav 
+          title="Training Module"
+          onHome={handleGoHome}
+          onLogout={handleLogout}
+          showReferralCode={false}
+        />
+        <div className="pt-4">
+          <TrainingModule />
         </div>
-        <LogoutButton onLogout={handleLogout} />
-      </>
+      </div>
     );
   }
 
@@ -869,118 +819,11 @@ const AmbassadorPortal = () => {
       return null;
     } else if (knowledgeTestAttempts >= maxAttempts && knowledgeTestPassed === false) {
       return (
-        <>
-          <div className="min-h-screen bg-gray-50">
-            <TopNav 
-              title="Knowledge Test"
-              onHome={handleGoHome}
-              showReferralCode={false}
-            />
-            <div className="flex items-center justify-center p-4 pt-8">
-              <Card className="max-w-md w-full">
-                <CardHeader className="text-center">
-                  <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                    <XCircle className="w-8 h-8 text-red-600" />
-                  </div>
-                  <CardTitle>Knowledge Test Not Passed</CardTitle>
-                  <CardDescription>You have used all {maxAttempts} attempts.</CardDescription>
-                </CardHeader>
-                <CardContent className="text-center space-y-4">
-                  <p className="text-gray-600">
-                    You have completed all {maxAttempts} attempts for the knowledge test. 
-                    Your application has been reviewed.
-                  </p>
-                  <Button variant="outline" onClick={handleGoHome} className="w-full">
-                    Return to Home
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-          <LogoutButton onLogout={handleLogout} />
-        </>
-      );
-    } else {
-      return (
-        <>
-          <div className="min-h-screen bg-gray-50">
-            <TopNav 
-              title="Knowledge Test"
-              onHome={handleGoHome}
-              showReferralCode={false}
-            />
-            <div className="pt-4">
-              <KnowledgeTest />
-            </div>
-          </div>
-          <LogoutButton onLogout={handleLogout} />
-        </>
-      );
-    }
-  }
-
-  // ==================== STEP 4: INTERVIEW ====================
-  if (step === 4 && interviewStatus === 'pending') {
-    return (
-      <>
-        <OnboardingPendingScreen 
-          title="Application Under Review"
-          description="You have successfully passed the knowledge test!"
-          nextSteps={[
-            'Wait for application review',
-            'Interview scheduling (if selected)',
-            'Ambassador approval and onboarding'
-          ]}
-          buttonText="Return to Home"
-          buttonAction={handleGoHome}
-          onHome={handleGoHome}
-        />
-        <LogoutButton onLogout={handleLogout} />
-      </>
-    );
-  }
-
-  if (step === 4 && interviewStatus === 'scheduled') {
-    return (
-      <>
         <div className="min-h-screen bg-gray-50">
           <TopNav 
-            title="Interview Scheduled"
+            title="Knowledge Test"
             onHome={handleGoHome}
-            showReferralCode={false}
-          />
-          <div className="flex items-center justify-center p-4 pt-8">
-            <Card className="max-w-md w-full">
-              <CardHeader className="text-center">
-                <div className="mx-auto w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4">
-                  <Video className="w-8 h-8 text-purple-600" />
-                </div>
-                <CardTitle>Interview Scheduled</CardTitle>
-                <CardDescription>Your interview has been scheduled with our team.</CardDescription>
-              </CardHeader>
-              <CardContent className="text-center space-y-4">
-                <p className="text-gray-600">
-                  You will receive an email with the interview details and link. Please check your inbox.
-                </p>
-                <Button variant="outline" onClick={handleGoHome} className="w-full">
-                  Return to Home
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-        <LogoutButton onLogout={handleLogout} />
-      </>
-    );
-  }
-
-  if (step === 4 && interviewStatus === 'failed') {
-    return (
-      <>
-        <div className="min-h-screen bg-gray-50">
-          <TopNav 
-            title="Application Status"
-            onHome={handleGoHome}
+            onLogout={handleLogout}
             showReferralCode={false}
           />
           <div className="flex items-center justify-center p-4 pt-8">
@@ -989,12 +832,13 @@ const AmbassadorPortal = () => {
                 <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
                   <XCircle className="w-8 h-8 text-red-600" />
                 </div>
-                <CardTitle>Application Not Successful</CardTitle>
-                <CardDescription>Thank you for your interest in becoming a MedMap Ambassador.</CardDescription>
+                <CardTitle>Knowledge Test Not Passed</CardTitle>
+                <CardDescription>You have used all {maxAttempts} attempts.</CardDescription>
               </CardHeader>
               <CardContent className="text-center space-y-4">
                 <p className="text-gray-600">
-                  While your application showed promise, we have decided to move forward with other candidates at this time.
+                  You have completed all {maxAttempts} attempts for the knowledge test. 
+                  Your application has been reviewed.
                 </p>
                 <Button variant="outline" onClick={handleGoHome} className="w-full">
                   Return to Home
@@ -1003,28 +847,122 @@ const AmbassadorPortal = () => {
             </Card>
           </div>
         </div>
-        <LogoutButton onLogout={handleLogout} />
-      </>
+      );
+    } else {
+      return (
+        <div className="min-h-screen bg-gray-50">
+          <TopNav 
+            title="Knowledge Test"
+            onHome={handleGoHome}
+            onLogout={handleLogout}
+            showReferralCode={false}
+          />
+          <div className="pt-4">
+            <KnowledgeTest />
+          </div>
+        </div>
+      );
+    }
+  }
+
+  // ==================== STEP 4: INTERVIEW ====================
+  if (step === 4 && interviewStatus === 'pending') {
+    return (
+      <OnboardingPendingScreen 
+        title="Application Under Review"
+        description="You have successfully passed the knowledge test!"
+        nextSteps={[
+          'Wait for application review',
+          'Interview scheduling (if selected)',
+          'Ambassador approval and onboarding'
+        ]}
+        buttonText="Return to Home"
+        buttonAction={handleGoHome}
+        onHome={handleGoHome}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  if (step === 4 && interviewStatus === 'scheduled') {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <TopNav 
+          title="Interview Scheduled"
+          onHome={handleGoHome}
+          onLogout={handleLogout}
+          showReferralCode={false}
+        />
+        <div className="flex items-center justify-center p-4 pt-8">
+          <Card className="max-w-md w-full">
+            <CardHeader className="text-center">
+              <div className="mx-auto w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4">
+                <Video className="w-8 h-8 text-purple-600" />
+              </div>
+              <CardTitle>Interview Scheduled</CardTitle>
+              <CardDescription>Your interview has been scheduled with our team.</CardDescription>
+            </CardHeader>
+            <CardContent className="text-center space-y-4">
+              <p className="text-gray-600">
+                You will receive an email with the interview details and link. Please check your inbox.
+              </p>
+              <Button variant="outline" onClick={handleGoHome} className="w-full">
+                Return to Home
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (step === 4 && interviewStatus === 'failed') {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <TopNav 
+          title="Application Status"
+          onHome={handleGoHome}
+          onLogout={handleLogout}
+          showReferralCode={false}
+        />
+        <div className="flex items-center justify-center p-4 pt-8">
+          <Card className="max-w-md w-full">
+            <CardHeader className="text-center">
+              <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <XCircle className="w-8 h-8 text-red-600" />
+              </div>
+              <CardTitle>Application Not Successful</CardTitle>
+              <CardDescription>Thank you for your interest in becoming a MedMap Ambassador.</CardDescription>
+            </CardHeader>
+            <CardContent className="text-center space-y-4">
+              <p className="text-gray-600">
+                While your application showed promise, we have decided to move forward with other candidates at this time.
+              </p>
+              <Button variant="outline" onClick={handleGoHome} className="w-full">
+                Return to Home
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     );
   }
 
   if (step === 4 && interviewStatus === 'passed' && applicationStatus === 'pending') {
     return (
-      <>
-        <OnboardingPendingScreen 
-          title="Interview Passed!"
-          description="You have successfully passed the interview."
-          nextSteps={[
-            'Awaiting final approval from the MedMap team',
-            'You will receive an email once approved',
-            'Approval typically takes 2-5 business days'
-          ]}
-          buttonText="Return to Home"
-          buttonAction={handleGoHome}
-          onHome={handleGoHome}
-        />
-        <LogoutButton onLogout={handleLogout} />
-      </>
+      <OnboardingPendingScreen 
+        title="Interview Passed!"
+        description="You have successfully passed the interview."
+        nextSteps={[
+          'Awaiting final approval from the MedMap team',
+          'You will receive an email once approved',
+          'Approval typically takes 2-5 business days'
+        ]}
+        buttonText="Return to Home"
+        buttonAction={handleGoHome}
+        onHome={handleGoHome}
+        onLogout={handleLogout}
+      />
     );
   }
 
@@ -1047,141 +985,136 @@ const AmbassadorPortal = () => {
     }
 
     return (
-      <>
-        <div className="min-h-screen bg-gray-50">
-          {/* Header with TopNav */}
-          <TopNav 
-            title="Ambassador Dashboard"
-            referralCode={referralCode}
-            onCopyCode={handleCopyReferralCode}
-            onRefresh={handleRefresh}
-            onHome={handleGoHome}
-            isRefetching={isRefetching}
-            showReferralCode={true}
-          />
+      <div className="min-h-screen bg-gray-50">
+        {/* Header with TopNav */}
+        <TopNav 
+          title="Ambassador Dashboard"
+          referralCode={referralCode}
+          onCopyCode={handleCopyReferralCode}
+          onRefresh={handleRefresh}
+          onHome={handleGoHome}
+          isRefetching={isRefetching}
+          showReferralCode={true}
+          onLogout={handleLogout}
+        />
 
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            {/* Welcome Message */}
-            <div className="mb-6">
-              <p className="text-gray-600">
-                Welcome back, <strong>{profile?.firstName || 'Ambassador'}</strong>!
-                {safeReferrals.length > 0 && (
-                  <span className="ml-2 text-purple-600">
-                    You've referred {safeReferrals.length} doctor{safeReferrals.length > 1 ? 's' : ''} 🎉
-                  </span>
-                )}
-              </p>
-            </div>
-
-            {/* Stats Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-              <StatsCard 
-                title="Total Referrals" 
-                value={stats?.totalReferrals || 0} 
-                icon={Users} 
-                color="purple" 
-              />
-              <StatsCard 
-                title="Active Doctors" 
-                value={stats?.activeDoctors || 0} 
-                icon={Heart} 
-                color="green"
-                subtitle="Verified + 50+ bookings" 
-              />
-              <StatsCard 
-                title="Eligible for Commission" 
-                value={stats?.eligibleDoctors || 0} 
-                icon={Target} 
-                color="blue"
-                subtitle="Verified & Active" 
-              />
-              <StatsCard 
-                title="Current Tier" 
-                value={tierDisplay.label} 
-                icon={Award} 
-                color="amber" 
-                badge={tierDisplay.color}
-                subtitle={`${stats?.activeDoctors || 0} active doctors`}
-              />
-              <StatsCard 
-                title="Total Earnings" 
-                value={`R${(stats?.totalCommission || 0).toLocaleString()}`} 
-                icon={TrendingUp} 
-                color="green"
-                subtitle="From active doctors only" 
-              />
-            </div>
-
-            {/* Tabs */}
-            <Tabs defaultValue="overview" className="space-y-6">
-              <TabsList className="grid w-full max-w-md grid-cols-3">
-                <TabsTrigger value="overview">Overview</TabsTrigger>
-                <TabsTrigger value="referrals">Referrals</TabsTrigger>
-                <TabsTrigger value="earnings">Earnings</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="overview">
-                <OverviewTab 
-                  referralCode={referralCode}
-                  referralsCount={safeReferrals.length || 0}
-                  stats={stats}
-                  tierDisplay={tierDisplay}
-                  onCopyCode={handleCopyReferralCode}
-                />
-              </TabsContent>
-
-              <TabsContent value="referrals">
-                <ReferralsTab 
-                  referrals={filteredReferrals}
-                  totalReferrals={safeReferrals.length || 0}
-                  searchTerm={searchTerm}
-                  setSearchTerm={setSearchTerm}
-                  filterStatus={filterStatus}
-                  setFilterStatus={setFilterStatus}
-                  isLoading={isLoading}
-                  getStatusBadge={getStatusBadge}
-                  formatDate={formatDate}
-                  onRefresh={handleRefresh}
-                  onCopyCode={handleCopyReferralCode}
-                  referralCode={referralCode}
-                />
-              </TabsContent>
-
-              <TabsContent value="earnings">
-                <EarningsTab 
-                  stats={stats}
-                  referrals={safeReferrals}
-                  tierDisplay={tierDisplay}
-                  formatDate={formatDate}
-                  getStatusBadge={getStatusBadge}
-                  onCopyCode={handleCopyReferralCode}
-                />
-              </TabsContent>
-            </Tabs>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {/* Welcome Message */}
+          <div className="mb-6">
+            <p className="text-gray-600">
+              Welcome back, <strong>{profile?.firstName || 'Ambassador'}</strong>!
+              {safeReferrals.length > 0 && (
+                <span className="ml-2 text-purple-600">
+                  You've referred {safeReferrals.length} doctor{safeReferrals.length > 1 ? 's' : ''} 🎉
+                </span>
+              )}
+            </p>
           </div>
+
+          {/* Stats Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+            <StatsCard 
+              title="Total Referrals" 
+              value={stats?.totalReferrals || 0} 
+              icon={Users} 
+              color="purple" 
+            />
+            <StatsCard 
+              title="Active Doctors" 
+              value={stats?.activeDoctors || 0} 
+              icon={Heart} 
+              color="green"
+              subtitle="Verified + 50+ bookings" 
+            />
+            <StatsCard 
+              title="Eligible for Commission" 
+              value={stats?.eligibleDoctors || 0} 
+              icon={Target} 
+              color="blue"
+              subtitle="Verified & Active" 
+            />
+            <StatsCard 
+              title="Current Tier" 
+              value={tierDisplay.label} 
+              icon={Award} 
+              color="amber" 
+              badge={tierDisplay.color}
+              subtitle={`${stats?.activeDoctors || 0} active doctors`}
+            />
+            <StatsCard 
+              title="Total Earnings" 
+              value={`R${(stats?.totalCommission || 0).toLocaleString()}`} 
+              icon={TrendingUp} 
+              color="green"
+              subtitle="From active doctors only" 
+            />
+          </div>
+
+          {/* Tabs */}
+          <Tabs defaultValue="overview" className="space-y-6">
+            <TabsList className="grid w-full max-w-md grid-cols-3">
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="referrals">Referrals</TabsTrigger>
+              <TabsTrigger value="earnings">Earnings</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="overview">
+              <OverviewTab 
+                referralCode={referralCode}
+                referralsCount={safeReferrals.length || 0}
+                stats={stats}
+                tierDisplay={tierDisplay}
+                onCopyCode={handleCopyReferralCode}
+              />
+            </TabsContent>
+
+            <TabsContent value="referrals">
+              <ReferralsTab 
+                referrals={filteredReferrals}
+                totalReferrals={safeReferrals.length || 0}
+                searchTerm={searchTerm}
+                setSearchTerm={setSearchTerm}
+                filterStatus={filterStatus}
+                setFilterStatus={setFilterStatus}
+                isLoading={isLoading}
+                getStatusBadge={getStatusBadge}
+                formatDate={formatDate}
+                onRefresh={handleRefresh}
+                onCopyCode={handleCopyReferralCode}
+                referralCode={referralCode}
+              />
+            </TabsContent>
+
+            <TabsContent value="earnings">
+              <EarningsTab 
+                stats={stats}
+                referrals={safeReferrals}
+                tierDisplay={tierDisplay}
+                formatDate={formatDate}
+                getStatusBadge={getStatusBadge}
+                onCopyCode={handleCopyReferralCode}
+              />
+            </TabsContent>
+          </Tabs>
         </div>
-        <LogoutButton onLogout={handleLogout} />
-      </>
+      </div>
     );
   }
 
   // ==================== FALLBACK ====================
   return (
-    <>
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-blue-50 py-8 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-4xl mx-auto text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-purple-100 rounded-full mb-4">
-            <Sparkles className="w-8 h-8 text-purple-600" />
-          </div>
-          <h1 className="text-3xl font-bold text-gray-900">Welcome to the Ambassador Program!</h1>
-          <p className="text-gray-600 mt-2">Loading your onboarding progress...</p>
-          <div className="mt-8 flex justify-center">
-            <Loader2 className="w-8 h-8 text-purple-600 animate-spin" />
-          </div>
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-blue-50 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-4xl mx-auto text-center">
+        <div className="inline-flex items-center justify-center w-16 h-16 bg-purple-100 rounded-full mb-4">
+          <Sparkles className="w-8 h-8 text-purple-600" />
+        </div>
+        <h1 className="text-3xl font-bold text-gray-900">Welcome to the Ambassador Program!</h1>
+        <p className="text-gray-600 mt-2">Loading your onboarding progress...</p>
+        <div className="mt-8 flex justify-center">
+          <Loader2 className="w-8 h-8 text-purple-600 animate-spin" />
         </div>
       </div>
-      <LogoutButton onLogout={handleLogout} />
-    </>
+    </div>
   );
 };
 
