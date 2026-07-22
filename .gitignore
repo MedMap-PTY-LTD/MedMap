@@ -31,5 +31,6 @@ venv.bak/
 Thumbs.db
 
 # .gitignore
+service-account.json
 serviceAccountKey.json
 node_modules
