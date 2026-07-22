@@ -32,103 +32,201 @@ import {
   UserCheck,
   LogOut,
   Home,
+  Menu,
+  X,
+  Wallet,
+  CreditCard,
+  User,
+  BarChart3,
+  Share2,
+  Settings,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import TrainingModule from './TrainingModule';
 import KnowledgeTest from './KnowledgeTest';
 
-// ==================== TOP NAV COMPONENT ====================
+// ==================== SIDEBAR COMPONENT ====================
+interface SidebarProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onLogout: () => void;
+  userProfile: any;
+  activeTab: string;
+  onTabChange: (tab: string) => void;
+}
+
+const Sidebar = ({ 
+  isOpen, 
+  onClose, 
+  onLogout, 
+  userProfile, 
+  activeTab, 
+  onTabChange 
+}: SidebarProps) => {
+  const [isCollapsed, setIsCollapsed] = useState(false);
+
+  const menuItems = [
+    { id: 'overview', label: 'Overview', icon: BarChart3 },
+    { id: 'referrals', label: 'Referrals', icon: Users },
+    { id: 'earnings', label: 'Earnings', icon: Wallet },
+    { id: 'profile', label: 'Profile', icon: User },
+    { id: 'share', label: 'Share & Refer', icon: Share2 },
+  ];
+
+  return (
+    <>
+      {/* Mobile Overlay */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={onClose}
+        />
+      )}
+
+      {/* Sidebar */}
+      <div 
+        className={`
+          fixed top-0 left-0 h-full bg-white shadow-2xl z-50 transition-all duration-300
+          ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+          ${isCollapsed ? 'w-20' : 'w-64'}
+          flex flex-col
+        `}
+      >
+        {/* Header */}
+        <div className={`p-4 border-b flex items-center justify-between ${isCollapsed ? 'justify-center' : ''}`}>
+          {!isCollapsed && (
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg flex items-center justify-center">
+                <span className="text-white font-bold text-sm">M</span>
+              </div>
+              <span className="font-bold text-lg text-gray-800">MedMap</span>
+            </div>
+          )}
+          {isCollapsed && (
+            <div className="w-8 h-8 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg flex items-center justify-center">
+              <span className="text-white font-bold text-sm">M</span>
+            </div>
+          )}
+          <button 
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            className="hidden lg:flex p-1 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            {isCollapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
+          </button>
+          <button 
+            onClick={onClose}
+            className="lg:hidden p-1 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* User Info */}
+        <div className={`p-4 border-b ${isCollapsed ? 'text-center' : ''}`}>
+          {!isCollapsed ? (
+            <div>
+              <p className="font-semibold text-gray-800 truncate">
+                {userProfile?.firstName || 'Ambassador'} {userProfile?.lastName || ''}
+              </p>
+              <p className="text-sm text-gray-500 truncate">{userProfile?.email || ''}</p>
+              <Badge className="mt-1 bg-purple-100 text-purple-800">
+                Ambassador
+              </Badge>
+            </div>
+          ) : (
+            <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center mx-auto">
+              <span className="text-purple-600 font-semibold text-lg">
+                {userProfile?.firstName?.[0] || 'A'}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 overflow-y-auto p-2 space-y-1">
+          {menuItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  onTabChange(item.id);
+                  if (window.innerWidth < 1024) onClose();
+                }}
+                className={`
+                  w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all
+                  ${isActive 
+                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md' 
+                    : 'text-gray-600 hover:bg-gray-100'
+                  }
+                  ${isCollapsed ? 'justify-center' : ''}
+                `}
+                title={isCollapsed ? item.label : ''}
+              >
+                <Icon className={`w-5 h-5 ${isActive ? 'text-white' : ''}`} />
+                {!isCollapsed && <span className="text-sm font-medium">{item.label}</span>}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Bottom Actions */}
+        <div className="p-4 border-t space-y-2">
+          {!isCollapsed && (
+            <div className="bg-purple-50 p-3 rounded-lg mb-2">
+              <p className="text-xs text-purple-600 font-medium">Commission Rate</p>
+              <p className="text-sm font-bold text-purple-700">10% of booking fee</p>
+            </div>
+          )}
+          
+          {/* Logout Button */}
+          <button
+            onClick={onLogout}
+            className={`
+              w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all
+              text-red-600 hover:bg-red-50
+              ${isCollapsed ? 'justify-center' : ''}
+            `}
+            title={isCollapsed ? 'Sign Out' : ''}
+          >
+            <LogOut className="w-5 h-5" />
+            {!isCollapsed && <span className="text-sm font-medium">Sign Out</span>}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ==================== TOP NAV COMPONENT (Mobile) ====================
 const TopNav = ({ 
   title, 
-  referralCode, 
-  onCopyCode, 
-  onRefresh, 
-  onHome, 
-  isRefetching,
+  onMenuClick,
   showReferralCode = true,
-  onLogout,
+  referralCode,
+  onCopyCode,
 }: any) => {
   const { toast } = useToast();
 
   return (
-    <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          {/* Left side - Title */}
-          <div className="flex-1 min-w-0">
-            <h1 className="text-2xl sm:text-3xl font-bold truncate">{title}</h1>
-            <p className="text-purple-100 text-sm mt-1 hidden sm:block">Welcome to the MedMap Ambassador Program</p>
-          </div>
-          
-          {/* Right side - Buttons */}
-          <div className="flex items-center gap-2 flex-wrap flex-shrink-0">
-            {/* Home Button */}
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="text-white hover:bg-white/20"
-              onClick={onHome}
-            >
-              <Home className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Home</span>
-            </Button>
-            
-            {/* Refresh Button */}
-            {onRefresh && (
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="text-white hover:bg-white/20"
-                onClick={onRefresh}
-                disabled={isRefetching}
-              >
-                <RefreshCw className={`w-4 h-4 sm:mr-2 ${isRefetching ? 'animate-spin' : ''}`} />
-                <span className="hidden sm:inline">{isRefetching ? 'Refreshing...' : 'Refresh'}</span>
-              </Button>
-            )}
-            
-            {/* Referral Code - Only show on desktop if showReferralCode is true */}
-            {showReferralCode && referralCode && (
-              <div className="bg-white/20 rounded-lg px-3 py-1.5 text-center hidden lg:block">
-                <p className="text-xs text-purple-200">Your Referral Code</p>
-                <div className="flex items-center gap-1.5">
-                  <code className="text-base font-bold tracking-wider font-mono">{referralCode}</code>
-                  <button 
-                    onClick={onCopyCode} 
-                    className="p-1 hover:bg-white/20 rounded transition-colors"
-                    aria-label="Copy referral code"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            )}
-            
-            {/* ✅ LOGOUT BUTTON - ALWAYS VISIBLE */}
-            {onLogout && (
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="text-white hover:bg-red-500/30 border border-white/20"
-                onClick={onLogout}
-              >
-                <LogOut className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Sign Out</span>
-              </Button>
-            )}
+    <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-3 px-4 sm:px-6 lg:px-8 lg:hidden">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button onClick={onMenuClick} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+            <Menu className="w-6 h-6" />
+          </button>
+          <div>
+            <h1 className="text-lg font-bold">{title}</h1>
+            <p className="text-purple-100 text-xs hidden sm:block">Ambassador Program</p>
           </div>
         </div>
-        
-        {/* Mobile referral code - shown below on small screens */}
         {showReferralCode && referralCode && (
-          <div className="mt-3 bg-white/20 rounded-lg px-3 py-1.5 text-center lg:hidden flex items-center justify-center gap-2">
-            <span className="text-xs text-purple-200">Your Code:</span>
-            <code className="text-sm font-bold tracking-wider font-mono">{referralCode}</code>
-            <button 
-              onClick={onCopyCode} 
-              className="p-1 hover:bg-white/20 rounded transition-colors"
-              aria-label="Copy referral code"
-            >
-              <Copy className="w-3.5 h-3.5" />
+          <div className="bg-white/20 rounded-lg px-2 py-1 flex items-center gap-1.5">
+            <code className="text-xs font-bold tracking-wider font-mono">{referralCode}</code>
+            <button onClick={onCopyCode} className="p-0.5 hover:bg-white/20 rounded transition-colors">
+              <Copy className="w-3 h-3" />
             </button>
           </div>
         )}
@@ -524,6 +622,127 @@ const EarningsTab = ({ stats = {}, referrals = [], tierDisplay = { label: 'Bronz
   );
 };
 
+// ==================== PROFILE TAB ====================
+const ProfileTab = ({ profile, ambassadorData }: any) => {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Profile Information</CardTitle>
+        <CardDescription>Your ambassador profile details</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-sm text-gray-500">First Name</p>
+            <p className="font-medium">{profile?.firstName || 'N/A'}</p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Last Name</p>
+            <p className="font-medium">{profile?.lastName || 'N/A'}</p>
+          </div>
+          <div className="col-span-2">
+            <p className="text-sm text-gray-500">Email</p>
+            <p className="font-medium">{profile?.email || 'N/A'}</p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Referral Code</p>
+            <p className="font-medium font-mono">{ambassadorData?.referralCode || 'N/A'}</p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Current Tier</p>
+            <Badge className="bg-purple-100 text-purple-800">
+              {ambassadorData?.tier || 'Bronze'}
+            </Badge>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Status</p>
+            <Badge className="bg-green-100 text-green-800">
+              {ambassadorData?.applicationStatus || 'Active'}
+            </Badge>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Joined</p>
+            <p className="font-medium">
+              {ambassadorData?.createdAt 
+                ? new Date(ambassadorData.createdAt).toLocaleDateString() 
+                : 'N/A'}
+            </p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+// ==================== SHARE TAB ====================
+const ShareTab = ({ referralCode, onCopyCode }: any) => {
+  const { toast } = useToast();
+
+  const shareLinks = [
+    {
+      name: 'WhatsApp',
+      icon: '💬',
+      url: `https://wa.me/?text=${encodeURIComponent(`Join MedMap using my referral code: ${referralCode}! 🏥 https://medmap.co.za/doctor-enrollment?ref=${referralCode}`)}`,
+    },
+    {
+      name: 'Email',
+      icon: '📧',
+      url: `mailto:?subject=Join MedMap&body=${encodeURIComponent(`Hi! I'm inviting you to join MedMap using my referral code: ${referralCode}\n\nSign up here: https://medmap.co.za/doctor-enrollment?ref=${referralCode}`)}`,
+    },
+    {
+      name: 'Twitter/X',
+      icon: '🐦',
+      url: `https://twitter.com/intent/tweet?text=${encodeURIComponent(`Join MedMap using my referral code: ${referralCode}! 🏥`)}&url=${encodeURIComponent(`https://medmap.co.za/doctor-enrollment?ref=${referralCode}`)}`,
+    },
+    {
+      name: 'LinkedIn',
+      icon: '🔗',
+      url: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(`https://medmap.co.za/doctor-enrollment?ref=${referralCode}`)}`,
+    },
+  ];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Share & Refer</CardTitle>
+        <CardDescription>Spread the word and earn commissions!</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="bg-purple-50 p-4 rounded-lg">
+          <p className="text-sm text-purple-800 font-medium">Your Referral Code</p>
+          <div className="flex items-center gap-2 mt-1">
+            <code className="text-xl font-mono font-bold text-purple-700">{referralCode || 'N/A'}</code>
+            <Button size="sm" variant="outline" onClick={onCopyCode}>
+              <Copy className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          {shareLinks.map((link) => (
+            <Button
+              key={link.name}
+              variant="outline"
+              className="h-auto py-3 flex flex-col items-center gap-1"
+              onClick={() => window.open(link.url, '_blank')}
+            >
+              <span className="text-2xl">{link.icon}</span>
+              <span className="text-sm">{link.name}</span>
+            </Button>
+          ))}
+        </div>
+
+        <div className="bg-gray-50 p-4 rounded-lg">
+          <p className="text-sm text-gray-600 text-center">
+            Share your referral link with doctors in your network.<br />
+            You earn <strong className="text-purple-600">10% commission</strong> on every booking fee!
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
 // ==================== ONBOARDING PENDING SCREEN ====================
 const OnboardingPendingScreen = ({ 
   title, 
@@ -536,10 +755,10 @@ const OnboardingPendingScreen = ({
 }: any) => {
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Mobile Top Nav */}
       <TopNav 
-        title="Ambassador Onboarding"
-        onHome={onHome}
-        onLogout={onLogout}
+        title="Onboarding" 
+        onMenuClick={() => {}} 
         showReferralCode={false}
       />
       <div className="flex items-center justify-center p-4 pt-8">
@@ -587,6 +806,8 @@ const AmbassadorPortal = () => {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
 
   const uid = user?.uid || '';
   
@@ -618,7 +839,6 @@ const AmbassadorPortal = () => {
     toast({ title: 'Refreshed', description: `Found ${referrals?.length || 0} referrals.` });
   };
 
-  // ✅ LOGOUT HANDLER - Progress is saved automatically in Firestore
   const handleLogout = async () => {
     try {
       await signOut();
@@ -635,6 +855,10 @@ const AmbassadorPortal = () => {
 
   const handleGoHome = () => {
     navigate('/');
+  };
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
   };
 
   const getTierDisplay = (tierName: string) => {
@@ -677,6 +901,17 @@ const AmbassadorPortal = () => {
       return;
     }
   }, [authLoading, user, navigate]);
+
+  // Close sidebar on resize to desktop
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setSidebarOpen(false);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // ==================== LOADING STATES ====================
   if (authLoading) {
@@ -774,12 +1009,19 @@ const AmbassadorPortal = () => {
     return (
       <div className="min-h-screen bg-gray-50">
         <TopNav 
-          title="Ambassador Assessment"
-          onHome={handleGoHome}
-          onLogout={handleLogout}
+          title="Assessment" 
+          onMenuClick={() => setSidebarOpen(true)}
           showReferralCode={false}
         />
-        <div className="flex items-center justify-center p-4 pt-8">
+        <Sidebar
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          onLogout={handleLogout}
+          userProfile={profile}
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+        />
+        <div className="flex items-center justify-center p-4 pt-8 lg:ml-20">
           <Card className="max-w-md w-full">
             <CardHeader className="text-center">
               <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
@@ -822,12 +1064,19 @@ const AmbassadorPortal = () => {
     return (
       <div className="min-h-screen bg-gray-50">
         <TopNav 
-          title="Training Module"
-          onHome={handleGoHome}
-          onLogout={handleLogout}
+          title="Training" 
+          onMenuClick={() => setSidebarOpen(true)}
           showReferralCode={false}
         />
-        <div className="pt-4">
+        <Sidebar
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          onLogout={handleLogout}
+          userProfile={profile}
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+        />
+        <div className="lg:ml-20">
           <TrainingModule />
         </div>
       </div>
@@ -843,12 +1092,19 @@ const AmbassadorPortal = () => {
       return (
         <div className="min-h-screen bg-gray-50">
           <TopNav 
-            title="Knowledge Test"
-            onHome={handleGoHome}
-            onLogout={handleLogout}
+            title="Knowledge Test" 
+            onMenuClick={() => setSidebarOpen(true)}
             showReferralCode={false}
           />
-          <div className="flex items-center justify-center p-4 pt-8">
+          <Sidebar
+            isOpen={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
+            onLogout={handleLogout}
+            userProfile={profile}
+            activeTab={activeTab}
+            onTabChange={handleTabChange}
+          />
+          <div className="flex items-center justify-center p-4 pt-8 lg:ml-20">
             <Card className="max-w-md w-full">
               <CardHeader className="text-center">
                 <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
@@ -874,12 +1130,19 @@ const AmbassadorPortal = () => {
       return (
         <div className="min-h-screen bg-gray-50">
           <TopNav 
-            title="Knowledge Test"
-            onHome={handleGoHome}
-            onLogout={handleLogout}
+            title="Knowledge Test" 
+            onMenuClick={() => setSidebarOpen(true)}
             showReferralCode={false}
           />
-          <div className="pt-4">
+          <Sidebar
+            isOpen={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
+            onLogout={handleLogout}
+            userProfile={profile}
+            activeTab={activeTab}
+            onTabChange={handleTabChange}
+          />
+          <div className="lg:ml-20">
             <KnowledgeTest />
           </div>
         </div>
@@ -910,12 +1173,19 @@ const AmbassadorPortal = () => {
     return (
       <div className="min-h-screen bg-gray-50">
         <TopNav 
-          title="Interview Scheduled"
-          onHome={handleGoHome}
-          onLogout={handleLogout}
+          title="Interview Scheduled" 
+          onMenuClick={() => setSidebarOpen(true)}
           showReferralCode={false}
         />
-        <div className="flex items-center justify-center p-4 pt-8">
+        <Sidebar
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          onLogout={handleLogout}
+          userProfile={profile}
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+        />
+        <div className="flex items-center justify-center p-4 pt-8 lg:ml-20">
           <Card className="max-w-md w-full">
             <CardHeader className="text-center">
               <div className="mx-auto w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4">
@@ -942,12 +1212,19 @@ const AmbassadorPortal = () => {
     return (
       <div className="min-h-screen bg-gray-50">
         <TopNav 
-          title="Application Status"
-          onHome={handleGoHome}
-          onLogout={handleLogout}
+          title="Application Status" 
+          onMenuClick={() => setSidebarOpen(true)}
           showReferralCode={false}
         />
-        <div className="flex items-center justify-center p-4 pt-8">
+        <Sidebar
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          onLogout={handleLogout}
+          userProfile={profile}
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+        />
+        <div className="flex items-center justify-center p-4 pt-8 lg:ml-20">
           <Card className="max-w-md w-full">
             <CardHeader className="text-center">
               <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
@@ -1006,118 +1283,156 @@ const AmbassadorPortal = () => {
       );
     }
 
+    // Render the main content based on active tab
+    const renderContent = () => {
+      switch (activeTab) {
+        case 'overview':
+          return (
+            <OverviewTab 
+              referralCode={referralCode}
+              referralsCount={safeReferrals.length || 0}
+              stats={stats}
+              tierDisplay={tierDisplay}
+              onCopyCode={handleCopyReferralCode}
+            />
+          );
+        case 'referrals':
+          return (
+            <ReferralsTab 
+              referrals={filteredReferrals}
+              totalReferrals={safeReferrals.length || 0}
+              searchTerm={searchTerm}
+              setSearchTerm={setSearchTerm}
+              filterStatus={filterStatus}
+              setFilterStatus={setFilterStatus}
+              isLoading={isLoading}
+              getStatusBadge={getStatusBadge}
+              formatDate={formatDate}
+              onRefresh={handleRefresh}
+              onCopyCode={handleCopyReferralCode}
+              referralCode={referralCode}
+            />
+          );
+        case 'earnings':
+          return (
+            <EarningsTab 
+              stats={stats}
+              referrals={safeReferrals}
+              tierDisplay={tierDisplay}
+              formatDate={formatDate}
+              getStatusBadge={getStatusBadge}
+              onCopyCode={handleCopyReferralCode}
+            />
+          );
+        case 'profile':
+          return (
+            <ProfileTab 
+              profile={profile}
+              ambassadorData={ambassadorData}
+            />
+          );
+        case 'share':
+          return (
+            <ShareTab 
+              referralCode={referralCode}
+              onCopyCode={handleCopyReferralCode}
+            />
+          );
+        default:
+          return (
+            <OverviewTab 
+              referralCode={referralCode}
+              referralsCount={safeReferrals.length || 0}
+              stats={stats}
+              tierDisplay={tierDisplay}
+              onCopyCode={handleCopyReferralCode}
+            />
+          );
+      }
+    };
+
     return (
       <div className="min-h-screen bg-gray-50">
-        {/* Header with TopNav */}
+        {/* Mobile Top Nav */}
         <TopNav 
-          title="Ambassador Dashboard"
+          title="Dashboard"
+          onMenuClick={() => setSidebarOpen(true)}
+          showReferralCode={true}
           referralCode={referralCode}
           onCopyCode={handleCopyReferralCode}
-          onRefresh={handleRefresh}
-          onHome={handleGoHome}
-          isRefetching={isRefetching}
-          showReferralCode={true}
-          onLogout={handleLogout}
         />
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Welcome Message */}
-          <div className="mb-6">
-            <p className="text-gray-600">
-              Welcome back, <strong>{profile?.firstName || 'Ambassador'}</strong>!
-              {safeReferrals.length > 0 && (
-                <span className="ml-2 text-purple-600">
-                  You've referred {safeReferrals.length} doctor{safeReferrals.length > 1 ? 's' : ''} 🎉
-                </span>
-              )}
-            </p>
+        {/* Sidebar */}
+        <Sidebar
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          onLogout={handleLogout}
+          userProfile={profile}
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+        />
+
+        {/* Main Content */}
+        <div className="lg:ml-20 transition-all duration-300">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 lg:py-8">
+            {/* Welcome Message */}
+            <div className="mb-6 hidden lg:block">
+              <p className="text-gray-600">
+                Welcome back, <strong>{profile?.firstName || 'Ambassador'}</strong>!
+                {safeReferrals.length > 0 && (
+                  <span className="ml-2 text-purple-600">
+                    You've referred {safeReferrals.length} doctor{safeReferrals.length > 1 ? 's' : ''} 🎉
+                  </span>
+                )}
+              </p>
+            </div>
+
+            {/* Stats Cards - Only show on overview */}
+            {activeTab === 'overview' && (
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+                <StatsCard 
+                  title="Total Referrals" 
+                  value={stats?.totalReferrals || 0} 
+                  icon={Users} 
+                  color="purple" 
+                />
+                <StatsCard 
+                  title="Active Doctors" 
+                  value={stats?.activeDoctors || 0} 
+                  icon={Heart} 
+                  color="green"
+                  subtitle="Verified + 50+ bookings" 
+                />
+                <StatsCard 
+                  title="Eligible for Commission" 
+                  value={stats?.eligibleDoctors || 0} 
+                  icon={Target} 
+                  color="blue"
+                  subtitle="Verified & Active" 
+                />
+                <StatsCard 
+                  title="Current Tier" 
+                  value={tierDisplay.label} 
+                  icon={Award} 
+                  color="amber" 
+                  badge={tierDisplay.color}
+                  subtitle={`${stats?.activeDoctors || 0} active doctors`}
+                />
+                <StatsCard 
+                  title="Total Earnings" 
+                  value={`R${(stats?.totalCommission || 0).toLocaleString()}`} 
+                  icon={TrendingUp} 
+                  color="green"
+                  subtitle="From active doctors only" 
+                />
+              </div>
+            )}
+
+            {/* Content */}
+            <div>
+              {renderContent()}
+            </div>
           </div>
-
-          {/* Stats Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-            <StatsCard 
-              title="Total Referrals" 
-              value={stats?.totalReferrals || 0} 
-              icon={Users} 
-              color="purple" 
-            />
-            <StatsCard 
-              title="Active Doctors" 
-              value={stats?.activeDoctors || 0} 
-              icon={Heart} 
-              color="green"
-              subtitle="Verified + 50+ bookings" 
-            />
-            <StatsCard 
-              title="Eligible for Commission" 
-              value={stats?.eligibleDoctors || 0} 
-              icon={Target} 
-              color="blue"
-              subtitle="Verified & Active" 
-            />
-            <StatsCard 
-              title="Current Tier" 
-              value={tierDisplay.label} 
-              icon={Award} 
-              color="amber" 
-              badge={tierDisplay.color}
-              subtitle={`${stats?.activeDoctors || 0} active doctors`}
-            />
-            <StatsCard 
-              title="Total Earnings" 
-              value={`R${(stats?.totalCommission || 0).toLocaleString()}`} 
-              icon={TrendingUp} 
-              color="green"
-              subtitle="From active doctors only" 
-            />
-          </div>
-
-          {/* Tabs */}
-          <Tabs defaultValue="overview" className="space-y-6">
-            <TabsList className="grid w-full max-w-md grid-cols-3">
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="referrals">Referrals</TabsTrigger>
-              <TabsTrigger value="earnings">Earnings</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="overview">
-              <OverviewTab 
-                referralCode={referralCode}
-                referralsCount={safeReferrals.length || 0}
-                stats={stats}
-                tierDisplay={tierDisplay}
-                onCopyCode={handleCopyReferralCode}
-              />
-            </TabsContent>
-
-            <TabsContent value="referrals">
-              <ReferralsTab 
-                referrals={filteredReferrals}
-                totalReferrals={safeReferrals.length || 0}
-                searchTerm={searchTerm}
-                setSearchTerm={setSearchTerm}
-                filterStatus={filterStatus}
-                setFilterStatus={setFilterStatus}
-                isLoading={isLoading}
-                getStatusBadge={getStatusBadge}
-                formatDate={formatDate}
-                onRefresh={handleRefresh}
-                onCopyCode={handleCopyReferralCode}
-                referralCode={referralCode}
-              />
-            </TabsContent>
-
-            <TabsContent value="earnings">
-              <EarningsTab 
-                stats={stats}
-                referrals={safeReferrals}
-                tierDisplay={tierDisplay}
-                formatDate={formatDate}
-                getStatusBadge={getStatusBadge}
-                onCopyCode={handleCopyReferralCode}
-              />
-            </TabsContent>
-          </Tabs>
         </div>
       </div>
     );
