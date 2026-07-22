@@ -1,6 +1,6 @@
 // pages/ambassador/AmbassadorPortal.tsx
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { useAmbassador } from '@/hooks/useAmbassador';
@@ -30,6 +30,9 @@ import {
   Video,
   Sparkles,
   UserCheck,
+  LogOut,
+  Home,
+  ChevronLeft,
 } from 'lucide-react';
 import TrainingModule from './TrainingModule';
 import KnowledgeTest from './KnowledgeTest';
@@ -466,7 +469,7 @@ const OnboardingPendingScreen = ({ title, description, nextSteps, buttonText, bu
 
 // ==================== MAIN COMPONENT ====================
 const AmbassadorPortal = () => {
-  const { user, profile, isLoading: authLoading } = useAuth();
+  const { user, profile, isLoading: authLoading, signOut } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
@@ -500,6 +503,26 @@ const AmbassadorPortal = () => {
     toast({ title: 'Refreshing...' });
     await refetch();
     toast({ title: 'Refreshed', description: `Found ${referrals?.length || 0} referrals.` });
+  };
+
+  // ✅ NEW: Handle logout
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      toast({ title: 'Logged Out', description: 'You have been successfully logged out.' });
+      navigate('/signin');
+    } catch (error: any) {
+      toast({ 
+        title: 'Error', 
+        description: error.message || 'Failed to log out. Please try again.', 
+        variant: 'destructive' 
+      });
+    }
+  };
+
+  // ✅ NEW: Navigate to home
+  const handleGoHome = () => {
+    navigate('/');
   };
 
   const getTierDisplay = (tierName: string) => {
@@ -825,7 +848,20 @@ const AmbassadorPortal = () => {
                   </p>
                 )}
               </div>
-              <div className="flex items-center gap-3">
+              {/* ✅ NEW: Action buttons - Home, Refresh, Logout */}
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* Home Button */}
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="text-white hover:bg-white/20"
+                  onClick={handleGoHome}
+                >
+                  <Home className="w-4 h-4 mr-2" />
+                  Home
+                </Button>
+                
+                {/* Refresh Button */}
                 <Button 
                   variant="ghost" 
                   size="sm" 
@@ -836,6 +872,19 @@ const AmbassadorPortal = () => {
                   <RefreshCw className={`w-4 h-4 mr-2 ${isRefetching ? 'animate-spin' : ''}`} />
                   {isRefetching ? 'Refreshing...' : 'Refresh'}
                 </Button>
+                
+                {/* Logout Button */}
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="text-white hover:bg-red-500/20"
+                  onClick={handleLogout}
+                >
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Logout
+                </Button>
+                
+                {/* Referral Code Display */}
                 <div className="bg-white/20 rounded-lg px-4 py-2 text-center">
                   <p className="text-xs text-purple-200">Your Referral Code</p>
                   <div className="flex items-center gap-2">
