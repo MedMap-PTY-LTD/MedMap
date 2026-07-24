@@ -35,3 +35,5 @@ service-account.json
 serviceAccountKey.json
 .env
 node_modules
+services/booking/service-account.json
+**/service-account.json
