@@ -33,4 +33,5 @@ Thumbs.db
 # .gitignore
 service-account.json
 serviceAccountKey.json
+.env
 node_modules

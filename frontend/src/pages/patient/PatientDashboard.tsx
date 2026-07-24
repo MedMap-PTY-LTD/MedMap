@@ -49,6 +49,8 @@ import { serverTimestamp } from 'firebase/firestore';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { BookingForm } from '@/pages/patient/components/BookingForm';
+import { useBookingSocket } from '@/hooks/useBookingSocket';
 
 // ==================== TYPES ====================
 interface PatientProfile {
@@ -85,6 +87,7 @@ interface Doctor {
   practiceName: string;
   practiceAddress: string;
   consultationFee: number;
+  consultationDuration: number;
   rating: number;
   reviewCount: number;
   profileImage?: string;
@@ -99,9 +102,11 @@ interface Booking {
   doctorSpecialization: string;
   appointmentDate: string;
   appointmentTime: string;
-  status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+  status: 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'rescheduled' | 'no-show';
   notes?: string;
   consultationFee: number;
+  rescheduleCount?: number;
+  maxReschedules?: number;
   createdAt: any;
 }
 
@@ -214,6 +219,8 @@ const fetchPatientBookings = async (uid: string): Promise<Booking[]> => {
         status: data.status || 'pending',
         notes: data.notes || '',
         consultationFee: data.consultationFee || 0,
+        rescheduleCount: data.rescheduleCount || 0,
+        maxReschedules: data.maxReschedules || 2,
         createdAt: data.createdAt || null,
       });
     }
@@ -253,6 +260,7 @@ const fetchAvailableDoctors = async (): Promise<Doctor[]> => {
         practiceName: data.practiceName || '',
         practiceAddress: data.practiceAddress || '',
         consultationFee: data.consultationFee || 0,
+        consultationDuration: data.consultationDuration || 30,
         rating: data.rating || 0,
         reviewCount: data.reviewCount || 0,
         profileImage: data.profileImage || '',
@@ -303,7 +311,8 @@ const SidebarContent = ({
   isRefetchingProfile, 
   signOut,
   isMobile,
-  closeMobileMenu
+  closeMobileMenu,
+  openBookingForm
 }: any) => {
   const getInitials = (name: string) => {
     if (!name) return 'P';
@@ -413,13 +422,13 @@ const SidebarContent = ({
           
           <button
             onClick={() => {
-              navigate('/search');
               if (isMobile && closeMobileMenu) closeMobileMenu();
+              openBookingForm();
             }}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-blue-600 hover:bg-blue-50 transition-colors"
           >
-            <SearchIcon className="w-5 h-5 flex-shrink-0" />
-            <span className="truncate">Find Doctors</span>
+            <Plus className="w-5 h-5 flex-shrink-0" />
+            <span className="truncate">Book Appointment</span>
           </button>
         </nav>
       </ScrollArea>
@@ -471,12 +480,61 @@ const PatientDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
+  // Booking form state
+  const [showBookingForm, setShowBookingForm] = useState(false);
+  const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
+  
   // Profile editing states
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [editedProfile, setEditedProfile] = useState<Partial<PatientProfile>>({});
   const [allergiesInput, setAllergiesInput] = useState('');
   const [conditionsInput, setConditionsInput] = useState('');
   const [medicationsInput, setMedicationsInput] = useState('');
+
+  // ==================== SOCKET CONNECTION ====================
+  
+  const {
+    isConnected,
+    joinPatientRoom,
+    createBooking,
+  } = useBookingSocket({
+    onBookingCreated: (data) => {
+      toast({
+        title: 'Booking Requested',
+        description: `Your appointment request for ${data.appointmentDate} at ${data.appointmentTime} has been sent.`,
+      });
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.patientBookings] });
+    },
+    onBookingRescheduled: (data) => {
+      toast({
+        title: 'Booking Rescheduled',
+        description: `Your appointment has been rescheduled. ${data.rescheduleCount}/${data.maxReschedules} reschedules used.`,
+      });
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.patientBookings] });
+    },
+    onBookingCancelled: (data) => {
+      toast({
+        title: 'Booking Cancelled',
+        description: data.reason || 'Your appointment has been cancelled.',
+        variant: 'destructive',
+      });
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.patientBookings] });
+    },
+    onBookingUpdated: (data) => {
+      toast({
+        title: 'Booking Updated',
+        description: `Your appointment status is now ${data.status}.`,
+      });
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.patientBookings] });
+    },
+  });
+
+  // Join patient room when user is logged in
+  useEffect(() => {
+    if (user?.uid) {
+      joinPatientRoom(user.uid);
+    }
+  }, [user?.uid]);
 
   // ==================== QUERIES ====================
   
@@ -609,6 +667,84 @@ const PatientDashboard = () => {
 
   // ==================== HANDLER FUNCTIONS ====================
   
+  const openBookingForm = () => {
+    setSelectedDoctor(null);
+    setShowBookingForm(true);
+  };
+
+  const handleBookAppointment = async (doctorId: string, date: string, time: string, notes?: string) => {
+    if (!user || !patientProfile) {
+      toast({
+        title: 'Error',
+        description: 'Please sign in to book an appointment.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      // Get doctor details
+      const doctorRef = doc(db, 'doctors', doctorId);
+      const doctorSnap = await getDoc(doctorRef);
+      const doctorData = doctorSnap.exists() ? doctorSnap.data() : {};
+
+      // Get doctor user data
+      const userRef = doc(db, 'users', doctorId);
+      const userSnap = await getDoc(userRef);
+      const userData = userSnap.exists() ? userSnap.data() : {};
+
+      const doctorName = userData.fullName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Doctor';
+      const doctorSpecialization = doctorData.specialization || '';
+
+      const bookingData = {
+        doctorId,
+        patientId: user.uid,
+        patientName: patientProfile.fullName,
+        patientEmail: patientProfile.email,
+        patientPhone: patientProfile.phone || '',
+        doctorName: doctorName,
+        doctorSpecialization: doctorSpecialization,
+        appointmentDate: date,
+        appointmentTime: time,
+        endTime: calculateEndTime(time, doctorData.consultationDuration || 30),
+        notes,
+        consultationFee: doctorData.consultationFee || 0,
+      };
+
+      const response = await createBooking(bookingData);
+      
+      if (response.bookingId) {
+        toast({
+          title: 'Booking Requested',
+          description: 'Your appointment request has been sent to the doctor.',
+        });
+        setShowBookingForm(false);
+        setSelectedDoctor(null);
+        queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.patientBookings] });
+      } else {
+        toast({
+          title: 'Error',
+          description: response.error || 'Failed to create booking.',
+          variant: 'destructive',
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to book appointment.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const calculateEndTime = (startTime: string, durationMinutes: number): string => {
+    const [hours, minutes] = startTime.split(':').map(Number);
+    const totalMinutes = hours * 60 + minutes + durationMinutes;
+    const endHours = Math.floor(totalMinutes / 60);
+    const endMinutes = totalMinutes % 60;
+    return `${String(endHours).padStart(2, '0')}:${String(endMinutes).padStart(2, '0')}`;
+  };
+
   const handleSaveProfile = async () => {
     if (!patientProfile) return;
     
@@ -678,6 +814,10 @@ const PatientDashboard = () => {
         return <Badge className="bg-red-100 text-red-800">Cancelled</Badge>;
       case 'completed':
         return <Badge className="bg-blue-100 text-blue-800">Completed</Badge>;
+      case 'rescheduled':
+        return <Badge className="bg-purple-100 text-purple-800">Rescheduled</Badge>;
+      case 'no-show':
+        return <Badge className="bg-gray-100 text-gray-800">No-Show</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
@@ -761,7 +901,7 @@ const PatientDashboard = () => {
           <Button
             size="sm"
             className="bg-blue-600 hover:bg-blue-700 text-white"
-            onClick={() => navigate('/search')}
+            onClick={openBookingForm}
           >
             <Plus className="h-4 w-4 mr-1" />
             Book
@@ -785,6 +925,7 @@ const PatientDashboard = () => {
                 signOut={handleSignOut}
                 isMobile={true}
                 closeMobileMenu={() => setMobileMenuOpen(false)}
+                openBookingForm={openBookingForm}
               />
             </SheetContent>
           </Sheet>
@@ -804,6 +945,7 @@ const PatientDashboard = () => {
           isRefetchingProfile={isRefetchingProfile}
           signOut={handleSignOut}
           isMobile={false}
+          openBookingForm={openBookingForm}
         />
       </div>
       
@@ -819,13 +961,17 @@ const PatientDashboard = () => {
                 {activeTab === 'history' && 'Medical History'}
                 {activeTab === 'profile' && 'My Profile'}
               </h1>
-              <p className="text-gray-600 mt-1 text-xs sm:text-sm">
+              <p className="text-gray-600 mt-1 text-xs sm:text-sm flex items-center gap-2">
                 {new Date().toLocaleDateString('en-ZA', { 
                   weekday: 'long', 
                   year: 'numeric', 
                   month: 'long', 
                   day: 'numeric' 
                 })}
+                <span className="hidden sm:inline-flex items-center gap-1 text-xs">
+                  <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                  {isConnected ? 'Live' : 'Offline'}
+                </span>
               </p>
             </div>
             
@@ -835,7 +981,7 @@ const PatientDashboard = () => {
               )}
               <Button 
                 className="bg-blue-600 hover:bg-blue-700 text-white text-sm sm:text-base"
-                onClick={() => navigate('/search')}
+                onClick={openBookingForm}
               >
                 <Plus className="h-4 w-4 mr-2" />
                 Book Appointment
@@ -934,9 +1080,9 @@ const PatientDashboard = () => {
                           </p>
                           <Button
                             className="bg-blue-600 hover:bg-blue-700 text-sm sm:text-base"
-                            onClick={() => navigate('/search')}
+                            onClick={openBookingForm}
                           >
-                            Find Doctors
+                            Book Now
                           </Button>
                         </div>
                       ) : (
@@ -954,6 +1100,11 @@ const PatientDashboard = () => {
                                 <p className="text-[10px] sm:text-xs text-gray-500">
                                   {formatDate(booking.appointmentDate)} at {formatTime(booking.appointmentTime)}
                                 </p>
+                                {booking.rescheduleCount && booking.rescheduleCount > 0 && (
+                                  <p className="text-[10px] text-purple-600">
+                                    Rescheduled {booking.rescheduleCount}/{booking.maxReschedules} times
+                                  </p>
+                                )}
                               </div>
                             </div>
                             <div className="text-left sm:text-right flex-shrink-0">
@@ -993,12 +1144,16 @@ const PatientDashboard = () => {
                               <div className="min-w-0">
                                 <h4 className="font-medium text-gray-900 text-xs sm:text-sm truncate">Dr. {doctor.firstName} {doctor.lastName}</h4>
                                 <p className="text-[10px] sm:text-xs text-gray-600 truncate">{doctor.specialization}</p>
+                                <p className="text-[10px] text-gray-500">R{doctor.consultationFee}</p>
                               </div>
                             </div>
                             <Button 
                               size="sm" 
                               className="bg-blue-600 hover:bg-blue-700 flex-shrink-0 text-xs sm:text-sm"
-                              onClick={() => navigate(`/book/${doctor.id}`)}
+                              onClick={() => {
+                                setSelectedDoctor(doctor);
+                                setShowBookingForm(true);
+                              }}
                             >
                               Book
                             </Button>
@@ -1065,9 +1220,9 @@ const PatientDashboard = () => {
                     <p className="text-gray-600 mb-4">Book your first appointment to get started</p>
                     <Button
                       className="bg-blue-600 hover:bg-blue-700"
-                      onClick={() => navigate('/search')}
+                      onClick={openBookingForm}
                     >
-                      Find Doctors
+                      Book Now
                     </Button>
                   </div>
                 ) : (
@@ -1086,6 +1241,11 @@ const PatientDashboard = () => {
                             <p className="text-[10px] sm:text-xs text-gray-500">
                               {formatDate(booking.appointmentDate)} at {formatTime(booking.appointmentTime)}
                             </p>
+                            {booking.rescheduleCount && booking.rescheduleCount > 0 && (
+                              <p className="text-[10px] text-purple-600">
+                                Rescheduled {booking.rescheduleCount}/{booking.maxReschedules} times
+                              </p>
+                            )}
                           </div>
                         </div>
                         <div className="text-left sm:text-right flex-shrink-0">
@@ -1538,6 +1698,14 @@ const PatientDashboard = () => {
           )}
         </div>
       </div>
+
+      {/* ===== BOOKING FORM ===== */}
+      <BookingForm
+        open={showBookingForm}
+        onOpenChange={setShowBookingForm}
+        onBook={handleBookAppointment}
+        selectedDoctor={selectedDoctor}
+      />
     </div>
   );
 };
