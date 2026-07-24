@@ -27,13 +27,14 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
+import { useBookingSocket } from '@/hooks/useBookingSocket';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DoctorCalendar } from './DoctorCalendar';
 import {
@@ -209,6 +210,7 @@ const DoctorDashboard = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { updateBookingStatus, joinDoctorRoom, leaveDoctorRoom, isConnected } = useBookingSocket();
   
   const [activeTab, setActiveTab] = useState('overview');
   const [editOpen, setEditOpen] = useState(false);
@@ -291,11 +293,10 @@ const DoctorDashboard = () => {
   
   const updateBookingStatusMutation = useMutation({
     mutationFn: async ({ bookingId, status }: { bookingId: string; status: string }) => {
-      const bookingRef = doc(db, 'bookings', bookingId);
-      await updateDoc(bookingRef, {
-        status: status,
-        updatedAt: serverTimestamp(),
-      });
+      const response = await updateBookingStatus({ bookingId, status: status as any });
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to update booking status.');
+      }
     },
     onSuccess: (_, variables) => {
       toast({

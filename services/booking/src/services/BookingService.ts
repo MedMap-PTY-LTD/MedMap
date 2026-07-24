@@ -133,15 +133,20 @@ export class BookingService {
       
       // Use Firestore transaction to prevent double booking
       const result = await db.runTransaction(async (transaction) => {
-        // Check if slot is already booked
-        const existingBookingsSnapshot = await transaction.get(
-          db.collection('bookings')
-            .where('doctorId', '==', bookingData.doctorId)
-            .where('appointmentDate', '==', bookingData.appointmentDate)
-            .where('appointmentTime', '==', bookingData.appointmentTime)
-            .where('status', 'in', ['pending', 'confirmed', 'rescheduled'])
-        );
-        
+        const availabilityRef = db.collection('doctorAvailability').doc(`${bookingData.doctorId}_${bookingData.appointmentDate}`);
+
+        // Check if slot is already booked and read availability before any writes
+        const [existingBookingsSnapshot, availabilitySnap] = await Promise.all([
+          transaction.get(
+            db.collection('bookings')
+              .where('doctorId', '==', bookingData.doctorId)
+              .where('appointmentDate', '==', bookingData.appointmentDate)
+              .where('appointmentTime', '==', bookingData.appointmentTime)
+              .where('status', 'in', ['pending', 'confirmed', 'rescheduled'])
+          ),
+          transaction.get(availabilityRef),
+        ]);
+
         if (!existingBookingsSnapshot.empty) {
           throw new Error('This slot is no longer available');
         }
@@ -162,10 +167,6 @@ export class BookingService {
         const bookingRef = db.collection('bookings').doc(bookingId);
         transaction.set(bookingRef, booking);
 
-        // Update slot availability
-        const availabilityRef = db.collection('doctorAvailability').doc(`${bookingData.doctorId}_${bookingData.appointmentDate}`);
-        const availabilitySnap = await transaction.get(availabilityRef);
-        
         if (availabilitySnap.exists) {
           const data = availabilitySnap.data() as DoctorAvailability;
           const updatedSlots = (data.slots || []).map(slot =>
@@ -299,17 +300,30 @@ export class BookingService {
   ): Promise<{ success: boolean; error: string | null }> {
     try {
       const bookingRef = db.collection('bookings').doc(bookingId);
-      
+
       const result = await db.runTransaction(async (transaction) => {
         const bookingSnap = await transaction.get(bookingRef);
-        
+
         if (!bookingSnap.exists) {
           throw new Error('Booking not found');
         }
 
         const booking = bookingSnap.data() as Booking;
+        const oldAvailabilityRef = db.collection('doctorAvailability').doc(`${booking.doctorId}_${booking.appointmentDate}`);
+        const newAvailabilityRef = db.collection('doctorAvailability').doc(`${booking.doctorId}_${newDate}`);
 
-        // Check if max reschedules reached
+        const [existingBookingsSnapshot, oldAvailabilitySnap, newAvailabilitySnap] = await Promise.all([
+          transaction.get(
+            db.collection('bookings')
+              .where('doctorId', '==', booking.doctorId)
+              .where('appointmentDate', '==', newDate)
+              .where('appointmentTime', '==', newTime)
+              .where('status', 'in', ['pending', 'confirmed', 'rescheduled'])
+          ),
+          transaction.get(oldAvailabilityRef),
+          transaction.get(newAvailabilityRef),
+        ]);
+
         if (booking.rescheduleCount >= booking.maxReschedules) {
           transaction.update(bookingRef, {
             status: 'cancelled',
@@ -318,25 +332,37 @@ export class BookingService {
             updatedAt: new Date().toISOString(),
           });
 
-          await this.updateSlotAvailability(
-            booking.doctorId,
-            booking.appointmentDate,
-            booking.appointmentTime,
-            true
-          );
+          const restoredOldSlots = oldAvailabilitySnap.exists
+            ? (oldAvailabilitySnap.data() as DoctorAvailability).slots.map(slot =>
+                slot.startTime === booking.appointmentTime
+                  ? { ...slot, isAvailable: true, doctorId: booking.doctorId }
+                  : { ...slot, doctorId: booking.doctorId }
+              )
+            : [{
+                date: booking.appointmentDate,
+                startTime: booking.appointmentTime,
+                endTime: booking.appointmentTime,
+                isAvailable: true,
+                doctorId: booking.doctorId,
+              }];
+
+          if (oldAvailabilitySnap.exists) {
+            transaction.update(oldAvailabilityRef, {
+              slots: restoredOldSlots,
+              updatedAt: new Date().toISOString(),
+            });
+          } else {
+            transaction.set(oldAvailabilityRef, {
+              doctorId: booking.doctorId,
+              date: booking.appointmentDate,
+              slots: restoredOldSlots,
+              updatedAt: new Date().toISOString(),
+            });
+          }
 
           throw new Error('Booking cancelled - maximum reschedules exceeded');
         }
 
-        // Check if new slot is available
-        const existingBookingsSnapshot = await transaction.get(
-          db.collection('bookings')
-            .where('doctorId', '==', booking.doctorId)
-            .where('appointmentDate', '==', newDate)
-            .where('appointmentTime', '==', newTime)
-            .where('status', 'in', ['pending', 'confirmed', 'rescheduled'])
-        );
-        
         if (!existingBookingsSnapshot.empty) {
           throw new Error('The new slot is not available');
         }
@@ -351,32 +377,66 @@ export class BookingService {
           reason,
         };
 
-        // Restore old slot
-        await this.updateSlotAvailability(
-          booking.doctorId,
-          booking.appointmentDate,
-          booking.appointmentTime,
-          true
+        const now = new Date().toISOString();
+
+        const oldSlots = oldAvailabilitySnap.exists ? (oldAvailabilitySnap.data() as DoctorAvailability).slots || [] : [];
+        const restoredOldSlots = oldSlots.map(slot =>
+          slot.startTime === booking.appointmentTime
+            ? { ...slot, isAvailable: true, doctorId: booking.doctorId }
+            : { ...slot, doctorId: booking.doctorId }
         );
 
-        // Update booking
+        const blockedNewSlots = newAvailabilitySnap.exists
+          ? (newAvailabilitySnap.data() as DoctorAvailability).slots.map(slot =>
+              slot.startTime === newTime
+                ? { ...slot, isAvailable: false, doctorId: booking.doctorId, bookingId }
+                : { ...slot, doctorId: booking.doctorId }
+            )
+          : [{
+              date: newDate,
+              startTime: newTime,
+              endTime: newTime,
+              isAvailable: false,
+              doctorId: booking.doctorId,
+              bookingId,
+            }];
+
         transaction.update(bookingRef, {
           appointmentDate: newDate,
           appointmentTime: newTime,
           status: 'rescheduled',
           rescheduleCount: booking.rescheduleCount + 1,
           rescheduleHistory: [...(booking.rescheduleHistory || []), historyEntry],
-          updatedAt: new Date().toISOString(),
+          updatedAt: now,
         });
 
-        // Block new slot
-        await this.updateSlotAvailability(
-          booking.doctorId,
-          newDate,
-          newTime,
-          false,
-          bookingId
-        );
+        if (oldAvailabilitySnap.exists) {
+          transaction.update(oldAvailabilityRef, {
+            slots: restoredOldSlots,
+            updatedAt: now,
+          });
+        } else {
+          transaction.set(oldAvailabilityRef, {
+            doctorId: booking.doctorId,
+            date: booking.appointmentDate,
+            slots: restoredOldSlots,
+            updatedAt: now,
+          });
+        }
+
+        if (newAvailabilitySnap.exists) {
+          transaction.update(newAvailabilityRef, {
+            slots: blockedNewSlots,
+            updatedAt: now,
+          });
+        } else {
+          transaction.set(newAvailabilityRef, {
+            doctorId: booking.doctorId,
+            date: newDate,
+            slots: blockedNewSlots,
+            updatedAt: now,
+          });
+        }
       });
 
       return { success: true, error: null };

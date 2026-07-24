@@ -4,15 +4,12 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { SocketHandlers } from './handlers/socketHandlers';
 
-// Load environment variables
 dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
 
-// CORS configuration
 const corsOptions = {
   origin: process.env.CLIENT_URL || 'http://localhost:5173',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -22,7 +19,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// Health check endpoint
+// Health check
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy', 
@@ -32,28 +29,55 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Socket.io setup
+// ==================== SIMPLE TEST ROUTES ====================
+
+// Test route - no auth
+app.get('/api/test', (req, res) => {
+  res.json({ 
+    success: true, 
+    message: 'Booking service is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ==================== SOCKET.IO SETUP ====================
+
 const io = new Server(httpServer, {
   cors: corsOptions,
   path: '/socket.io/',
   transports: ['websocket', 'polling'],
-  pingTimeout: 60000,
-  pingInterval: 25000,
+  // Allow all connections - NO AUTH
+  allowEIO3: true,
 });
 
-// Connection handler
+// Connection handler - NO AUTH CHECK
 io.on('connection', (socket) => {
   console.log(`🔌 Client connected: ${socket.id}`);
   
-  // Initialize socket handlers for this connection
+  // Send a welcome message
+  socket.emit('welcome', { 
+    message: 'Connected to booking service',
+    timestamp: new Date().toISOString()
+  });
+
+  // Ping test
+  socket.on('ping', (callback) => {
+    console.log('📡 Ping received');
+    if (callback && typeof callback === 'function') {
+      callback({ pong: true, timestamp: new Date().toISOString() });
+    } else {
+      socket.emit('pong', { timestamp: new Date().toISOString() });
+    }
+  });
+
+  // Initialize socket handlers - NO AUTH REQUIRED
+  const { SocketHandlers } = require('./handlers/socketHandlers');
   new SocketHandlers({ io, socket });
   
-  // Handle disconnection
   socket.on('disconnect', () => {
     console.log(`🔌 Client disconnected: ${socket.id}`);
   });
-  
-  // Handle errors
+
   socket.on('error', (error) => {
     console.error(`❌ Socket error for ${socket.id}:`, error);
   });
@@ -67,16 +91,7 @@ httpServer.listen(PORT, () => {
   console.log(`📅 Booking Service running on port ${PORT}`);
   console.log(`📍 Health check: http://localhost:${PORT}/health`);
   console.log(`🔌 WebSocket: ws://localhost:${PORT}/socket.io`);
-  console.log(`🌐 Client URL: ${process.env.CLIENT_URL || 'http://localhost:5173'}`);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('🛑 Received SIGTERM, shutting down gracefully...');
-  httpServer.close(() => {
-    console.log('✅ Server closed');
-    process.exit(0);
-  });
+  console.log(`🔓 AUTH IS DISABLED - All connections allowed`);
 });
 
 export { app, io, httpServer };

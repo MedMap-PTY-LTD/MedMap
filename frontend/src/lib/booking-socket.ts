@@ -9,6 +9,8 @@ export const getBookingSocket = (): Socket => {
   if (!socketInstance) {
     const url = import.meta.env.VITE_BOOKING_SERVICE_URL || 'http://localhost:3001';
     
+    console.log(`🔌 Connecting to booking service at: ${url}`);
+    
     socketInstance = io(url, {
       transports: ['websocket', 'polling'],
       autoConnect: true,
@@ -39,6 +41,14 @@ export const getBookingSocket = (): Socket => {
     socketInstance.on('reconnect', (attemptNumber) => {
       console.log(`🔄 Reconnected after ${attemptNumber} attempts`);
     });
+
+    socketInstance.on('reconnect_error', (error) => {
+      console.error(`❌ Reconnect error:`, error);
+    });
+
+    socketInstance.on('reconnect_failed', () => {
+      console.error('❌ Reconnect failed');
+    });
   }
 
   return socketInstance;
@@ -49,6 +59,7 @@ export const disconnectBookingSocket = (): void => {
     socketInstance.disconnect();
     socketInstance = null;
     reconnectAttempts = 0;
+    console.log('🔌 Booking socket disconnected');
   }
 };
 

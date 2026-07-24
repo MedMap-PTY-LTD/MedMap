@@ -49,8 +49,6 @@ import { serverTimestamp } from 'firebase/firestore';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { BookingForm } from '@/pages/patient/components/BookingForm';
-import { useBookingSocket } from '@/hooks/useBookingSocket';
 
 // ==================== TYPES ====================
 interface PatientProfile {
@@ -87,7 +85,6 @@ interface Doctor {
   practiceName: string;
   practiceAddress: string;
   consultationFee: number;
-  consultationDuration: number;
   rating: number;
   reviewCount: number;
   profileImage?: string;
@@ -260,7 +257,6 @@ const fetchAvailableDoctors = async (): Promise<Doctor[]> => {
         practiceName: data.practiceName || '',
         practiceAddress: data.practiceAddress || '',
         consultationFee: data.consultationFee || 0,
-        consultationDuration: data.consultationDuration || 30,
         rating: data.rating || 0,
         reviewCount: data.reviewCount || 0,
         profileImage: data.profileImage || '',
@@ -311,8 +307,7 @@ const SidebarContent = ({
   isRefetchingProfile, 
   signOut,
   isMobile,
-  closeMobileMenu,
-  openBookingForm
+  closeMobileMenu
 }: any) => {
   const getInitials = (name: string) => {
     if (!name) return 'P';
@@ -422,8 +417,8 @@ const SidebarContent = ({
           
           <button
             onClick={() => {
+              navigate('/search');
               if (isMobile && closeMobileMenu) closeMobileMenu();
-              openBookingForm();
             }}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-blue-600 hover:bg-blue-50 transition-colors"
           >
@@ -480,61 +475,12 @@ const PatientDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
-  // Booking form state
-  const [showBookingForm, setShowBookingForm] = useState(false);
-  const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
-  
   // Profile editing states
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [editedProfile, setEditedProfile] = useState<Partial<PatientProfile>>({});
   const [allergiesInput, setAllergiesInput] = useState('');
   const [conditionsInput, setConditionsInput] = useState('');
   const [medicationsInput, setMedicationsInput] = useState('');
-
-  // ==================== SOCKET CONNECTION ====================
-  
-  const {
-    isConnected,
-    joinPatientRoom,
-    createBooking,
-  } = useBookingSocket({
-    onBookingCreated: (data) => {
-      toast({
-        title: 'Booking Requested',
-        description: `Your appointment request for ${data.appointmentDate} at ${data.appointmentTime} has been sent.`,
-      });
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.patientBookings] });
-    },
-    onBookingRescheduled: (data) => {
-      toast({
-        title: 'Booking Rescheduled',
-        description: `Your appointment has been rescheduled. ${data.rescheduleCount}/${data.maxReschedules} reschedules used.`,
-      });
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.patientBookings] });
-    },
-    onBookingCancelled: (data) => {
-      toast({
-        title: 'Booking Cancelled',
-        description: data.reason || 'Your appointment has been cancelled.',
-        variant: 'destructive',
-      });
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.patientBookings] });
-    },
-    onBookingUpdated: (data) => {
-      toast({
-        title: 'Booking Updated',
-        description: `Your appointment status is now ${data.status}.`,
-      });
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.patientBookings] });
-    },
-  });
-
-  // Join patient room when user is logged in
-  useEffect(() => {
-    if (user?.uid) {
-      joinPatientRoom(user.uid);
-    }
-  }, [user?.uid]);
 
   // ==================== QUERIES ====================
   
@@ -667,84 +613,6 @@ const PatientDashboard = () => {
 
   // ==================== HANDLER FUNCTIONS ====================
   
-  const openBookingForm = () => {
-    setSelectedDoctor(null);
-    setShowBookingForm(true);
-  };
-
-  const handleBookAppointment = async (doctorId: string, date: string, time: string, notes?: string) => {
-    if (!user || !patientProfile) {
-      toast({
-        title: 'Error',
-        description: 'Please sign in to book an appointment.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    try {
-      // Get doctor details
-      const doctorRef = doc(db, 'doctors', doctorId);
-      const doctorSnap = await getDoc(doctorRef);
-      const doctorData = doctorSnap.exists() ? doctorSnap.data() : {};
-
-      // Get doctor user data
-      const userRef = doc(db, 'users', doctorId);
-      const userSnap = await getDoc(userRef);
-      const userData = userSnap.exists() ? userSnap.data() : {};
-
-      const doctorName = userData.fullName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Doctor';
-      const doctorSpecialization = doctorData.specialization || '';
-
-      const bookingData = {
-        doctorId,
-        patientId: user.uid,
-        patientName: patientProfile.fullName,
-        patientEmail: patientProfile.email,
-        patientPhone: patientProfile.phone || '',
-        doctorName: doctorName,
-        doctorSpecialization: doctorSpecialization,
-        appointmentDate: date,
-        appointmentTime: time,
-        endTime: calculateEndTime(time, doctorData.consultationDuration || 30),
-        notes,
-        consultationFee: doctorData.consultationFee || 0,
-      };
-
-      const response = await createBooking(bookingData);
-      
-      if (response.bookingId) {
-        toast({
-          title: 'Booking Requested',
-          description: 'Your appointment request has been sent to the doctor.',
-        });
-        setShowBookingForm(false);
-        setSelectedDoctor(null);
-        queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.patientBookings] });
-      } else {
-        toast({
-          title: 'Error',
-          description: response.error || 'Failed to create booking.',
-          variant: 'destructive',
-        });
-      }
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to book appointment.',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const calculateEndTime = (startTime: string, durationMinutes: number): string => {
-    const [hours, minutes] = startTime.split(':').map(Number);
-    const totalMinutes = hours * 60 + minutes + durationMinutes;
-    const endHours = Math.floor(totalMinutes / 60);
-    const endMinutes = totalMinutes % 60;
-    return `${String(endHours).padStart(2, '0')}:${String(endMinutes).padStart(2, '0')}`;
-  };
-
   const handleSaveProfile = async () => {
     if (!patientProfile) return;
     
@@ -901,7 +769,7 @@ const PatientDashboard = () => {
           <Button
             size="sm"
             className="bg-blue-600 hover:bg-blue-700 text-white"
-            onClick={openBookingForm}
+            onClick={() => navigate('/search')}
           >
             <Plus className="h-4 w-4 mr-1" />
             Book
@@ -925,7 +793,6 @@ const PatientDashboard = () => {
                 signOut={handleSignOut}
                 isMobile={true}
                 closeMobileMenu={() => setMobileMenuOpen(false)}
-                openBookingForm={openBookingForm}
               />
             </SheetContent>
           </Sheet>
@@ -945,7 +812,6 @@ const PatientDashboard = () => {
           isRefetchingProfile={isRefetchingProfile}
           signOut={handleSignOut}
           isMobile={false}
-          openBookingForm={openBookingForm}
         />
       </div>
       
@@ -961,17 +827,13 @@ const PatientDashboard = () => {
                 {activeTab === 'history' && 'Medical History'}
                 {activeTab === 'profile' && 'My Profile'}
               </h1>
-              <p className="text-gray-600 mt-1 text-xs sm:text-sm flex items-center gap-2">
+              <p className="text-gray-600 mt-1 text-xs sm:text-sm">
                 {new Date().toLocaleDateString('en-ZA', { 
                   weekday: 'long', 
                   year: 'numeric', 
                   month: 'long', 
                   day: 'numeric' 
                 })}
-                <span className="hidden sm:inline-flex items-center gap-1 text-xs">
-                  <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                  {isConnected ? 'Live' : 'Offline'}
-                </span>
               </p>
             </div>
             
@@ -981,7 +843,7 @@ const PatientDashboard = () => {
               )}
               <Button 
                 className="bg-blue-600 hover:bg-blue-700 text-white text-sm sm:text-base"
-                onClick={openBookingForm}
+                onClick={() => navigate('/search')}
               >
                 <Plus className="h-4 w-4 mr-2" />
                 Book Appointment
@@ -1080,9 +942,9 @@ const PatientDashboard = () => {
                           </p>
                           <Button
                             className="bg-blue-600 hover:bg-blue-700 text-sm sm:text-base"
-                            onClick={openBookingForm}
+                            onClick={() => navigate('/search')}
                           >
-                            Book Now
+                            Find Doctors
                           </Button>
                         </div>
                       ) : (
@@ -1150,10 +1012,7 @@ const PatientDashboard = () => {
                             <Button 
                               size="sm" 
                               className="bg-blue-600 hover:bg-blue-700 flex-shrink-0 text-xs sm:text-sm"
-                              onClick={() => {
-                                setSelectedDoctor(doctor);
-                                setShowBookingForm(true);
-                              }}
+                              onClick={() => navigate(`/book/${doctor.id}`)}
                             >
                               Book
                             </Button>
@@ -1220,9 +1079,9 @@ const PatientDashboard = () => {
                     <p className="text-gray-600 mb-4">Book your first appointment to get started</p>
                     <Button
                       className="bg-blue-600 hover:bg-blue-700"
-                      onClick={openBookingForm}
+                      onClick={() => navigate('/search')}
                     >
-                      Book Now
+                      Find Doctors
                     </Button>
                   </div>
                 ) : (
@@ -1698,14 +1557,6 @@ const PatientDashboard = () => {
           )}
         </div>
       </div>
-
-      {/* ===== BOOKING FORM ===== */}
-      <BookingForm
-        open={showBookingForm}
-        onOpenChange={setShowBookingForm}
-        onBook={handleBookAppointment}
-        selectedDoctor={selectedDoctor}
-      />
     </div>
   );
 };

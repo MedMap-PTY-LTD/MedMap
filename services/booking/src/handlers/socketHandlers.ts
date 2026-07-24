@@ -28,7 +28,6 @@ export class SocketHandlers {
       this.handleJoinPatient(patientId);
     });
 
-    // Leave rooms
     this.socket.on(BookingEvents.LEAVE_DOCTOR, (doctorId: string) => {
       this.handleLeaveDoctor(doctorId);
     });
@@ -102,6 +101,7 @@ export class SocketHandlers {
 
   private async handleCreateBooking(data: any, callback: Function): Promise<void> {
     try {
+      console.log('📝 Creating booking:', data);
       const result = await BookingService.createBooking(data);
       
       if (result.bookingId) {
@@ -126,12 +126,14 @@ export class SocketHandlers {
       
       callback(result);
     } catch (error: any) {
+      console.error('❌ Error creating booking:', error);
       callback({ bookingId: '', error: error.message });
     }
   }
 
   private async handleRescheduleBooking(data: any, callback: Function): Promise<void> {
     try {
+      console.log('🔄 Rescheduling booking:', data);
       const booking = await BookingService.getBooking(data.bookingId);
       
       if (!booking) {
@@ -180,12 +182,14 @@ export class SocketHandlers {
       
       callback(result);
     } catch (error: any) {
+      console.error('❌ Error rescheduling booking:', error);
       callback({ success: false, error: error.message });
     }
   }
 
   private async handleCancelBooking(data: any, callback: Function): Promise<void> {
     try {
+      console.log('❌ Cancelling booking:', data);
       const booking = await BookingService.getBooking(data.bookingId);
       
       if (!booking) {
@@ -217,12 +221,14 @@ export class SocketHandlers {
       
       callback(result);
     } catch (error: any) {
+      console.error('❌ Error cancelling booking:', error);
       callback({ success: false, error: error.message });
     }
   }
 
   private async handleUpdateStatus(data: any, callback: Function): Promise<void> {
     try {
+      console.log('📊 Updating booking status:', data);
       const booking = await BookingService.getBooking(data.bookingId);
       
       if (!booking) {
@@ -252,6 +258,7 @@ export class SocketHandlers {
       
       callback(result);
     } catch (error: any) {
+      console.error('❌ Error updating booking status:', error);
       callback({ success: false, error: error.message });
     }
   }
@@ -260,15 +267,41 @@ export class SocketHandlers {
 
   private async handleGetSlots(data: any, callback: Function): Promise<void> {
     try {
+      console.log('📡 Getting slots for:', { doctorId: data.doctorId, date: data.date });
+      
+      if (!data.doctorId || !data.date) {
+        console.log('⚠️ Missing doctorId or date:', data);
+        callback({ 
+          success: false, 
+          error: 'Missing doctorId or date',
+          slots: [] 
+        });
+        return;
+      }
+
       const slots = await BookingService.getAvailableSlots(data.doctorId, data.date);
-      callback({ success: true, slots });
+      
+      console.log(`✅ Found ${slots.length} slots for ${data.doctorId} on ${data.date}`);
+      
+      callback({ 
+        success: true, 
+        slots: slots || [],
+        count: slots?.length || 0
+      });
     } catch (error: any) {
-      callback({ success: false, error: error.message });
+      console.error('❌ Error getting slots:', error);
+      callback({ 
+        success: true, 
+        slots: [],
+        count: 0,
+        error: error.message
+      });
     }
   }
 
   private async handleGetBookings(data: any, callback: Function): Promise<void> {
     try {
+      console.log('📋 Getting bookings for:', data);
       let bookings: Booking[] = [];
       
       if (data.role === 'doctor') {
@@ -277,32 +310,40 @@ export class SocketHandlers {
         bookings = await BookingService.getPatientBookings(data.userId);
       }
       
+      console.log(`✅ Found ${bookings.length} bookings`);
       callback({ success: true, bookings });
     } catch (error: any) {
-      callback({ success: false, error: error.message });
+      console.error('❌ Error getting bookings:', error);
+      callback({ success: false, error: error.message, bookings: [] });
     }
   }
 
   private async handleGetUpcoming(data: any, callback: Function): Promise<void> {
     try {
+      console.log('📅 Getting upcoming bookings for:', data);
       const bookings = await BookingService.getUpcomingBookings(data.doctorId);
+      console.log(`✅ Found ${bookings.length} upcoming bookings`);
       callback({ success: true, bookings });
     } catch (error: any) {
-      callback({ success: false, error: error.message });
+      console.error('❌ Error getting upcoming bookings:', error);
+      callback({ success: false, error: error.message, bookings: [] });
     }
   }
 
   private async handleGetStats(data: any, callback: Function): Promise<void> {
     try {
+      console.log('📊 Getting stats for:', data);
       const stats = await BookingService.getBookingStats(data.doctorId);
       callback({ success: true, stats });
     } catch (error: any) {
-      callback({ success: false, error: error.message });
+      console.error('❌ Error getting stats:', error);
+      callback({ success: false, error: error.message, stats: null });
     }
   }
 
   private async handleSetAvailability(data: any, callback: Function): Promise<void> {
     try {
+      console.log('📝 Setting availability for:', { doctorId: data.doctorId, date: data.date, slots: data.slots?.length });
       const result = await BookingService.setDayAvailability(
         data.doctorId,
         data.date,
@@ -320,6 +361,7 @@ export class SocketHandlers {
       
       callback(result);
     } catch (error: any) {
+      console.error('❌ Error setting availability:', error);
       callback({ success: false, error: error.message });
     }
   }
