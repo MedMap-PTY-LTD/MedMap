@@ -17,6 +17,11 @@ export function useBookingSocket(events?: BookingEvents) {
   const socket = useRef(getBookingSocket());
   const eventsRef = useRef(events);
 
+  // Rooms we want to be in. Re-joined automatically on every (re)connect,
+  // so a join requested before the socket is ready is never lost.
+  const doctorRooms = useRef<Set<string>>(new Set());
+  const patientRooms = useRef<Set<string>>(new Set());
+
   // Update events ref when events change
   useEffect(() => {
     eventsRef.current = events;
@@ -26,11 +31,18 @@ export function useBookingSocket(events?: BookingEvents) {
   useEffect(() => {
     const currentSocket = socket.current;
 
+    // Re-join all requested rooms (first connect AND every reconnect)
+    const rejoinRooms = () => {
+      doctorRooms.current.forEach((id) => currentSocket.emit('join:doctor', id));
+      patientRooms.current.forEach((id) => currentSocket.emit('join:patient', id));
+    };
+
     // Connection handlers
     const onConnect = () => {
       console.log('✅ Socket connected to booking service');
       setIsConnected(true);
       setIsConnecting(false);
+      rejoinRooms();
     };
 
     const onDisconnect = (reason: string) => {
@@ -81,6 +93,14 @@ export function useBookingSocket(events?: BookingEvents) {
     currentSocket.on('booking:updated', onBookingUpdated);
     currentSocket.on('availability:updated', onAvailabilityUpdated);
 
+    // If the shared socket was already connected before this hook mounted,
+    // the 'connect' event won't fire again for us — sync state and re-join now.
+    if (currentSocket.connected) {
+      setIsConnected(true);
+      setIsConnecting(false);
+      rejoinRooms();
+    }
+
     // Cleanup
     return () => {
       currentSocket.off('connect', onConnect);
@@ -96,39 +116,48 @@ export function useBookingSocket(events?: BookingEvents) {
 
   // ==================== ROOM MANAGEMENT ====================
 
-  // Join a doctor's room to receive updates
+  // Join a doctor's room. Safe to call before the socket is connected — the
+  // room is remembered and joined on connect, and re-joined after a reconnect.
   const joinDoctorRoom = useCallback((doctorId: string) => {
-    if (!socket.current || !isConnected) {
-      console.warn('⚠️ Cannot join doctor room: socket not connected');
-      return;
+    if (!doctorId) return;
+    doctorRooms.current.add(doctorId);
+    if (socket.current?.connected) {
+      socket.current.emit('join:doctor', doctorId);
+      console.log(`👨‍⚕️ Joined doctor room: ${doctorId}`);
+    } else {
+      console.log(`👨‍⚕️ Queued doctor room (joins on connect): ${doctorId}`);
     }
-    socket.current.emit('join:doctor', doctorId);
-    console.log(`👨‍⚕️ Joined doctor room: ${doctorId}`);
-  }, [isConnected]);
+  }, []);
 
-  // Join a patient's room to receive updates
+  // Join a patient's room
   const joinPatientRoom = useCallback((patientId: string) => {
-    if (!socket.current || !isConnected) {
-      console.warn('⚠️ Cannot join patient room: socket not connected');
-      return;
+    if (!patientId) return;
+    patientRooms.current.add(patientId);
+    if (socket.current?.connected) {
+      socket.current.emit('join:patient', patientId);
+      console.log(`👤 Joined patient room: ${patientId}`);
+    } else {
+      console.log(`👤 Queued patient room (joins on connect): ${patientId}`);
     }
-    socket.current.emit('join:patient', patientId);
-    console.log(`👤 Joined patient room: ${patientId}`);
-  }, [isConnected]);
+  }, []);
 
   // Leave a doctor's room
   const leaveDoctorRoom = useCallback((doctorId: string) => {
-    if (!socket.current || !isConnected) return;
-    socket.current.emit('leave:doctor', doctorId);
-    console.log(`👨‍⚕️ Left doctor room: ${doctorId}`);
-  }, [isConnected]);
+    doctorRooms.current.delete(doctorId);
+    if (socket.current?.connected) {
+      socket.current.emit('leave:doctor', doctorId);
+      console.log(`👨‍⚕️ Left doctor room: ${doctorId}`);
+    }
+  }, []);
 
   // Leave a patient's room
   const leavePatientRoom = useCallback((patientId: string) => {
-    if (!socket.current || !isConnected) return;
-    socket.current.emit('leave:patient', patientId);
-    console.log(`👤 Left patient room: ${patientId}`);
-  }, [isConnected]);
+    patientRooms.current.delete(patientId);
+    if (socket.current?.connected) {
+      socket.current.emit('leave:patient', patientId);
+      console.log(`👤 Left patient room: ${patientId}`);
+    }
+  }, []);
 
   // ==================== BOOKING OPERATIONS ====================
 
