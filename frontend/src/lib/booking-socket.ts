@@ -7,7 +7,7 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 
 export const getBookingSocket = (): Socket => {
   if (!socketInstance) {
-    const url = import.meta.env.VITE_BOOKING_SERVICE_URL || 'http://localhost:3001';
+    const url = import.meta.env.VITE_BOOKING_SERVICE_URL || 'https://medmap-f4ob.onrender.com';
     
     console.log(`🔌 Connecting to booking service at: ${url}`);
     
