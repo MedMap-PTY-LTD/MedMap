@@ -16,7 +16,7 @@ services:
       - key: PORT
         value: 10000
       - key: CLIENT_URL
-        value: "https://medmap-f4ob.onrender.com"
+        value: "https://medmap.co.za"
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: FIREBASE_PRIVATE_KEY
