@@ -12,6 +12,8 @@ import { BookingsRepo, Booking as RepoBooking } from '@/backend/repositories/boo
 import { PaymentsRepo } from '@/backend/repositories/payments';
 import { api } from '@/lib/django-api';
 import { useSearchParams } from 'react-router-dom';
+import { db } from '@/lib/firebase';
+import { collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 
 // Map or extend RepoBooking to match local needs
 interface Booking extends RepoBooking {
@@ -68,37 +70,56 @@ const BookingHistory = () => {
 
   const fetchBookings = async () => {
     try {
-        if (!user?.id) return;
-        const data = await BookingsRepo.listForUser(user.id);
-        
-        // Map data to match component expectations
-        const mapped = data.map((b: any) => ({
-            ...b,
-            doctors: b.doctor_details ? {
-                practice_name: b.doctor_details.city, // Fallback
-                speciality: b.doctor_details.speciality,
-                city: b.doctor_details.city,
-                province: b.doctor_details.province,
-                profiles: {
-                    first_name: b.doctor_details.first_name,
-                    last_name: b.doctor_details.last_name,
-                    phone: null
-                }
-            } : null,
-            // Fallbacks for missing fields in Django model
-            payment_status: b.payment_status || 'unpaid',
-            total_amount: parseFloat(b.total_amount) || 0,
-            consultation_fee: parseFloat(b.consultation_fee) || 0,
-            booking_fee: parseFloat(b.booking_fee) || 0,
-            notes: b.notes || '',
-        }));
-        
-        setBookings(mapped);
+      if (!user?.uid) {        // Firebase uses .uid, not .id
+        setLoading(false);
+        return;
+      }
+
+      // Read bookings from Firestore — where this app actually stores them.
+      // (where patientId + orderBy appointmentDate is backed by the composite index.)
+      const q = query(
+        collection(db, 'bookings'),
+        where('patientId', '==', user.uid),
+        orderBy('appointmentDate', 'desc'),
+        limit(100)
+      );
+      const snap = await getDocs(q);
+
+      // Map the Firestore booking shape onto the fields this page renders.
+      const mapped = snap.docs.map((d) => {
+        const b = d.data() as any;
+        return {
+          id: d.id,
+          appointment_date: b.appointmentDate,
+          appointment_time: b.appointmentTime,
+          status: b.status,
+          notes: b.notes || '',
+          doctor_notes: '',
+          payment_status: b.paymentStatus || 'unpaid',
+          consultation_fee: b.consultationFee || 0,
+          booking_fee: b.bookingFee || 0,
+          total_amount: b.consultationFee || 0,
+          doctors: {
+            practice_name: b.doctorName || 'Doctor',
+            speciality: b.doctorSpecialization || '',
+            city: '',
+            province: '',
+            profiles: {
+              first_name: b.doctorName || null,
+              last_name: null,
+              phone: b.patientPhone || null,
+            },
+          },
+        };
+      }) as unknown as Booking[];
+
+      setBookings(mapped);
     } catch (error: any) {
+      console.error('❌ Failed to fetch bookings from Firestore:', error);
       toast({
-        title: "Error",
-        description: "Failed to fetch your bookings",
-        variant: "destructive",
+        title: 'Error',
+        description: 'Failed to fetch your bookings',
+        variant: 'destructive',
       });
     } finally {
       setLoading(false);
