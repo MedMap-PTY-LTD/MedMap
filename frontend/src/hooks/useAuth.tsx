@@ -26,19 +26,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { toast } = useToast();
 
   useEffect(() => {
-    const unsubscribe = authService.onAuthStateChange(async (firebaseUser) => {
+    // Track the current profile listener so we can tear it down on the next
+    // auth change / sign-out. Returning a cleanup from the auth callback does
+    // nothing (Firebase ignores it), which leaks listeners that keep firing
+    // after sign-out and throw "Missing or insufficient permissions".
+    let profileUnsubscribe: (() => void) | null = null;
+
+    const unsubscribe = authService.onAuthStateChange((firebaseUser) => {
       setUser(firebaseUser);
-      
+
+      // Always tear down the previous profile listener before (re)subscribing
+      if (profileUnsubscribe) {
+        profileUnsubscribe();
+        profileUnsubscribe = null;
+      }
+
       if (firebaseUser) {
-        // Subscribe to user profile
-        const profileUnsubscribe = onSnapshot(
+        profileUnsubscribe = onSnapshot(
           doc(db, 'users', firebaseUser.uid),
           (snapshot) => {
             if (snapshot.exists()) {
-              const profileData = snapshot.data() as UserProfile;
-              setProfile(profileData);
+              setProfile(snapshot.data() as UserProfile);
             } else {
-              // If profile doesn't exist in Firestore but user is authenticated
               console.log('User authenticated but no profile found in Firestore');
             }
             setLoading(false);
@@ -48,15 +57,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setLoading(false);
           }
         );
-        
-        return () => profileUnsubscribe();
       } else {
         setProfile(null);
         setLoading(false);
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      if (profileUnsubscribe) profileUnsubscribe();
+      unsubscribe();
+    };
   }, []);
 
   const signUp = async (email: string, password: string, profileData: any) => {
