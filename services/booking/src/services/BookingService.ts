@@ -1,4 +1,3 @@
-// src/services/BookingService.ts
 import { db } from '../config/firebase';
 import { 
   Booking, 
@@ -7,6 +6,7 @@ import {
   BookingStats,
   RescheduleHistory 
 } from '../types';
+import { PaymentService } from './PaymentService';
 
 const MAX_RESCHEDULES = 2;
 const DEFAULT_CONSULTATION_DURATION = 30;
@@ -127,15 +127,15 @@ export class BookingService {
   }
 
   // Create booking with transaction
-  static async createBooking(bookingData: Omit<Booking, 'id' | 'status' | 'rescheduleCount' | 'maxReschedules' | 'rescheduleHistory' | 'createdAt' | 'updatedAt'>): Promise<{ bookingId: string; error: string | null }> {
+  static async createBooking(
+    bookingData: Omit<Booking, 'id' | 'status' | 'rescheduleCount' | 'maxReschedules' | 'rescheduleHistory' | 'createdAt' | 'updatedAt' | 'paymentStatus' | 'paymentId' | 'paymentReference'>
+  ): Promise<{ bookingId: string; error: string | null }> {
     try {
       const bookingId = `booking_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
       
-      // Use Firestore transaction to prevent double booking
       const result = await db.runTransaction(async (transaction) => {
         const availabilityRef = db.collection('doctorAvailability').doc(`${bookingData.doctorId}_${bookingData.appointmentDate}`);
 
-        // Check if slot is already booked and read availability before any writes
         const [existingBookingsSnapshot, availabilitySnap] = await Promise.all([
           transaction.get(
             db.collection('bookings')
@@ -151,12 +151,12 @@ export class BookingService {
           throw new Error('This slot is no longer available');
         }
 
-        // Create the booking
         const now = new Date().toISOString();
         const booking: Booking = {
           id: bookingId,
           ...bookingData,
           status: 'pending',
+          paymentStatus: 'unpaid',
           rescheduleCount: 0,
           maxReschedules: MAX_RESCHEDULES,
           rescheduleHistory: [],
@@ -187,6 +187,58 @@ export class BookingService {
     } catch (error: any) {
       console.error('Error creating booking:', error);
       return { bookingId: '', error: error.message };
+    }
+  }
+
+  // 🔥 Create booking + PayFast payment form together
+  static async createBookingWithPayment(
+    bookingData: Omit<Booking, 'id' | 'status' | 'rescheduleCount' | 'maxReschedules' | 'rescheduleHistory' | 'createdAt' | 'updatedAt' | 'paymentStatus' | 'paymentId' | 'paymentReference'>,
+    paymentMethod: string = 'card'
+  ): Promise<{ bookingId: string; paymentUrl?: string; formHtml?: string; error: string | null }> {
+    const { bookingId, error } = await this.createBooking(bookingData);
+    if (error || !bookingId) {
+      return { bookingId: '', error };
+    }
+
+    try {
+      const paymentResult = await PaymentService.createPaymentIntent({
+        bookingId,
+        amount: bookingData.consultationFee,
+        currency: 'ZAR',
+        customerEmail: bookingData.patientEmail,
+        customerName: bookingData.patientName,
+        description: `Consultation with Dr. ${bookingData.doctorName}`,
+        paymentMethod,
+      });
+
+      if (paymentResult.error) {
+        // Rollback booking + free slot on payment init failure
+        await this.updateSlotAvailability(
+          bookingData.doctorId,
+          bookingData.appointmentDate,
+          bookingData.appointmentTime,
+          true
+        );
+        await db.collection('bookings').doc(bookingId).delete();
+        return { bookingId: '', error: paymentResult.error };
+      }
+
+      return { 
+        bookingId, 
+        paymentUrl: paymentResult.paymentUrl, 
+        formHtml: paymentResult.formHtml,
+        error: null 
+      };
+    } catch (err: any) {
+      // Rollback
+      await this.updateSlotAvailability(
+        bookingData.doctorId,
+        bookingData.appointmentDate,
+        bookingData.appointmentTime,
+        true
+      );
+      await db.collection('bookings').doc(bookingId).delete();
+      return { bookingId: '', error: err.message };
     }
   }
 
@@ -282,7 +334,7 @@ export class BookingService {
         completed: bookings.filter(b => b.status === 'completed').length,
         cancelled: bookings.filter(b => b.status === 'cancelled').length,
         revenue: bookings
-          .filter(b => b.status === 'completed')
+          .filter(b => b.paymentStatus === 'paid')
           .reduce((sum, b) => sum + (b.consultationFee || 0), 0),
       };
     } catch (error) {
@@ -301,7 +353,7 @@ export class BookingService {
     try {
       const bookingRef = db.collection('bookings').doc(bookingId);
 
-      const result = await db.runTransaction(async (transaction) => {
+      await db.runTransaction(async (transaction) => {
         const bookingSnap = await transaction.get(bookingRef);
 
         if (!bookingSnap.exists) {
@@ -367,7 +419,6 @@ export class BookingService {
           throw new Error('The new slot is not available');
         }
 
-        // Add to reschedule history
         const historyEntry: RescheduleHistory = {
           fromDate: booking.appointmentDate,
           fromTime: booking.appointmentTime,
@@ -446,8 +497,11 @@ export class BookingService {
     }
   }
 
-  // Cancel booking
-  static async cancelBooking(bookingId: string, reason?: string): Promise<{ success: boolean; error: string | null }> {
+  // 🔥 Updated: Cancel booking with PayFast-aware refund handling
+  static async cancelBooking(
+    bookingId: string, 
+    reason?: string
+  ): Promise<{ success: boolean; error: string | null; refundPending?: boolean }> {
     try {
       const bookingRef = db.collection('bookings').doc(bookingId);
       const bookingSnap = await bookingRef.get();
@@ -457,8 +511,9 @@ export class BookingService {
       }
 
       const booking = bookingSnap.data() as Booking;
+      let refundPending = false;
 
-      // Restore slot availability
+      // Free the slot
       await this.updateSlotAvailability(
         booking.doctorId,
         booking.appointmentDate,
@@ -466,18 +521,110 @@ export class BookingService {
         true
       );
 
-      // Update booking
+      // Determine payment status after cancellation
+      let newPaymentStatus = booking.paymentStatus;
+
+      if (booking.paymentStatus === 'paid') {
+        // ⚠️ PayFast refunds require either:
+        //   1. Manual processing via PayFast dashboard, OR
+        //   2. Special API access (request from PayFast, not available in sandbox)
+        // We mark as 'refund_pending' and let an admin process it.
+        newPaymentStatus = 'refund_pending';
+        refundPending = true;
+
+        // Log for admin visibility
+        await db.collection('refundQueue').add({
+          bookingId,
+          paymentId: booking.paymentId,
+          pfPaymentId: booking.pfPaymentId || null,
+          amount: booking.consultationFee,
+          customerEmail: booking.patientEmail,
+          customerName: booking.patientName,
+          reason: reason || 'Cancelled by patient',
+          status: 'pending_manual_refund',
+          createdAt: new Date().toISOString(),
+        });
+
+        console.log(`⚠️ Refund needed for booking ${bookingId} — process manually in PayFast dashboard`);
+      } else if (booking.paymentStatus === 'pending') {
+        // Payment was initiated but never completed — safe to mark as failed
+        newPaymentStatus = 'failed';
+      }
+
       await bookingRef.update({
         status: 'cancelled',
         cancelledAt: new Date().toISOString(),
         cancellationReason: reason || 'Cancelled by patient',
+        paymentStatus: newPaymentStatus,
         updatedAt: new Date().toISOString(),
       });
 
-      return { success: true, error: null };
+      return { success: true, error: null, refundPending };
     } catch (error: any) {
       console.error('Error cancelling booking:', error);
       return { success: false, error: error.message };
+    }
+  }
+
+  // 🔥 NEW: Admin marks a refund as processed (after doing it in PayFast dashboard)
+  static async markRefundProcessed(
+    bookingId: string,
+    refundReference?: string
+  ): Promise<{ success: boolean; error: string | null }> {
+    try {
+      const bookingRef = db.collection('bookings').doc(bookingId);
+      const bookingSnap = await bookingRef.get();
+      
+      if (!bookingSnap.exists) {
+        return { success: false, error: 'Booking not found' };
+      }
+
+      await bookingRef.update({
+        paymentStatus: 'refunded',
+        refundedAt: new Date().toISOString(),
+        refundReference: refundReference || null,
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Update the refund queue entry if it exists
+      const queueSnapshot = await db.collection('refundQueue')
+        .where('bookingId', '==', bookingId)
+        .where('status', '==', 'pending_manual_refund')
+        .get();
+
+      const batch = db.batch();
+      queueSnapshot.forEach(doc => {
+        batch.update(doc.ref, {
+          status: 'completed',
+          refundReference: refundReference || null,
+          processedAt: new Date().toISOString(),
+        });
+      });
+      await batch.commit();
+
+      return { success: true, error: null };
+    } catch (error: any) {
+      console.error('Error marking refund processed:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // 🔥 NEW: Get pending refunds (for admin dashboard)
+  static async getPendingRefunds(): Promise<any[]> {
+    try {
+      const snapshot = await db.collection('refundQueue')
+        .where('status', '==', 'pending_manual_refund')
+        .orderBy('createdAt', 'desc')
+        .get();
+
+      const refunds: any[] = [];
+      snapshot.forEach(doc => {
+        refunds.push({ id: doc.id, ...doc.data() });
+      });
+      return refunds;
+    } catch (error) {
+      console.error('Error getting pending refunds:', error);
+      return [];
     }
   }
 
@@ -516,7 +663,6 @@ export class BookingService {
     try {
       const availabilityRef = db.collection('doctorAvailability').doc(`${doctorId}_${date}`);
       
-      // Get existing bookings to block booked slots
       const bookingsSnapshot = await db.collection('bookings')
         .where('doctorId', '==', doctorId)
         .where('appointmentDate', '==', date)
@@ -545,6 +691,63 @@ export class BookingService {
       return { success: true, error: null };
     } catch (error: any) {
       console.error('Error setting day availability:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // 🔥 Mark booking as paid (called from PayFast ITN handler)
+  static async markBookingAsPaid(
+    bookingId: string,
+    pfPaymentId: string,
+    paymentReference: string
+  ): Promise<{ success: boolean; error: string | null }> {
+    try {
+      await db.collection('bookings').doc(bookingId).update({
+        paymentStatus: 'paid',
+        pfPaymentId, // PayFast's transaction ID
+        paymentReference,
+        status: 'confirmed',
+        confirmedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      return { success: true, error: null };
+    } catch (error: any) {
+      console.error('Error marking booking as paid:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // 🔥 Mark booking payment as failed (called from ITN or timeout)
+  static async markBookingPaymentFailed(
+    bookingId: string,
+    reason?: string
+  ): Promise<{ success: boolean; error: string | null }> {
+    try {
+      const bookingRef = db.collection('bookings').doc(bookingId);
+      const bookingSnap = await bookingRef.get();
+      if (!bookingSnap.exists) return { success: false, error: 'Booking not found' };
+
+      const booking = bookingSnap.data() as Booking;
+
+      // Free the slot
+      await this.updateSlotAvailability(
+        booking.doctorId,
+        booking.appointmentDate,
+        booking.appointmentTime,
+        true
+      );
+
+      await bookingRef.update({
+        paymentStatus: 'failed',
+        status: 'cancelled',
+        cancellationReason: reason || 'Payment failed',
+        cancelledAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      return { success: true, error: null };
+    } catch (error: any) {
+      console.error('Error marking payment failed:', error);
       return { success: false, error: error.message };
     }
   }
