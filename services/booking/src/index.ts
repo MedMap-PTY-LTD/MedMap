@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import { authenticateToken } from './middleware/auth';
 
 dotenv.config();
+import { PaymentService } from './services/PaymentService';
 
 const app = express();
 app.set('trust proxy', 1); // Render's edge proxy forwards the original PayFast IP.
@@ -68,6 +69,8 @@ app.get('/health', (req, res) => {
     service: 'booking-service',
     paymentMode: 'sandbox',
     paymentIntegration: 'payfast-sandbox-v2',
+    paymentEndpoints: PaymentService.sandboxEndpoints(),
+    payfastNotification: payfastNotificationHealth,
     revision: process.env.RENDER_GIT_COMMIT || 'local',
     timestamp: new Date().toISOString(),
     version: '1.0.0',
@@ -84,7 +87,7 @@ app.get('/api/test', (req, res) => {
 
 // ==================== ROUTES ====================
 import bookingsRouter from './routes/bookings';
-import payfastITNRouter from './routes/payfastITN';
+import payfastITNRouter, { payfastNotificationHealth } from './routes/payfastITN';
 import refundsRouter from './routes/refunds';
 
 app.use(bookingsRouter);

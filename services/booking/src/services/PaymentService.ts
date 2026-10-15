@@ -24,7 +24,7 @@ function configuration() {
   const merchantId = '10004002';
   const merchantKey = 'q1cd2rdny4a53';
   const passphrase = 'payfast';
-  const clientBase = process.env.CLIENT_URL?.split(',')[0]?.trim() || 'https://medmap.co.za';
+  const clientBase = process.env.PAYFAST_CLIENT_URL?.trim() || 'https://medmap.co.za';
   const publicBase = process.env.PUBLIC_BASE_URL?.trim() || process.env.RENDER_EXTERNAL_URL?.trim();
   if (!publicBase) throw new Error('PayFast public sandbox callback URL is not configured');
   const clientUrl = new URL(clientBase);
@@ -73,6 +73,11 @@ function checkoutFor(booking: Booking, reference: string): PayFastCheckout {
 }
 
 export class PaymentService {
+  static sandboxEndpoints() {
+    const { clientUrl, publicUrl } = configuration();
+    return { returnOrigin: clientUrl.origin, notificationOrigin: publicUrl.origin };
+  }
+
   static ensureSandboxConfigured(): void {
     configuration();
   }

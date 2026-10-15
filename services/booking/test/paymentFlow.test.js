@@ -122,7 +122,7 @@ beforeEach(() => {
   Object.assign(process.env, {
     PAYFAST_SANDBOX: 'true', PAYFAST_MERCHANT_ID: '10004002',
     PAYFAST_MERCHANT_KEY: 'q1cd2rdny4a53', PAYFAST_PASSPHRASE: 'payfast',
-    CLIENT_URL: 'https://frontend.example.test', PUBLIC_BASE_URL: 'https://backend.example.test',
+    PAYFAST_CLIENT_URL: 'https://frontend.example.test', CLIENT_URL: 'https://backend.example.test', PUBLIC_BASE_URL: 'https://backend.example.test',
   });
   validationResponse = () => ({ ok: true, text: async () => 'VALID' });
 });
@@ -147,6 +147,7 @@ test('checkout charges R10, reuses pending attempt, and never stores signed fiel
   const checkout = await PaymentService.createPaymentIntent('b1');
   assert.equal(checkout.action, 'https://sandbox.payfast.co.za/eng/process');
   assert.equal(checkout.fields.amount, '10.00');
+  assert.equal(new URL(checkout.fields.return_url).origin, 'https://frontend.example.test');
   assert.equal(checkout.fields.m_payment_id, 'pf_test');
   assert.equal(checkout.fields.passphrase, undefined);
   assert.equal(new URL(checkout.fields.return_url).searchParams.get('bookingId'), 'b1');

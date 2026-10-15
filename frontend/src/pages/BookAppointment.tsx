@@ -197,7 +197,7 @@ const BookAppointment = () => {
         setDoctor(doctorData);
 
         // Auto-select today's date
-        const today = new Date().toISOString().split('T')[0];
+        const today = format(new Date(), 'yyyy-MM-dd');
         setSelectedDate(today);
         
         // Fetch slots for today
@@ -301,7 +301,7 @@ const BookAppointment = () => {
 
     for (let i = 0; i < 7; i++) {
       const day = addDays(start, i);
-      const dateStr = day.toISOString().split('T')[0];
+      const dateStr = format(day, 'yyyy-MM-dd');
       const isTodayDate = isToday(day);
       const isSelected = selectedDate === dateStr;
       const isPastDay = isPast(day) && !isTodayDate;
