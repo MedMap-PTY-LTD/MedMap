@@ -41,6 +41,10 @@ export interface Booking {
   status: 'pending' | 'confirmed' | 'rescheduled' | 'completed' | 'cancelled' | 'no-show';
   notes?: string;
   consultationFee: number;
+  bookingFee?: number;
+  paymentEnvironment?: 'sandbox';
+  isTestBooking?: boolean;
+  paidAt?: any;
   rescheduleCount: number;
   maxReschedules: number;
   rescheduleHistory: RescheduleHistory[];
@@ -89,7 +93,7 @@ export interface PaymentIntent {
   paymentMethod?: string;
 }
 
-// 🔥 PayFast returns formHtml, not just a URL
+// Sandbox checkout fields are posted by the browser to PayFast.
 export interface PaymentIntentResult {
   paymentId: string;
   paymentUrl: string;

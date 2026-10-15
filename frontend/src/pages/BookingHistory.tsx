@@ -8,20 +8,20 @@ import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import Header from '@/components/Header';
-import { BookingsRepo, Booking as RepoBooking } from '@/backend/repositories/bookings';
-import { PaymentsRepo } from '@/backend/repositories/payments';
-import { api } from '@/lib/django-api';
+import { Booking as RepoBooking } from '@/backend/repositories/bookings';
+import { cancelBookingRequest, retryBookingPayment, getPatientBookings } from '@/client/payfastClient';
 import { useSearchParams } from 'react-router-dom';
-import { db } from '@/lib/firebase';
-import { collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 
 // Map or extend RepoBooking to match local needs
-interface Booking extends RepoBooking {
+interface Booking extends Omit<RepoBooking, 'id'> {
+  id: string;
+  is_test?: boolean;
   payment_status: string; // Not in repo interface yet?
   total_amount: number;
   consultation_fee: number;
   booking_fee: number;
   notes?: string;
+  patient_notes?: string;
   doctor_notes?: string;
   // doctors mapped from doctor_details
   doctors?: {
@@ -49,8 +49,8 @@ const BookingHistory = () => {
     const status = searchParams.get('status');
     if (status === 'success') {
       toast({
-        title: "Payment Successful",
-        description: "Your booking has been confirmed.",
+        title: "Checking payment status",
+        description: "Check the latest booking fee status below.",
         className: "bg-green-500 text-white",
       });
     } else if (status === 'cancelled') {
@@ -75,30 +75,22 @@ const BookingHistory = () => {
         return;
       }
 
-      // Read bookings from Firestore — where this app actually stores them.
-      // (where patientId + orderBy appointmentDate is backed by the composite index.)
-      const q = query(
-        collection(db, 'bookings'),
-        where('patientId', '==', user.uid),
-        orderBy('appointmentDate', 'desc'),
-        limit(100)
-      );
-      const snap = await getDocs(q);
-
-      // Map the Firestore booking shape onto the fields this page renders.
-      const mapped = snap.docs.map((d) => {
-        const b = d.data() as any;
+      // The authenticated service reads bookings; client Firestore rules deny this collection.
+      const rows = await getPatientBookings(user.uid);
+      const mapped = rows.map((b) => {
         return {
-          id: d.id,
+          id: b.id,
+          is_test: b.isTestBooking === true,
           appointment_date: b.appointmentDate,
           appointment_time: b.appointmentTime,
           status: b.status,
           notes: b.notes || '',
+          patient_notes: b.notes || '',
           doctor_notes: '',
           payment_status: b.paymentStatus || 'unpaid',
           consultation_fee: b.consultationFee || 0,
-          booking_fee: b.bookingFee || 0,
-          total_amount: b.consultationFee || 0,
+          booking_fee: b.bookingFee ?? 10,
+          total_amount: b.bookingFee ?? 10,
           doctors: {
             practice_name: b.doctorName || 'Doctor',
             speciality: b.doctorSpecialization || '',
@@ -115,7 +107,7 @@ const BookingHistory = () => {
 
       setBookings(mapped);
     } catch (error: any) {
-      console.error('❌ Failed to fetch bookings from Firestore:', error);
+      console.error('❌ Failed to fetch bookings:', error);
       toast({
         title: 'Error',
         description: 'Failed to fetch your bookings',
@@ -193,18 +185,7 @@ const BookingHistory = () => {
 
   const handlePayment = async (booking: Booking) => {
     try {
-      // Initiate PayFast payment
-      // Use booking_fee or consultation_fee or total_amount depending on business logic
-      // Assuming booking_fee for now, or fallback to R50
-      const amount = booking.booking_fee || 50; 
-      
-      const data = await PaymentsRepo.initiateBookingPayment(booking.id, amount);
-
-      if (data.payment_url) {
-        window.location.href = data.payment_url;
-      } else {
-        throw new Error('No payment URL returned');
-      }
+      await retryBookingPayment(booking.id);
     } catch (error: any) {
       toast({
         title: 'Payment Error',
@@ -216,7 +197,7 @@ const BookingHistory = () => {
 
   const cancelBooking = async (bookingId: string) => {
     try {
-      await BookingsRepo.update(bookingId, { status: 'cancelled' });
+      await cancelBookingRequest(bookingId);
 
       toast({
         title: "Success",
@@ -287,6 +268,7 @@ const BookingHistory = () => {
                   filterBookings(bookings, tab).map((booking) => (
                     <Card key={booking.id} className="medical-card">
                       <CardContent className="p-6">
+                        {booking.is_test && <Badge variant="outline">Sandbox test — no real consultation</Badge>}
                         <div className="grid md:grid-cols-3 gap-6">
                           {/* Doctor Info */}
                           <div className="space-y-3">
@@ -345,18 +327,17 @@ const BookingHistory = () => {
                           {/* Actions & Payment */}
                           <div className="space-y-4">
                             <div className="text-right">
-                              <p className="text-sm text-muted-foreground">Total Amount</p>
+                              <p className="text-sm text-muted-foreground">Booking Fee</p>
                               <p className="text-2xl font-bold text-primary">
                                 {formatCurrency(booking.total_amount)}
                               </p>
                               <div className="text-xs text-muted-foreground space-y-1">
-                                <div>Consultation: {formatCurrency(booking.consultation_fee)}</div>
-                                <div>Booking Fee: {formatCurrency(booking.booking_fee)}</div>
+                                <div>Consultation: {formatCurrency(booking.consultation_fee)} (paid separately)</div>
                               </div>
                             </div>
 
                             <div className="flex flex-col gap-2">
-                              {booking.status === 'pending' && booking.payment_status !== 'COMPLETE' && (
+                              {booking.status === 'pending' && booking.payment_status !== 'paid' && (
                                 <Button
                                   className="w-full bg-green-600 hover:bg-green-700"
                                   size="sm"

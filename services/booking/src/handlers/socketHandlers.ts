@@ -12,6 +12,14 @@ export class SocketHandlers {
   private io: any;
   private socket: Socket;
 
+  private get user(): { uid: string; admin: boolean } {
+    return this.socket.data.authUser;
+  }
+
+  private canAccess(patientId: string, doctorId: string): boolean {
+    return this.user.admin || this.user.uid === patientId || this.user.uid === doctorId;
+  }
+
   constructor({ io, socket }: SocketHandlerDependencies) {
     this.io = io;
     this.socket = socket;
@@ -79,11 +87,13 @@ export class SocketHandlers {
   // ==================== ROOM HANDLERS ====================
 
   private handleJoinDoctor(doctorId: string): void {
+    if (doctorId !== this.user.uid && !this.user.admin) return;
     this.socket.join(`doctor_${doctorId}`);
     console.log(`👨‍⚕️ Client ${this.socket.id} joined doctor room: ${doctorId}`);
   }
 
   private handleJoinPatient(patientId: string): void {
+    if (patientId !== this.user.uid && !this.user.admin) return;
     this.socket.join(`patient_${patientId}`);
     console.log(`👤 Client ${this.socket.id} joined patient room: ${patientId}`);
   }
@@ -102,30 +112,7 @@ export class SocketHandlers {
 
   private async handleCreateBooking(data: any, callback: Function): Promise<void> {
     try {
-      console.log('📝 Creating booking:', data);
-      const result = await BookingService.createBooking(data);
-      
-      if (result.bookingId) {
-        // Emit to doctor and patient rooms
-        this.io.to(`doctor_${data.doctorId}`).emit(BookingEvents.BOOKING_CREATED, {
-          bookingId: result.bookingId,
-          ...data,
-        });
-        this.io.to(`patient_${data.patientId}`).emit(BookingEvents.BOOKING_CREATED, {
-          bookingId: result.bookingId,
-          ...data,
-        });
-
-        // Emit availability update
-        this.io.to(`doctor_${data.doctorId}`).emit(BookingEvents.AVAILABILITY_UPDATED, {
-          doctorId: data.doctorId,
-          date: data.appointmentDate,
-          time: data.appointmentTime,
-          isAvailable: false,
-        });
-      }
-      
-      callback(result);
+      callback({ bookingId: '', error: 'Use the PayFast checkout to create a booking' });
     } catch (error: any) {
       console.error('❌ Error creating booking:', error);
       callback({ bookingId: '', error: error.message });
@@ -139,6 +126,10 @@ export class SocketHandlers {
       
       if (!booking) {
         callback({ success: false, error: 'Booking not found' });
+        return;
+      }
+      if (!this.canAccess(booking.patientId, booking.doctorId)) {
+        callback({ success: false, error: 'Forbidden' });
         return;
       }
 
@@ -197,6 +188,10 @@ export class SocketHandlers {
         callback({ success: false, error: 'Booking not found' });
         return;
       }
+      if (!this.canAccess(booking.patientId, booking.doctorId)) {
+        callback({ success: false, error: 'Forbidden' });
+        return;
+      }
 
       const result = await BookingService.cancelBooking(data.bookingId, data.reason);
       
@@ -234,6 +229,10 @@ export class SocketHandlers {
       
       if (!booking) {
         callback({ success: false, error: 'Booking not found' });
+        return;
+      }
+      if (booking.doctorId !== this.user.uid && !this.user.admin) {
+        callback({ success: false, error: 'Forbidden' });
         return;
       }
 
@@ -302,6 +301,10 @@ export class SocketHandlers {
 
   private async handleGetBookings(data: any, callback: Function): Promise<void> {
     try {
+      if (data.userId !== this.user.uid && !this.user.admin) {
+        callback({ success: false, error: 'Forbidden', bookings: [] });
+        return;
+      }
       console.log('📋 Getting bookings for:', data);
       let bookings: Booking[] = [];
       
@@ -321,6 +324,10 @@ export class SocketHandlers {
 
   private async handleGetUpcoming(data: any, callback: Function): Promise<void> {
     try {
+      if (data.doctorId !== this.user.uid && !this.user.admin) {
+        callback({ success: false, error: 'Forbidden', bookings: [] });
+        return;
+      }
       console.log('📅 Getting upcoming bookings for:', data);
       const bookings = await BookingService.getUpcomingBookings(data.doctorId);
       console.log(`✅ Found ${bookings.length} upcoming bookings`);
@@ -333,6 +340,10 @@ export class SocketHandlers {
 
   private async handleGetStats(data: any, callback: Function): Promise<void> {
     try {
+      if (data.doctorId !== this.user.uid && !this.user.admin) {
+        callback({ success: false, error: 'Forbidden', stats: null });
+        return;
+      }
       console.log('📊 Getting stats for:', data);
       const stats = await BookingService.getBookingStats(data.doctorId);
       callback({ success: true, stats });
@@ -344,6 +355,10 @@ export class SocketHandlers {
 
   private async handleSetAvailability(data: any, callback: Function): Promise<void> {
     try {
+      if (data.doctorId !== this.user.uid && !this.user.admin) {
+        callback({ success: false, error: 'Forbidden' });
+        return;
+      }
       console.log('📝 Setting availability for:', { doctorId: data.doctorId, date: data.date, slots: data.slots?.length });
       const result = await BookingService.setDayAvailability(
         data.doctorId,

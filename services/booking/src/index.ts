@@ -4,10 +4,12 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { authenticateToken } from './middleware/auth';
 
 dotenv.config();
 
 const app = express();
+app.set('trust proxy', 1); // Render's edge proxy forwards the original PayFast IP.
 const httpServer = createServer(app);
 
 // 🔥 Allow multiple origins (array is supported by the cors package)
@@ -64,6 +66,9 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     service: 'booking-service',
+    paymentMode: 'sandbox',
+    paymentIntegration: 'payfast-sandbox-v2',
+    revision: process.env.RENDER_GIT_COMMIT || 'local',
     timestamp: new Date().toISOString(),
     version: '1.0.0',
   });
@@ -93,6 +98,15 @@ const io = new Server(httpServer, {
   path: '/socket.io/',
   transports: ['websocket', 'polling'],
   allowEIO3: true,
+});
+
+io.use(async (socket, next) => {
+  try {
+    socket.data.authUser = await authenticateToken(String(socket.handshake.auth?.token || ''));
+    next();
+  } catch {
+    next(new Error('Authentication required'));
+  }
 });
 
 io.on('connection', (socket) => {

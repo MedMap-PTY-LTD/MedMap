@@ -15,6 +15,7 @@ import Header from '@/components/Header';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { useBookingSocket } from '@/hooks/useBookingSocket';
+import { createBookingAndPay } from '@/client/payfastClient';
 import { format, startOfWeek, addDays, isSameDay, isPast, parseISO, isToday } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -68,15 +69,7 @@ const BookAppointment = () => {
   const [currentWeek, setCurrentWeek] = useState(new Date());
 
   // Socket for real-time booking
-  const { getSlots, createBooking, isConnected } = useBookingSocket({
-    onBookingCreated: () => {
-      toast({
-        title: 'Booking Created!',
-        description: 'Your appointment has been booked successfully.',
-      });
-      navigate('/bookings');
-    },
-  });
+  const { getSlots, isConnected } = useBookingSocket();
 
   // ==================== GENERATE DEFAULT SLOTS ====================
 
@@ -175,10 +168,8 @@ const BookAppointment = () => {
 
         const data = doctorSnap.data();
 
-        // Get user data
-        const userRef = doc(db, 'users', doctorId);
-        const userSnap = await getDoc(userRef);
-        const userData = userSnap.exists() ? userSnap.data() : {};
+        // Use the public doctor profile; private user profiles are denied by Firestore rules.
+        const userData = data;
 
         const doctorData: Doctor = {
           id: doctorId,
@@ -265,42 +256,16 @@ const BookAppointment = () => {
 
       const bookingData = {
         doctorId: doctor.id,
-        patientId: user.uid,
-        patientName: profile.fullName || `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || 'Patient',
-        patientEmail: profile.email || user.email || '',
-        patientPhone: profile.phone || '',
-        doctorName: doctor.fullName,
-        doctorSpecialization: doctor.specialization,
         appointmentDate: selectedDate,
         appointmentTime: selectedTime,
-        endTime: calculateEndTime(selectedTime, doctor.consultationDuration || 30),
-        notes: patientNotes || undefined,
-        consultationFee: doctor.consultationFee || 0,
+        ...(patientNotes.trim() ? { notes: patientNotes.trim() } : {}),
       };
-
-      console.log('📝 Creating booking:', bookingData);
-
-      const response = await createBooking(bookingData);
-      
-      if (response.bookingId) {
-        toast({
-          title: 'Booking Requested',
-          description: 'Your appointment request has been sent to the doctor.',
-        });
-        navigate('/bookings');
-      } else {
-        toast({
-          title: 'Booking Failed',
-          description: response.error || 'Could not book appointment. Please try again.',
-          variant: 'destructive',
-        });
-        setIsBooking(false);
-      }
+      await createBookingAndPay(bookingData);
     } catch (err: any) {
       console.error('Booking error:', err);
       toast({
-        title: 'Booking Failed',
-        description: err.message || 'Something went wrong. Please try again.',
+        title: 'Checkout could not start',
+        description: `${err.message || 'Please try again.'} If a booking was saved, you can retry from My Bookings.`,
         variant: 'destructive',
       });
       setIsBooking(false);
@@ -308,14 +273,6 @@ const BookAppointment = () => {
   };
 
   // ==================== HELPER FUNCTIONS ====================
-
-  const calculateEndTime = (startTime: string, durationMinutes: number): string => {
-    const [hours, minutes] = startTime.split(':').map(Number);
-    const totalMinutes = hours * 60 + minutes + durationMinutes;
-    const endHours = Math.floor(totalMinutes / 60);
-    const endMinutes = totalMinutes % 60;
-    return `${String(endHours).padStart(2, '0')}:${String(endMinutes).padStart(2, '0')}`;
-  };
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-ZA', {
@@ -637,16 +594,17 @@ const BookAppointment = () => {
                               <span className="font-medium text-blue-900">{formatCurrency(doctor.consultationFee)}</span>
                             </div>
                             <Separator className="bg-blue-200" />
-                            <div className="flex justify-between font-semibold">
-                              <span className="text-blue-900">Total</span>
-                              <span className="text-blue-900">{formatCurrency(doctor.consultationFee)}</span>
+                            <div className="flex justify-between">
+                              <span className="text-blue-900">Booking fee payable now</span>
+                              <span className="text-blue-900">R10.00</span>
                             </div>
-                            <p className="text-xs text-blue-600 mt-1">* Payment will be made at the doctor's office</p>
+                            <p className="text-xs text-blue-600 mt-1">The consultation fee is paid separately at the doctor's office.</p>
                           </div>
                         </CardContent>
                       </Card>
                     )}
 
+                    <p className="text-sm font-semibold text-amber-800">Sandbox testing only. No real money is charged. This creates a test booking, not a real consultation.</p>
                     {/* Book Button */}
                     <Button
                       onClick={handleBooking}
@@ -666,7 +624,7 @@ const BookAppointment = () => {
                       ) : (
                         <>
                           <Calendar className="w-5 h-5 mr-2" />
-                          Confirm Booking
+                          Continue to PayFast Sandbox
                         </>
                       )}
                     </Button>

@@ -1,8 +1,10 @@
 // src/routes/refunds.ts
 import { Router } from 'express';
 import { BookingService } from '../services/BookingService';
+import { requireAdmin, requireAuth } from '../middleware/auth';
 
 const router = Router();
+router.use('/api/admin/refunds', requireAuth, requireAdmin);
 
 // Get all bookings awaiting manual PayFast refund
 router.get('/api/admin/refunds/pending', async (req, res) => {

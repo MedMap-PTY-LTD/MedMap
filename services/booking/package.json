@@ -11,7 +11,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "clean": "rm -rf dist",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test -r ts-node/register test/payfastSignature.test.js test/paymentFlow.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -1,7 +1,10 @@
 // lib/booking-socket.ts
 import { io, Socket } from 'socket.io-client';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from './firebase';
 
 let socketInstance: Socket | null = null;
+let authUnsubscribe: (() => void) | null = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 
@@ -13,12 +16,25 @@ export const getBookingSocket = (): Socket => {
     
     socketInstance = io(url, {
       transports: ['websocket', 'polling'],
-      autoConnect: true,
+      autoConnect: false,
+      auth: async (callback) => {
+        try {
+          callback({ token: await auth.currentUser?.getIdToken() || '' });
+        } catch {
+          callback({ token: '' });
+        }
+      },
       reconnection: true,
       reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       timeout: 10000,
+    });
+
+    const current = socketInstance;
+    authUnsubscribe = onAuthStateChanged(auth, user => {
+      if (user) current.connect();
+      else current.disconnect();
     });
 
     socketInstance.on('connect', () => {
@@ -56,6 +72,8 @@ export const getBookingSocket = (): Socket => {
 
 export const disconnectBookingSocket = (): void => {
   if (socketInstance) {
+    authUnsubscribe?.();
+    authUnsubscribe = null;
     socketInstance.disconnect();
     socketInstance = null;
     reconnectAttempts = 0;
