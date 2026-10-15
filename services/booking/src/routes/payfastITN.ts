@@ -1,5 +1,5 @@
 // src/routes/payfastITN.ts
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { PaymentService } from '../services/PaymentService';
 
 const router = Router();
@@ -11,7 +11,7 @@ router.post(
   async (req, res) => {
     try {
       const itnData = req.body; // Record<string, string>
-      
+
       const result = await PaymentService.handleITN(itnData);
 
       if (result.success) {
@@ -20,7 +20,7 @@ router.post(
         console.error('❌ ITN failed:', result.error);
       }
 
-      // ALWAYS return 200 — PayFast retries on non-2xx responses [citation:17]
+      // ALWAYS return 200 — PayFast retries on non-2xx responses
       res.status(200).send('OK');
     } catch (error: any) {
       console.error('ITN route error:', error);
