@@ -117,6 +117,7 @@ before(async () => {
   base = 'http://127.0.0.1:' + server.address().port;
 });
 beforeEach(() => {
+  dns.lookup = async () => [{ address: '192.0.2.1', family: 4 }];
   records.clear(); seed(); calls = 0;
   Object.assign(process.env, {
     PAYFAST_SANDBOX: 'true', PAYFAST_MERCHANT_ID: '10004002',
@@ -328,4 +329,12 @@ test('existing non-test bookings cannot be converted to sandbox paid bookings', 
   delete records.get('bookings/b1').paymentEnvironment;
   await assert.rejects(PaymentService.createPaymentIntent('b1'), /Only sandbox test bookings/);
   assert.equal(get('bookings/b1').paymentStatus, 'pending');
+});
+
+
+test('accepts a notification source published only by PayFast worker DNS', async () => {
+  dns.lookup = async host => host === 'w1w.payfast.co.za'
+    ? [{ address: '192.0.2.9', family: 4 }] : [];
+  await PaymentService.handleITN(notification(), '192.0.2.9');
+  assert.equal(get('bookings/b1').paymentStatus, 'paid');
 });

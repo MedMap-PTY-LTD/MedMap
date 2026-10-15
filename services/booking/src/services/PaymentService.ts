@@ -36,7 +36,7 @@ function configuration() {
 }
 
 async function verifySource(sourceIp: string): Promise<void> {
-  const hosts = ['sandbox.payfast.co.za', 'www.payfast.co.za', 'w1.payfast.co.za', 'w2.payfast.co.za'];
+  const hosts = ['sandbox.payfast.co.za', 'www.payfast.co.za', 'w1w.payfast.co.za', 'w2w.payfast.co.za'];
   const lookups = await Promise.allSettled(hosts.map(host => lookup(host, { all: true })));
   const addresses = new Set(lookups.flatMap(result =>
     result.status === 'fulfilled' ? result.value.map(address => address.address) : []
