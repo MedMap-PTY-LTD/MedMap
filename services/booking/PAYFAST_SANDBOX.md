@@ -2,7 +2,7 @@
 
 This code only connects to PayFast sandbox and charges a virtual R10 booking fee. It uses PayFast's public sandbox test account. Live merchant environment values are intentionally ignored; setting PAYFAST_SANDBOX=false refuses checkout.
 
-On Render, RENDER_EXTERNAL_URL supplies the public callback URL automatically. PUBLIC_BASE_URL may override it for local tunnels. CLIENT_URL defaults to https://medmap.co.za. Firebase Admin credentials remain required for the booking service.
+On Render, RENDER_EXTERNAL_URL supplies the public callback URL automatically. PUBLIC_BASE_URL may override it for local tunnels. PAYFAST_CLIENT_URL defaults to https://medmap.co.za. It is separate from the general CLIENT_URL setting to prevent a backend URL from being used for the browser return. Firebase Admin credentials remain required for the booking service.
 
 Checkout requires an explicit sandboxTest=true request. Newly created bookings carry isTestBooking=true, paymentEnvironment=sandbox, and a test-only note. Existing non-test bookings cannot enter sandbox checkout. Synthetic contact details are sent to PayFast instead of real patient information.
 

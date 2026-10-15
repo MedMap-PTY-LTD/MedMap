@@ -347,7 +347,7 @@ const BookingHistory = () => {
                                   Pay Now
                                 </Button>
                               )}
-                              {booking.status === 'pending' && new Date(booking.appointment_date) > new Date() && (
+                              {(booking.status === 'pending' || (booking.is_test === true && booking.status === 'confirmed')) && new Date(booking.appointment_date) > new Date() && (
                                 <Button
                                   variant="destructive"
                                   size="sm"
