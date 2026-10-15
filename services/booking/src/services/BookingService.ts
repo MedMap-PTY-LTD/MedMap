@@ -203,11 +203,17 @@ export class BookingService {
     paymentMethod: string = 'card'
   ): Promise<{ bookingId: string; checkout?: PayFastCheckout; error: string | null }> {
     try {
-      PaymentService.ensureSandboxConfigured();
+      PaymentService.ensureConfigured();
     } catch (err: any) {
       return { bookingId: '', error: err.message };
     }
-    const { bookingId, error } = await this.createBooking({ ...bookingData, bookingFee: BOOKING_FEE, paymentEnvironment: 'sandbox', isTestBooking: true });
+    const paymentEnvironment = PaymentService.currentMode();
+    const { bookingId, error } = await this.createBooking({
+      ...bookingData,
+      bookingFee: BOOKING_FEE,
+      paymentEnvironment,
+      isTestBooking: paymentEnvironment === 'sandbox',
+    });
     if (error || !bookingId) {
       return { bookingId: '', error };
     }
@@ -496,6 +502,7 @@ export class BookingService {
         const availability = await transaction.get(availabilityRef);
         const paymentRef = booking.paymentId ? db.collection('payments').doc(booking.paymentId) : null;
         const payment = paymentRef ? await transaction.get(paymentRef) : null;
+        const paymentData = payment?.exists ? payment.data()! : {};
         const now = new Date().toISOString();
         const needsRefund = booking.paymentStatus === 'paid';
 
@@ -511,10 +518,12 @@ export class BookingService {
         if (needsRefund) {
           transaction.set(db.collection('refundQueue').doc(booking.paymentId || bookingId), {
             bookingId, paymentId: booking.paymentId || null,
-            pfPaymentId: booking.pfPaymentId || null, amount: BOOKING_FEE,
+            pfPaymentId: booking.pfPaymentId || null,
+            amount: paymentData.amount ?? booking.bookingFee ?? BOOKING_FEE,
             customerEmail: booking.patientEmail || '', customerName: booking.patientName || '',
             reason: reason || 'Cancelled by patient',
-            environment: 'sandbox', status: 'pending_manual_refund', createdAt: now,
+            environment: paymentData.environment ?? booking.paymentEnvironment ?? 'sandbox',
+            status: 'pending_manual_refund', createdAt: now,
           });
           if (paymentRef && payment?.exists) {
             transaction.update(paymentRef, { status: 'refund_pending', updatedAt: now });

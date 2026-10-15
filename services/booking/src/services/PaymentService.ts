@@ -5,34 +5,95 @@ import { Booking } from '../types';
 import { payFastSignature } from './payfastSignature';
 
 export const BOOKING_FEE = 10;
-const PROCESS_URL = 'https://sandbox.payfast.co.za/eng/process';
-const VALIDATE_URL = 'https://sandbox.payfast.co.za/eng/query/validate';
+export type PayFastMode = 'sandbox' | 'live';
 
 export interface PayFastCheckout {
+  mode: PayFastMode;
   action: string;
   fields: Record<string, string>;
 }
 
+interface PayFastConfiguration {
+  mode: PayFastMode;
+  merchantId: string;
+  merchantKey: string;
+  passphrase?: string;
+  processUrl: string;
+  validateUrl: string;
+  clientUrl: URL;
+  publicUrl: URL;
+}
+
 export class InvalidPayFastNotification extends Error {}
 
-function configuration() {
-  // This deployment is deliberately sandbox-only. These are PayFast's public
-  // test credentials, never live merchant secrets from an existing environment.
-  if (process.env.PAYFAST_SANDBOX && process.env.PAYFAST_SANDBOX !== 'true') {
+const SANDBOX_MERCHANT_ID = '10004002';
+const SANDBOX_MERCHANT_KEY = 'q1cd2rdny4a53';
+const SANDBOX_PASSPHRASE = 'payfast';
+
+function selectedMode(): PayFastMode {
+  const configuredMode = process.env.PAYFAST_MODE?.trim().toLowerCase();
+  if (configuredMode === 'live') return configuredMode;
+  if (configuredMode === 'sandbox') {
+    if (process.env.PAYFAST_SANDBOX === 'false') {
+      throw new Error('This deployment only supports PayFast sandbox mode');
+    }
+    if (process.env.PAYFAST_SANDBOX && process.env.PAYFAST_SANDBOX !== 'true') {
+      throw new Error('PAYFAST_SANDBOX must be true when PAYFAST_MODE is sandbox');
+    }
+    return configuredMode;
+  }
+  if (configuredMode) throw new Error('PAYFAST_MODE must be either sandbox or live');
+
+  // Backward compatibility: the old false value meant “refuse checkout”, not
+  // “switch to live”. Live mode always requires an explicit PAYFAST_MODE=live.
+  if (process.env.PAYFAST_SANDBOX === 'false') {
     throw new Error('This deployment only supports PayFast sandbox mode');
   }
-  const merchantId = '10004002';
-  const merchantKey = 'q1cd2rdny4a53';
-  const passphrase = 'payfast';
+  if (process.env.PAYFAST_SANDBOX && process.env.PAYFAST_SANDBOX !== 'true') {
+    throw new Error('PAYFAST_SANDBOX must be true when PAYFAST_MODE is not set');
+  }
+  return 'sandbox';
+}
+
+function configuration(mode: PayFastMode = selectedMode()): PayFastConfiguration {
+  let merchantId: string;
+  let merchantKey: string;
+  let passphrase: string | undefined;
+  if (mode === 'sandbox') {
+    merchantId = SANDBOX_MERCHANT_ID;
+    merchantKey = SANDBOX_MERCHANT_KEY;
+    passphrase = SANDBOX_PASSPHRASE;
+  } else {
+    merchantId = process.env.PAYFAST_LIVE_MERCHANT_ID?.trim() || '';
+    merchantKey = process.env.PAYFAST_LIVE_MERCHANT_KEY?.trim() || '';
+    passphrase = process.env.PAYFAST_LIVE_PASSPHRASE?.trim() || undefined;
+    if (!merchantId || !merchantKey) {
+      throw new Error('Live PayFast merchant credentials are not configured on the booking service');
+    }
+    if (merchantId === SANDBOX_MERCHANT_ID || merchantKey === SANDBOX_MERCHANT_KEY || passphrase === SANDBOX_PASSPHRASE) {
+      throw new Error('Live PayFast configuration contains sandbox credentials');
+    }
+  }
+
+  const host = mode === 'sandbox' ? 'sandbox.payfast.co.za' : 'www.payfast.co.za';
   const clientBase = process.env.PAYFAST_CLIENT_URL?.trim() || 'https://medmap.co.za';
   const publicBase = process.env.PUBLIC_BASE_URL?.trim() || process.env.RENDER_EXTERNAL_URL?.trim();
-  if (!publicBase) throw new Error('PayFast public sandbox callback URL is not configured');
+  if (!publicBase) throw new Error('PayFast public callback URL is not configured');
   const clientUrl = new URL(clientBase);
   const publicUrl = new URL(publicBase);
   if (publicUrl.protocol !== 'https:' || !['https:', 'http:'].includes(clientUrl.protocol)) {
     throw new Error('PayFast callback URLs must use a public HTTPS service URL');
   }
-  return { merchantId, merchantKey, passphrase, clientUrl, publicUrl };
+  return {
+    mode,
+    merchantId,
+    merchantKey,
+    passphrase,
+    processUrl: `https://${host}/eng/process`,
+    validateUrl: `https://${host}/eng/query/validate`,
+    clientUrl,
+    publicUrl,
+  };
 }
 
 async function verifySource(sourceIp: string): Promise<void> {
@@ -47,50 +108,80 @@ async function verifySource(sourceIp: string): Promise<void> {
   }
 }
 
-function checkoutFor(booking: Booking, reference: string): PayFastCheckout {
-  const { merchantId, merchantKey, passphrase, clientUrl, publicUrl } = configuration();
-  const returnUrl = new URL('/payfast/success', clientUrl);
-  const cancelUrl = new URL('/payfast/cancel', clientUrl);
+function checkoutFor(booking: Booking, reference: string, config: PayFastConfiguration): PayFastCheckout {
+  const returnUrl = new URL('/payfast/success', config.clientUrl);
+  const cancelUrl = new URL('/payfast/cancel', config.clientUrl);
   returnUrl.searchParams.set('bookingId', booking.id);
   cancelUrl.searchParams.set('bookingId', booking.id);
-  // A sandbox gateway needs no real patient contact details.
+
+  const nameParts = (booking.patientName || '').trim().split(/\s+/).filter(Boolean);
   const fields: Record<string, string> = {
-    merchant_id: merchantId,
-    merchant_key: merchantKey,
+    merchant_id: config.merchantId,
+    merchant_key: config.merchantKey,
     return_url: returnUrl.toString(),
     cancel_url: cancelUrl.toString(),
-    notify_url: new URL('/api/payments/payfast/notify', publicUrl).toString(),
-    name_first: 'MedMap',
-    name_last: 'Sandbox',
-    email_address: 'sandbox@example.com',
+    notify_url: new URL('/api/payments/payfast/notify', config.publicUrl).toString(),
+    name_first: config.mode === 'sandbox' ? 'MedMap' : (nameParts.shift() || 'Patient'),
+    name_last: config.mode === 'sandbox' ? 'Sandbox' : nameParts.join(' '),
+    email_address: config.mode === 'sandbox' ? 'sandbox@example.com' : (booking.patientEmail || ''),
     m_payment_id: reference,
     amount: BOOKING_FEE.toFixed(2),
     item_name: 'MedMap Booking Fee',
     item_description: `Booking ${booking.id}`,
   };
-  fields.signature = payFastSignature(fields, passphrase);
-  return { action: PROCESS_URL, fields };
+  fields.signature = payFastSignature(fields, config.passphrase);
+  return { mode: config.mode, action: config.processUrl, fields };
+}
+
+function notificationConfigurations(active: PayFastConfiguration): PayFastConfiguration[] {
+  const otherMode: PayFastMode = active.mode === 'sandbox' ? 'live' : 'sandbox';
+  try {
+    // Accept delayed notifications for an existing payment after a mode switch,
+    // while requiring the exact merchant configuration recorded on that payment.
+    return [active, configuration(otherMode)];
+  } catch {
+    return [active];
+  }
 }
 
 export class PaymentService {
-  static sandboxEndpoints() {
-    const { clientUrl, publicUrl } = configuration();
-    return { returnOrigin: clientUrl.origin, notificationOrigin: publicUrl.origin };
+  static currentMode(): PayFastMode {
+    return selectedMode();
   }
 
-  static ensureSandboxConfigured(): void {
+  static ensureConfigured(): void {
     configuration();
+  }
+
+  static publicConfig() {
+    const config = configuration();
+    return { mode: config.mode, bookingFee: BOOKING_FEE, currency: 'ZAR' as const };
+  }
+
+  static publicStatus() {
+    const config = configuration();
+    return {
+      mode: config.mode,
+      integration: `payfast-${config.mode}-v3`,
+      processOrigin: new URL(config.processUrl).origin,
+      validationOrigin: new URL(config.validateUrl).origin,
+      returnOrigin: config.clientUrl.origin,
+      notificationOrigin: config.publicUrl.origin,
+    };
   }
 
   static async createPaymentIntent(bookingId: string): Promise<PayFastCheckout> {
-    configuration();
+    const config = configuration();
     const bookingRef = db.collection('bookings').doc(bookingId);
     const result = await db.runTransaction(async transaction => {
       const bookingSnap = await transaction.get(bookingRef);
       if (!bookingSnap.exists) throw new Error('Booking not found');
       const booking = { ...bookingSnap.data(), id: bookingId } as Booking;
-      if (!booking.isTestBooking || booking.paymentEnvironment !== 'sandbox') {
+      if (config.mode === 'sandbox' && (!booking.isTestBooking || booking.paymentEnvironment !== 'sandbox')) {
         throw new Error('Only sandbox test bookings can be paid in this deployment');
+      }
+      if (config.mode === 'live' && (booking.isTestBooking || booking.paymentEnvironment !== 'live')) {
+        throw new Error('Only live bookings can be paid in this deployment');
       }
       if (booking.status !== 'pending' || ['paid', 'refund_pending', 'refunded'].includes(booking.paymentStatus)) {
         throw new Error('This booking cannot be paid');
@@ -99,7 +190,8 @@ export class PaymentService {
       if (booking.paymentId) {
         const existing = await transaction.get(db.collection('payments').doc(booking.paymentId));
         if (existing.exists && existing.data()?.status === 'pending' &&
-            existing.data()?.environment === 'sandbox' && existing.data()?.amount === BOOKING_FEE && existing.data()?.reference === booking.paymentId) {
+            existing.data()?.environment === config.mode && existing.data()?.amount === BOOKING_FEE &&
+            existing.data()?.reference === booking.paymentId) {
           return { booking, reference: booking.paymentId };
         }
       }
@@ -108,38 +200,43 @@ export class PaymentService {
       const now = new Date().toISOString();
       transaction.set(db.collection('payments').doc(reference), {
         paymentId: reference, bookingId, reference, amount: BOOKING_FEE,
-        currency: 'ZAR', provider: 'payfast', environment: 'sandbox', status: 'pending',
+        currency: 'ZAR', provider: 'payfast', environment: config.mode, status: 'pending',
         createdAt: now, updatedAt: now,
       });
       transaction.update(bookingRef, {
-        bookingFee: BOOKING_FEE, paymentEnvironment: 'sandbox', isTestBooking: true, paymentId: reference, paymentReference: reference,
-        paymentStatus: 'pending', updatedAt: now,
+        bookingFee: BOOKING_FEE, paymentEnvironment: config.mode, isTestBooking: config.mode === 'sandbox',
+        paymentId: reference, paymentReference: reference, paymentStatus: 'pending', updatedAt: now,
       });
       return { booking, reference };
     });
-    return checkoutFor(result.booking, result.reference);
+    return checkoutFor(result.booking, result.reference, config);
   }
 
   static async handleITN(payload: Record<string, unknown>, sourceIp: string): Promise<void> {
-    const { merchantId, passphrase } = configuration();
+    const activeConfig = configuration();
     if (!payload || Object.values(payload).some(value => typeof value !== 'string')) {
       throw new InvalidPayFastNotification('Malformed PayFast notification');
     }
     const fields = payload as Record<string, string>;
     const received = fields.signature || '';
-    const expected = payFastSignature(fields, passphrase, true);
-    if (!/^[a-f0-9]{32}$/i.test(received) ||
-        !crypto.timingSafeEqual(Buffer.from(received.toLowerCase()), Buffer.from(expected))) {
+    if (!/^[a-f0-9]{32}$/i.test(received)) {
       throw new InvalidPayFastNotification('Invalid PayFast signature');
     }
-    if (fields.merchant_id !== merchantId || !fields.m_payment_id ||
-        !/^[A-Za-z0-9_-]{1,100}$/.test(fields.pf_payment_id || '') ||
+    const receivedSignature = Buffer.from(received.toLowerCase());
+    const matchedConfig = notificationConfigurations(activeConfig).find(candidate => {
+      if (fields.merchant_id !== candidate.merchantId) return false;
+      const expected = payFastSignature(fields, candidate.passphrase, true);
+      return crypto.timingSafeEqual(receivedSignature, Buffer.from(expected));
+    });
+    if (!matchedConfig) throw new InvalidPayFastNotification('Invalid PayFast signature or merchant');
+
+    if (!fields.m_payment_id || !/^[A-Za-z0-9_-]{1,100}$/.test(fields.pf_payment_id || '') ||
         !Number.isFinite(Number(fields.amount_gross)) || Number(fields.amount_gross) !== BOOKING_FEE) {
       throw new InvalidPayFastNotification('PayFast merchant, reference, or amount mismatch');
     }
     await verifySource(sourceIp);
 
-    const confirmation = await fetch(VALIDATE_URL, {
+    const confirmation = await fetch(matchedConfig.validateUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(fields).toString(),
@@ -155,14 +252,19 @@ export class PaymentService {
       const paymentSnap = await transaction.get(paymentRef);
       if (!paymentSnap.exists) throw new InvalidPayFastNotification('Unknown payment reference');
       const payment = paymentSnap.data()!;
-      if (payment.provider !== 'payfast' || payment.environment !== 'sandbox' || payment.reference !== fields.m_payment_id ||
-          payment.amount !== BOOKING_FEE || !payment.bookingId) {
+      if (payment.provider !== 'payfast' || payment.environment !== matchedConfig.mode ||
+          payment.reference !== fields.m_payment_id || payment.amount !== BOOKING_FEE || !payment.bookingId) {
         throw new InvalidPayFastNotification('Payment record mismatch');
       }
       const bookingRef = db.collection('bookings').doc(payment.bookingId);
       const bookingSnap = await transaction.get(bookingRef);
       if (!bookingSnap.exists) throw new InvalidPayFastNotification('Booking not found');
       const booking = bookingSnap.data() as Booking;
+      if (booking.paymentEnvironment !== matchedConfig.mode ||
+          (matchedConfig.mode === 'sandbox' && !booking.isTestBooking) ||
+          (matchedConfig.mode === 'live' && booking.isTestBooking)) {
+        throw new InvalidPayFastNotification('Booking payment environment mismatch');
+      }
       if ((payment.status === 'paid' || payment.status === 'refund_pending') &&
           payment.pfPaymentId === fields.pf_payment_id) return;
       const now = new Date().toISOString();
@@ -174,7 +276,7 @@ export class PaymentService {
             pfPaymentId: fields.pf_payment_id, amount: BOOKING_FEE,
             customerEmail: booking.patientEmail, customerName: booking.patientName,
             reason: 'Duplicate PayFast charge for one payment reference',
-            environment: 'sandbox', status: 'pending_manual_refund', createdAt: now,
+            environment: matchedConfig.mode, status: 'pending_manual_refund', createdAt: now,
           }, { merge: true });
         }
         return;
@@ -193,7 +295,7 @@ export class PaymentService {
             pfPaymentId: fields.pf_payment_id, amount: BOOKING_FEE,
             customerEmail: booking.patientEmail, customerName: booking.patientName,
             reason: 'Payment arrived after booking was cancelled or replaced',
-            environment: 'sandbox', status: 'pending_manual_refund', createdAt: now,
+            environment: matchedConfig.mode, status: 'pending_manual_refund', createdAt: now,
           }, { merge: true });
           transaction.update(paymentRef, { status: 'refund_pending', pfPaymentId: fields.pf_payment_id, updatedAt: now });
           if (booking.status === 'cancelled' && booking.paymentId === paymentRef.id) {

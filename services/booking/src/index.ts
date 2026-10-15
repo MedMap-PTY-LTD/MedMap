@@ -64,12 +64,13 @@ app.use(express.urlencoded({ extended: true })); // PayFast/ITN webhooks need th
 // ==================== HEALTH + TEST ====================
 
 app.get('/health', (req, res) => {
+  const payments = PaymentService.publicStatus();
   res.json({
     status: 'healthy',
     service: 'booking-service',
-    paymentMode: 'sandbox',
-    paymentIntegration: 'payfast-sandbox-v2',
-    paymentEndpoints: PaymentService.sandboxEndpoints(),
+    paymentMode: payments.mode,
+    paymentIntegration: payments.integration,
+    paymentEndpoints: payments,
     payfastNotification: payfastNotificationHealth,
     revision: process.env.RENDER_GIT_COMMIT || 'local',
     timestamp: new Date().toISOString(),

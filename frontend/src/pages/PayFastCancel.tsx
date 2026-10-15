@@ -31,7 +31,7 @@ const PayFastCancel = () => {
           <CardContent className="pt-8 space-y-5 text-center">
             <h1 className="text-2xl font-semibold">PayFast checkout closed</h1>
             <p className="text-muted-foreground">
-              Your booking fee has not been confirmed. Check My Bookings for the latest status or retry the R10 sandbox payment.
+              Your booking fee has not been confirmed. Check My Bookings for the latest status or retry the PayFast payment.
             </p>
             {error && <p className="text-destructive">{error}</p>}
             <div className="flex justify-center gap-3">

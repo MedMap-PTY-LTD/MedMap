@@ -1,6 +1,6 @@
 # PayFast sandbox test deployment
 
-This code only connects to PayFast sandbox and charges a virtual R10 booking fee. It uses PayFast's public sandbox test account. Live merchant environment values are intentionally ignored; setting PAYFAST_SANDBOX=false refuses checkout.
+The booking service defaults to PayFast sandbox and charges a virtual R10 booking fee. It uses PayFast's public sandbox test account. Live checkout is available only when explicitly selected with `PAYFAST_MODE=live` and separate live credentials are configured. See [PAYFAST_LIVE.md](./PAYFAST_LIVE.md) before enabling it.
 
 On Render, RENDER_EXTERNAL_URL supplies the public callback URL automatically. PUBLIC_BASE_URL may override it for local tunnels. PAYFAST_CLIENT_URL defaults to https://medmap.co.za. It is separate from the general CLIENT_URL setting to prevent a backend URL from being used for the browser return. Firebase Admin credentials remain required for the booking service.
 
@@ -32,4 +32,4 @@ Source IP validation remains enabled. A proxy/tunnel must preserve the actual Pa
 
 Only custom Firebase admin claims can access refund administration. A profile role string is insufficient.
 
-No live payments are supported. A future production launch requires a separate reviewed change and private server-side live credentials.
+Live mode is not enabled by this document. Keep `PAYFAST_MODE` unset or set it to `sandbox` while doing sandbox verification.

@@ -8,8 +8,15 @@ export interface BookingRequest {
 }
 
 interface Checkout {
+  mode: 'sandbox' | 'live';
   action: string;
   fields: Record<string, string>;
+}
+
+export interface PayFastPublicConfig {
+  mode: 'sandbox' | 'live';
+  bookingFee: number;
+  currency: 'ZAR';
 }
 
 const serviceUrl = (import.meta.env.VITE_BOOKING_SERVICE_URL || 'https://medmap-f4ob.onrender.com').replace(/\/$/, '');
@@ -32,11 +39,24 @@ async function request(path: string, options: RequestInit = {}) {
   return data;
 }
 
+export async function getPayFastConfig(): Promise<PayFastPublicConfig> {
+  const response = await fetch(`${serviceUrl}/api/payments/payfast/config`, { cache: 'no-store' });
+  const data = await response.json();
+  if (!response.ok || !['sandbox', 'live'].includes(data.mode) ||
+      !Number.isFinite(data.bookingFee) || data.currency !== 'ZAR') {
+    throw new Error(data.error || 'Payment configuration is unavailable');
+  }
+  return data as PayFastPublicConfig;
+}
+
 export function submitPayFastCheckout(checkout: Checkout): void {
-  if (checkout.action !== 'https://sandbox.payfast.co.za/eng/process' ||
+  const expectedAction = checkout.mode === 'sandbox'
+    ? 'https://sandbox.payfast.co.za/eng/process'
+    : 'https://www.payfast.co.za/eng/process';
+  if (checkout.action !== expectedAction ||
       !checkout.fields || checkout.fields.amount !== '10.00' ||
-      !checkout.fields.signature) {
-    throw new Error('Invalid sandbox checkout response');
+      !checkout.fields.signature || !checkout.fields.merchant_id || !checkout.fields.merchant_key) {
+    throw new Error('Invalid PayFast checkout response');
   }
   const form = document.createElement('form');
   form.method = 'POST';
@@ -54,9 +74,10 @@ export function submitPayFastCheckout(checkout: Checkout): void {
 }
 
 export async function createBookingAndPay(booking: BookingRequest): Promise<void> {
+  const config = await getPayFastConfig();
   const data = await request('/api/bookings/create-with-payment', {
     method: 'POST',
-    body: JSON.stringify({ ...booking, sandboxTest: true }),
+    body: JSON.stringify({ ...booking, ...(config.mode === 'sandbox' ? { sandboxTest: true } : {}) }),
   });
   if (!data.checkout) throw new Error('PayFast checkout was not created');
   submitPayFastCheckout(data.checkout);
@@ -69,9 +90,17 @@ export async function retryBookingPayment(bookingId: string): Promise<void> {
   submitPayFastCheckout(data.checkout);
 }
 
-export async function getBookingPaymentStatus(bookingId: string): Promise<string> {
+export async function getBookingPaymentDetails(bookingId: string): Promise<{
+  paymentStatus: string;
+  paymentEnvironment?: 'sandbox' | 'live';
+  bookingFee?: number;
+}> {
   const booking = await request(`/api/bookings/${encodeURIComponent(bookingId)}`);
-  return booking.paymentStatus || 'unpaid';
+  return {
+    paymentStatus: booking.paymentStatus || 'unpaid',
+    paymentEnvironment: booking.paymentEnvironment,
+    bookingFee: booking.bookingFee,
+  };
 }
 
 export async function cancelBookingRequest(bookingId: string): Promise<void> {

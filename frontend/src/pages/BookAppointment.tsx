@@ -15,7 +15,7 @@ import Header from '@/components/Header';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { useBookingSocket } from '@/hooks/useBookingSocket';
-import { createBookingAndPay } from '@/client/payfastClient';
+import { createBookingAndPay, getPayFastConfig, type PayFastPublicConfig } from '@/client/payfastClient';
 import { format, startOfWeek, addDays, isSameDay, isPast, parseISO, isToday } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -67,9 +67,21 @@ const BookAppointment = () => {
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [currentWeek, setCurrentWeek] = useState(new Date());
+  const [payFastConfig, setPayFastConfig] = useState<PayFastPublicConfig | null>(null);
+  const [paymentConfigError, setPaymentConfigError] = useState('');
 
   // Socket for real-time booking
   const { getSlots, isConnected } = useBookingSocket();
+
+  useEffect(() => {
+    let active = true;
+    getPayFastConfig()
+      .then(config => { if (active) setPayFastConfig(config); })
+      .catch(error => {
+        if (active) setPaymentConfigError(error instanceof Error ? error.message : 'Payment options are unavailable');
+      });
+    return () => { active = false; };
+  }, []);
 
   // ==================== GENERATE DEFAULT SLOTS ====================
 
@@ -596,7 +608,7 @@ const BookAppointment = () => {
                             <Separator className="bg-blue-200" />
                             <div className="flex justify-between">
                               <span className="text-blue-900">Booking fee payable now</span>
-                              <span className="text-blue-900">R10.00</span>
+                              <span className="text-blue-900">{formatCurrency(payFastConfig?.bookingFee ?? 10)}</span>
                             </div>
                             <p className="text-xs text-blue-600 mt-1">The consultation fee is paid separately at the doctor's office.</p>
                           </div>
@@ -604,11 +616,19 @@ const BookAppointment = () => {
                       </Card>
                     )}
 
-                    <p className="text-sm font-semibold text-amber-800">Sandbox testing only. No real money is charged. This creates a test booking, not a real consultation.</p>
+                    {payFastConfig?.mode === 'sandbox' && (
+                      <p className="text-sm font-semibold text-amber-800">Sandbox testing only. No real money is charged. This creates a test booking, not a real consultation.</p>
+                    )}
+                    {payFastConfig?.mode === 'live' && (
+                      <p className="text-sm font-semibold text-blue-800">You’ll pay the booking fee through PayFast. The consultation fee is paid separately at the doctor’s office.</p>
+                    )}
+                    {paymentConfigError && (
+                      <p className="text-sm font-semibold text-destructive">PayFast is temporarily unavailable: {paymentConfigError}</p>
+                    )}
                     {/* Book Button */}
                     <Button
                       onClick={handleBooking}
-                      disabled={!user || !selectedDate || !selectedTime || isBooking || !isConnected}
+                      disabled={!user || !selectedDate || !selectedTime || isBooking || !isConnected || !payFastConfig}
                       className="w-full bg-blue-600 hover:bg-blue-700 text-white h-12 text-lg"
                     >
                       {isBooking ? (
@@ -616,6 +636,13 @@ const BookAppointment = () => {
                           <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                           Processing...
                         </>
+                      ) : !payFastConfig ? (
+                        paymentConfigError ? 'Payment options unavailable' : (
+                          <>
+                            <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                            Loading payment options...
+                          </>
+                        )
                       ) : !isConnected ? (
                         <>
                           <Loader2 className="w-5 h-5 mr-2 animate-spin" />
@@ -624,7 +651,7 @@ const BookAppointment = () => {
                       ) : (
                         <>
                           <Calendar className="w-5 h-5 mr-2" />
-                          Continue to PayFast Sandbox
+                          {payFastConfig.mode === 'sandbox' ? 'Continue to PayFast Sandbox' : `Pay ${formatCurrency(payFastConfig.bookingFee)} booking fee`}
                         </>
                       )}
                     </Button>

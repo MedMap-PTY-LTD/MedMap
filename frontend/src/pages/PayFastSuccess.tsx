@@ -3,13 +3,15 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import Header from '@/components/Header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { getBookingPaymentStatus } from '@/client/payfastClient';
+import { getBookingPaymentDetails } from '@/client/payfastClient';
 
 const PayFastSuccess = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const bookingId = searchParams.get('bookingId');
   const [status, setStatus] = useState('checking');
+  const [paymentEnvironment, setPaymentEnvironment] = useState<'sandbox' | 'live' | undefined>();
+  const [bookingFee, setBookingFee] = useState(10);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -21,10 +23,12 @@ const PayFastSuccess = () => {
     let attempts = 0;
     const check = async () => {
       try {
-        const current = await getBookingPaymentStatus(bookingId);
+        const details = await getBookingPaymentDetails(bookingId);
         if (cancelled) return;
-        setStatus(current);
-        if (current !== 'paid' && attempts++ < 15) {
+        setStatus(details.paymentStatus);
+        setPaymentEnvironment(details.paymentEnvironment);
+        setBookingFee(details.bookingFee ?? 10);
+        if (details.paymentStatus !== 'paid' && attempts++ < 15) {
           timer = window.setTimeout(check, 2000);
         }
       } catch (err: unknown) {
@@ -46,11 +50,15 @@ const PayFastSuccess = () => {
         <Card>
           <CardContent className="pt-8 space-y-5 text-center">
             <h1 className="text-2xl font-semibold">
-              {status === 'paid' ? 'Sandbox booking fee confirmed' : 'Checking your booking fee'}
+              {status === 'paid' ? 'Booking fee payment confirmed' : 'Checking your booking fee'}
             </h1>
             <p className="text-muted-foreground">
               {error || (status === 'paid'
-                ? 'PayFast confirmed the R10 sandbox test. No real money was charged and no real consultation was purchased.'
+                ? paymentEnvironment === 'sandbox'
+                  ? `PayFast confirmed the R${bookingFee.toFixed(2)} sandbox test. No real money was charged and no real consultation was purchased.`
+                  : paymentEnvironment === 'live'
+                    ? `PayFast confirmed your R${bookingFee.toFixed(2)} booking fee. The consultation fee is paid separately at the doctor's office.`
+                    : 'PayFast confirmed your booking fee.'
                 : 'We are waiting for PayFast to confirm the payment. Your booking stays pending until the confirmation arrives.')}
             </p>
             <Button onClick={() => navigate('/booking-history')}>View My Bookings</Button>

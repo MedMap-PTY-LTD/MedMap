@@ -9,12 +9,12 @@ export function payFastEncode(value: string): string {
 
 export function payFastSignature(
   fields: Record<string, string>,
-  passphrase: string,
+  passphrase?: string,
   includeBlank = false
 ): string {
   const parameters = Object.entries(fields)
     .filter(([key, value]) => key !== 'signature' && (includeBlank || value !== ''))
     .map(([key, value]) => `${key}=${payFastEncode(value)}`);
-  parameters.push(`passphrase=${payFastEncode(passphrase)}`);
+  if (passphrase?.trim()) parameters.push(`passphrase=${payFastEncode(passphrase)}`);
   return crypto.createHash('md5').update(parameters.join('&')).digest('hex');
 }

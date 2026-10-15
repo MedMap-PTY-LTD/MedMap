@@ -15,7 +15,13 @@ router.post('/api/bookings/create-with-payment', async (req, res) => {
   try {
     const user = (req as AuthedRequest).authUser!;
     const body = req.body || {};
-    if (body.sandboxTest !== true) return res.status(400).json({ error: 'This checkout is for explicit sandbox tests only' });
+    const paymentMode = PaymentService.currentMode();
+    if (paymentMode === 'sandbox' && body.sandboxTest !== true) {
+      return res.status(400).json({ error: 'Sandbox checkout requires an explicit test booking' });
+    }
+    if (paymentMode === 'live' && body.sandboxTest === true) {
+      return res.status(400).json({ error: 'Sandbox test bookings cannot be created in live mode' });
+    }
     if (typeof body.doctorId !== 'string' || typeof body.appointmentDate !== 'string' ||
         !/^\d{4}-\d{2}-\d{2}$/.test(body.appointmentDate) ||
         !/^\d{2}:\d{2}$/.test(body.appointmentTime || '')) {
@@ -59,7 +65,9 @@ router.post('/api/bookings/create-with-payment', async (req, res) => {
       appointmentTime: body.appointmentTime,
       endTime,
       consultationFee: Number(doctor.consultationFee) || 0,
-      notes: '[PAYFAST SANDBOX TEST - NO REAL CONSULTATION] ' + (typeof body.notes === 'string' ? body.notes.trim().slice(0, 1900) : ''),
+      notes: paymentMode === 'sandbox'
+        ? '[PAYFAST SANDBOX TEST - NO REAL CONSULTATION] ' + (typeof body.notes === 'string' ? body.notes.trim().slice(0, 1900) : '')
+        : (typeof body.notes === 'string' ? body.notes.trim().slice(0, 2000) : ''),
     });
 
     if (result.error) {

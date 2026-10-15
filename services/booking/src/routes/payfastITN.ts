@@ -19,6 +19,18 @@ export function notificationSource(req: Request): string {
   return req.ip || '';
 }
 
+// The browser needs only the current payment mode and booking fee to present
+// accurate checkout text. Merchant credentials are never returned here.
+router.get('/api/payments/payfast/config', (_req, res) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(PaymentService.publicConfig());
+  } catch (error) {
+    console.error('PayFast public config unavailable:', error);
+    res.status(503).json({ error: 'PayFast is temporarily unavailable' });
+  }
+});
+
 // IMPORTANT: PayFast sends application/x-www-form-urlencoded, not JSON
 router.post(
   '/api/payments/payfast/notify',

@@ -42,7 +42,7 @@ export interface Booking {
   notes?: string;
   consultationFee: number;
   bookingFee?: number;
-  paymentEnvironment?: 'sandbox';
+  paymentEnvironment?: 'sandbox' | 'live';
   isTestBooking?: boolean;
   paidAt?: any;
   rescheduleCount: number;
@@ -115,6 +115,7 @@ export interface PaymentRecord {
   currency: string;
   status: PaymentStatus;
   provider: string;             // 'payfast'
+  environment?: 'sandbox' | 'live';
   customerEmail: string;
   customerName: string;
   paymentMethod: string;
