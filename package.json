@@ -1,5 +1,8 @@
 {
   "dependencies": {
+    "@rhucodes/payfast-sdk": "^1.1.0",
+    "axios": "^1.20.0",
+    "express": "^5.3.0",
     "firebase-admin": "^14.2.0",
     "paystack": "^2.0.1"
   },
