@@ -1,6 +1,5 @@
 // frontend/src/integrations/sentry.ts
 import * as Sentry from '@sentry/react';
-import { BrowserTracing } from '@sentry/tracing';
 
 // Get DSN from environment variables
 const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN;
@@ -13,21 +12,17 @@ if (SENTRY_DSN) {
     dsn: SENTRY_DSN,
     environment: ENVIRONMENT,
     release: RELEASE,
-    
+
     // Performance monitoring
     integrations: [
-      new BrowserTracing({
-        // Trace all page loads and navigation
-        tracePropagationTargets: [
-          'localhost',
-          /^https:\/\/yourdomain\.com/,
-        ],
-        // Sample rate for performance traces (0-1)
-        tracesSampleRate: ENVIRONMENT === 'production' ? 0.2 : 1.0,
-        // Max number of breadcrumbs to keep
-        maxBreadcrumbs: 50,
-      }),
+      Sentry.browserTracingIntegration(),
     ],
+
+    // Trace all page loads and navigation
+    tracePropagationTargets: ['localhost', /^https:\/\/medmap\.co.za/],
+
+    // Sample rate for performance traces (0-1)
+    tracesSampleRate: ENVIRONMENT === 'production' ? 0.2 : 1.0,
 
     // Sample rate for errors (always 1.0 in production)
     sampleRate: 1.0,
