@@ -339,3 +339,18 @@ test('accepts a notification source published only by PayFast worker DNS', async
   await PaymentService.handleITN(notification(), '192.0.2.9');
   assert.equal(get('bookings/b1').paymentStatus, 'paid');
 });
+
+test('Render callbacks use the managed Cloudflare sender header and fail closed without it', () => {
+  const { notificationSource } = require('../src/routes/payfastITN');
+  const previous = process.env.RENDER;
+  try {
+    process.env.RENDER = 'true';
+    assert.equal(notificationSource({ ip: '192.0.2.10', get: name => name === 'cf-connecting-ip' ? '192.0.2.1' : 'forged' }), '192.0.2.1');
+    assert.equal(notificationSource({ ip: '192.0.2.10', get: () => undefined }), '');
+    assert.equal(notificationSource({ ip: '192.0.2.10', get: () => 'invalid' }), '');
+    delete process.env.RENDER;
+    assert.equal(notificationSource({ ip: '192.0.2.10', get: () => '192.0.2.1' }), '192.0.2.10');
+  } finally {
+    if (previous === undefined) delete process.env.RENDER; else process.env.RENDER = previous;
+  }
+});
