@@ -1,0 +1,8 @@
+{
+  "service": "booking-service",
+  "paymentMode": "sandbox",
+  "paymentIntegration": "payfast-sandbox-v2",
+  "revision": "eea96b768ed91ad70a65955b78a36d3982db03ec",
+  "callbackOutcome": "accepted",
+  "callbackReceivedAt": "2026-10-15T11:57:38.328Z"
+}
