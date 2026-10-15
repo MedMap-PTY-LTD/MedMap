@@ -30,42 +30,46 @@ exports.app = exports.db = void 0;
 // src/config/firebase.ts
 const fs = __importStar(require("fs"));
 const path_1 = __importDefault(require("path"));
-const admin = __importStar(require("firebase-admin"));
+const app_1 = require("firebase-admin/app");
 const firestore_1 = require("firebase-admin/firestore");
-const serviceAccountPath = path_1.default.resolve(__dirname, '../../service-account.json');
-let serviceAccount = null;
-if (fs.existsSync(serviceAccountPath)) {
-    serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+function loadServiceAccount() {
+    // 1. Prefer environment variables (production / Render)
+    const projectId = process.env.FIREBASE_PROJECT_ID;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+    if (projectId && clientEmail && privateKey) {
+        privateKey = privateKey
+            .trim()
+            // Strip surrounding double-quotes if the value was pasted with them.
+            .replace(/^"(.*)"$/s, '$1')
+            // Convert literal "\n" sequences into real newlines (safe no-op if
+            // the key already uses real newlines).
+            .replace(/\\n/g, '\n');
+        return { projectId, clientEmail, privateKey };
+    }
+    // 2. Fall back to a local service-account.json file (local dev only)
+    const serviceAccountPath = path_1.default.resolve(__dirname, '../../service-account.json');
+    if (fs.existsSync(serviceAccountPath)) {
+        const json = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+        return {
+            projectId: json.project_id ?? json.projectId,
+            clientEmail: json.client_email ?? json.clientEmail,
+            privateKey: json.private_key ?? json.privateKey,
+        };
+    }
+    throw new Error('Firebase credentials missing: set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL ' +
+        'and FIREBASE_PRIVATE_KEY, or provide service-account.json for local dev.');
 }
-else {
-    console.warn(`⚠️ Firebase service account file not found at ${serviceAccountPath}`);
-}
-const serviceAccountProjectId = serviceAccount
-    ? (serviceAccount.project_id ?? serviceAccount.projectId)
-    : undefined;
-// Initialize Firebase Admin
-let app;
+// Initialize Firebase Admin (once)
+const app = (0, app_1.getApps)().length === 0
+    ? (0, app_1.initializeApp)({
+        credential: (0, app_1.cert)(loadServiceAccount()),
+        projectId: process.env.FIREBASE_PROJECT_ID,
+    })
+    : (0, app_1.getApp)();
 exports.app = app;
-if (admin.apps.length === 0) {
-    if (serviceAccount) {
-        exports.app = app = admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount),
-            projectId: serviceAccountProjectId,
-        });
-        console.log('✅ Firebase Admin initialized with Firestore service account credentials');
-    }
-    else {
-        throw new Error('Firebase credentials are missing: service-account.json not found.');
-    }
-}
-else {
-    const existingApp = admin.apps[0];
-    if (!existingApp) {
-        throw new Error('Unexpected missing Firebase app instance');
-    }
-    exports.app = app = existingApp;
-}
 const db = (0, firestore_1.getFirestore)(app);
 exports.db = db;
+console.log('✅ Firebase Admin initialized');
 console.log('✅ Firestore initialized');
 //# sourceMappingURL=firebase.js.map

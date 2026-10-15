@@ -14,6 +14,7 @@ export interface RescheduleHistory {
     rescheduledAt: any;
     reason?: string;
 }
+export type PaymentStatus = 'unpaid' | 'pending' | 'paid' | 'failed' | 'refund_pending' | 'refunded';
 export interface Booking {
     id: string;
     doctorId: string;
@@ -32,6 +33,13 @@ export interface Booking {
     rescheduleCount: number;
     maxReschedules: number;
     rescheduleHistory: RescheduleHistory[];
+    paymentStatus: PaymentStatus;
+    paymentId?: string;
+    paymentReference?: string;
+    paymentUrl?: string;
+    pfPaymentId?: string;
+    refundReference?: string;
+    refundedAt?: any;
     createdAt: any;
     updatedAt: any;
     cancelledAt?: any;
@@ -53,6 +61,66 @@ export interface BookingStats {
     cancelled: number;
     revenue: number;
 }
+export interface PaymentIntent {
+    bookingId: string;
+    amount: number;
+    currency?: string;
+    customerEmail: string;
+    customerName: string;
+    description: string;
+    paymentMethod?: string;
+}
+export interface PaymentIntentResult {
+    paymentId: string;
+    paymentUrl: string;
+    formHtml?: string;
+    status: PaymentStatus;
+    error: string | null;
+}
+export interface RefundResult {
+    success: boolean;
+    refundId: string;
+    error: string | null;
+}
+export interface PaymentRecord {
+    paymentId: string;
+    bookingId: string;
+    amount: number;
+    currency: string;
+    status: PaymentStatus;
+    provider: string;
+    customerEmail: string;
+    customerName: string;
+    paymentMethod: string;
+    paymentUrl?: string;
+    reference: string;
+    pfPaymentId?: string;
+    amountGross?: number;
+    amountFee?: number;
+    amountNet?: number;
+    refundId?: string;
+    refundAmount?: number;
+    refundedAt?: string;
+    refundReference?: string;
+    itnPayload?: Record<string, any>;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface RefundQueueItem {
+    id: string;
+    bookingId: string;
+    paymentId?: string;
+    pfPaymentId?: string;
+    amount: number;
+    customerEmail: string;
+    customerName: string;
+    reason?: string;
+    status: 'pending_manual_refund' | 'completed' | 'cancelled';
+    refundReference?: string;
+    processedAt?: any;
+    createdAt: any;
+    updatedAt?: any;
+}
 export declare enum BookingEvents {
     CREATE_BOOKING = "create:booking",
     RESCHEDULE_BOOKING = "reschedule:booking",
@@ -72,5 +140,15 @@ export declare enum BookingEvents {
     BOOKING_CANCELLED = "booking:cancelled",
     BOOKING_UPDATED = "booking:updated",
     AVAILABILITY_UPDATED = "availability:updated"
+}
+export declare enum PaymentEvents {
+    CREATE_PAYMENT = "create:payment",
+    VERIFY_PAYMENT = "verify:payment",
+    REFUND_PAYMENT = "refund:payment",
+    GET_PAYMENT = "get:payment",
+    PAYMENT_CREATED = "payment:created",
+    PAYMENT_COMPLETED = "payment:completed",
+    PAYMENT_FAILED = "payment:failed",
+    PAYMENT_REFUNDED = "payment:refunded"
 }
 //# sourceMappingURL=index.d.ts.map

@@ -1,8 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BookingService = void 0;
-// src/services/BookingService.ts
 const firebase_1 = require("../config/firebase");
+const PaymentService_1 = require("./PaymentService");
 const MAX_RESCHEDULES = 2;
 const DEFAULT_CONSULTATION_DURATION = 30;
 const SLOT_INTERVAL = 30;
@@ -102,10 +102,8 @@ class BookingService {
     static async createBooking(bookingData) {
         try {
             const bookingId = `booking_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-            // Use Firestore transaction to prevent double booking
             const result = await firebase_1.db.runTransaction(async (transaction) => {
                 const availabilityRef = firebase_1.db.collection('doctorAvailability').doc(`${bookingData.doctorId}_${bookingData.appointmentDate}`);
-                // Check if slot is already booked and read availability before any writes
                 const [existingBookingsSnapshot, availabilitySnap] = await Promise.all([
                     transaction.get(firebase_1.db.collection('bookings')
                         .where('doctorId', '==', bookingData.doctorId)
@@ -117,12 +115,12 @@ class BookingService {
                 if (!existingBookingsSnapshot.empty) {
                     throw new Error('This slot is no longer available');
                 }
-                // Create the booking
                 const now = new Date().toISOString();
                 const booking = {
                     id: bookingId,
                     ...bookingData,
                     status: 'pending',
+                    paymentStatus: 'unpaid',
                     rescheduleCount: 0,
                     maxReschedules: MAX_RESCHEDULES,
                     rescheduleHistory: [],
@@ -148,6 +146,42 @@ class BookingService {
         catch (error) {
             console.error('Error creating booking:', error);
             return { bookingId: '', error: error.message };
+        }
+    }
+    // 🔥 Create booking + PayFast payment form together
+    static async createBookingWithPayment(bookingData, paymentMethod = 'card') {
+        const { bookingId, error } = await this.createBooking(bookingData);
+        if (error || !bookingId) {
+            return { bookingId: '', error };
+        }
+        try {
+            const paymentResult = await PaymentService_1.PaymentService.createPaymentIntent({
+                bookingId,
+                amount: bookingData.consultationFee,
+                currency: 'ZAR',
+                customerEmail: bookingData.patientEmail,
+                customerName: bookingData.patientName,
+                description: `Consultation with Dr. ${bookingData.doctorName}`,
+                paymentMethod,
+            });
+            if (paymentResult.error) {
+                // Rollback booking + free slot on payment init failure
+                await this.updateSlotAvailability(bookingData.doctorId, bookingData.appointmentDate, bookingData.appointmentTime, true);
+                await firebase_1.db.collection('bookings').doc(bookingId).delete();
+                return { bookingId: '', error: paymentResult.error };
+            }
+            return {
+                bookingId,
+                paymentUrl: paymentResult.paymentUrl,
+                formHtml: paymentResult.formHtml,
+                error: null
+            };
+        }
+        catch (err) {
+            // Rollback
+            await this.updateSlotAvailability(bookingData.doctorId, bookingData.appointmentDate, bookingData.appointmentTime, true);
+            await firebase_1.db.collection('bookings').doc(bookingId).delete();
+            return { bookingId: '', error: err.message };
         }
     }
     // Get booking by ID
@@ -237,7 +271,7 @@ class BookingService {
                 completed: bookings.filter(b => b.status === 'completed').length,
                 cancelled: bookings.filter(b => b.status === 'cancelled').length,
                 revenue: bookings
-                    .filter(b => b.status === 'completed')
+                    .filter(b => b.paymentStatus === 'paid')
                     .reduce((sum, b) => sum + (b.consultationFee || 0), 0),
             };
         }
@@ -250,7 +284,7 @@ class BookingService {
     static async rescheduleBooking(bookingId, newDate, newTime, reason) {
         try {
             const bookingRef = firebase_1.db.collection('bookings').doc(bookingId);
-            const result = await firebase_1.db.runTransaction(async (transaction) => {
+            await firebase_1.db.runTransaction(async (transaction) => {
                 const bookingSnap = await transaction.get(bookingRef);
                 if (!bookingSnap.exists) {
                     throw new Error('Booking not found');
@@ -304,7 +338,6 @@ class BookingService {
                 if (!existingBookingsSnapshot.empty) {
                     throw new Error('The new slot is not available');
                 }
-                // Add to reschedule history
                 const historyEntry = {
                     fromDate: booking.appointmentDate,
                     fromTime: booking.appointmentTime,
@@ -374,7 +407,7 @@ class BookingService {
             return { success: false, error: error.message };
         }
     }
-    // Cancel booking
+    // 🔥 Updated: Cancel booking with PayFast-aware refund handling
     static async cancelBooking(bookingId, reason) {
         try {
             const bookingRef = firebase_1.db.collection('bookings').doc(bookingId);
@@ -383,20 +416,101 @@ class BookingService {
                 return { success: false, error: 'Booking not found' };
             }
             const booking = bookingSnap.data();
-            // Restore slot availability
+            let refundPending = false;
+            // Free the slot
             await this.updateSlotAvailability(booking.doctorId, booking.appointmentDate, booking.appointmentTime, true);
-            // Update booking
+            // Determine payment status after cancellation
+            let newPaymentStatus = booking.paymentStatus;
+            if (booking.paymentStatus === 'paid') {
+                // ⚠️ PayFast refunds require either:
+                //   1. Manual processing via PayFast dashboard, OR
+                //   2. Special API access (request from PayFast, not available in sandbox)
+                // We mark as 'refund_pending' and let an admin process it.
+                newPaymentStatus = 'refund_pending';
+                refundPending = true;
+                // Log for admin visibility
+                await firebase_1.db.collection('refundQueue').add({
+                    bookingId,
+                    paymentId: booking.paymentId,
+                    pfPaymentId: booking.pfPaymentId || null,
+                    amount: booking.consultationFee,
+                    customerEmail: booking.patientEmail,
+                    customerName: booking.patientName,
+                    reason: reason || 'Cancelled by patient',
+                    status: 'pending_manual_refund',
+                    createdAt: new Date().toISOString(),
+                });
+                console.log(`⚠️ Refund needed for booking ${bookingId} — process manually in PayFast dashboard`);
+            }
+            else if (booking.paymentStatus === 'pending') {
+                // Payment was initiated but never completed — safe to mark as failed
+                newPaymentStatus = 'failed';
+            }
             await bookingRef.update({
                 status: 'cancelled',
                 cancelledAt: new Date().toISOString(),
                 cancellationReason: reason || 'Cancelled by patient',
+                paymentStatus: newPaymentStatus,
                 updatedAt: new Date().toISOString(),
             });
-            return { success: true, error: null };
+            return { success: true, error: null, refundPending };
         }
         catch (error) {
             console.error('Error cancelling booking:', error);
             return { success: false, error: error.message };
+        }
+    }
+    // 🔥 NEW: Admin marks a refund as processed (after doing it in PayFast dashboard)
+    static async markRefundProcessed(bookingId, refundReference) {
+        try {
+            const bookingRef = firebase_1.db.collection('bookings').doc(bookingId);
+            const bookingSnap = await bookingRef.get();
+            if (!bookingSnap.exists) {
+                return { success: false, error: 'Booking not found' };
+            }
+            await bookingRef.update({
+                paymentStatus: 'refunded',
+                refundedAt: new Date().toISOString(),
+                refundReference: refundReference || null,
+                updatedAt: new Date().toISOString(),
+            });
+            // Update the refund queue entry if it exists
+            const queueSnapshot = await firebase_1.db.collection('refundQueue')
+                .where('bookingId', '==', bookingId)
+                .where('status', '==', 'pending_manual_refund')
+                .get();
+            const batch = firebase_1.db.batch();
+            queueSnapshot.forEach(doc => {
+                batch.update(doc.ref, {
+                    status: 'completed',
+                    refundReference: refundReference || null,
+                    processedAt: new Date().toISOString(),
+                });
+            });
+            await batch.commit();
+            return { success: true, error: null };
+        }
+        catch (error) {
+            console.error('Error marking refund processed:', error);
+            return { success: false, error: error.message };
+        }
+    }
+    // 🔥 NEW: Get pending refunds (for admin dashboard)
+    static async getPendingRefunds() {
+        try {
+            const snapshot = await firebase_1.db.collection('refundQueue')
+                .where('status', '==', 'pending_manual_refund')
+                .orderBy('createdAt', 'desc')
+                .get();
+            const refunds = [];
+            snapshot.forEach(doc => {
+                refunds.push({ id: doc.id, ...doc.data() });
+            });
+            return refunds;
+        }
+        catch (error) {
+            console.error('Error getting pending refunds:', error);
+            return [];
         }
     }
     // Update booking status
@@ -429,7 +543,6 @@ class BookingService {
     static async setDayAvailability(doctorId, date, slots) {
         try {
             const availabilityRef = firebase_1.db.collection('doctorAvailability').doc(`${doctorId}_${date}`);
-            // Get existing bookings to block booked slots
             const bookingsSnapshot = await firebase_1.db.collection('bookings')
                 .where('doctorId', '==', doctorId)
                 .where('appointmentDate', '==', date)
@@ -455,6 +568,48 @@ class BookingService {
         }
         catch (error) {
             console.error('Error setting day availability:', error);
+            return { success: false, error: error.message };
+        }
+    }
+    // 🔥 Mark booking as paid (called from PayFast ITN handler)
+    static async markBookingAsPaid(bookingId, pfPaymentId, paymentReference) {
+        try {
+            await firebase_1.db.collection('bookings').doc(bookingId).update({
+                paymentStatus: 'paid',
+                pfPaymentId, // PayFast's transaction ID
+                paymentReference,
+                status: 'confirmed',
+                confirmedAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+            });
+            return { success: true, error: null };
+        }
+        catch (error) {
+            console.error('Error marking booking as paid:', error);
+            return { success: false, error: error.message };
+        }
+    }
+    // 🔥 Mark booking payment as failed (called from ITN or timeout)
+    static async markBookingPaymentFailed(bookingId, reason) {
+        try {
+            const bookingRef = firebase_1.db.collection('bookings').doc(bookingId);
+            const bookingSnap = await bookingRef.get();
+            if (!bookingSnap.exists)
+                return { success: false, error: 'Booking not found' };
+            const booking = bookingSnap.data();
+            // Free the slot
+            await this.updateSlotAvailability(booking.doctorId, booking.appointmentDate, booking.appointmentTime, true);
+            await bookingRef.update({
+                paymentStatus: 'failed',
+                status: 'cancelled',
+                cancellationReason: reason || 'Payment failed',
+                cancelledAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+            });
+            return { success: true, error: null };
+        }
+        catch (error) {
+            console.error('Error marking payment failed:', error);
             return { success: false, error: error.message };
         }
     }

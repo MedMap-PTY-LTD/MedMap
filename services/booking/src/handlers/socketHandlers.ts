@@ -28,6 +28,7 @@ export class SocketHandlers {
       this.handleJoinPatient(patientId);
     });
 
+    // Leave rooms
     this.socket.on(BookingEvents.LEAVE_DOCTOR, (doctorId: string) => {
       this.handleLeaveDoctor(doctorId);
     });

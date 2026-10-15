@@ -17,6 +17,7 @@ class SocketHandlers {
         this.socket.on(types_1.BookingEvents.JOIN_PATIENT, (patientId) => {
             this.handleJoinPatient(patientId);
         });
+        // Leave rooms
         this.socket.on(types_1.BookingEvents.LEAVE_DOCTOR, (doctorId) => {
             this.handleLeaveDoctor(doctorId);
         });

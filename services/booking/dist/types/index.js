@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.BookingEvents = void 0;
+exports.PaymentEvents = exports.BookingEvents = void 0;
 // Socket Events
 var BookingEvents;
 (function (BookingEvents) {
@@ -22,5 +22,17 @@ var BookingEvents;
     BookingEvents["BOOKING_CANCELLED"] = "booking:cancelled";
     BookingEvents["BOOKING_UPDATED"] = "booking:updated";
     BookingEvents["AVAILABILITY_UPDATED"] = "availability:updated";
-})(BookingEvents = exports.BookingEvents || (exports.BookingEvents = {}));
+})(BookingEvents || (exports.BookingEvents = BookingEvents = {}));
+// 🔥 Payment socket events
+var PaymentEvents;
+(function (PaymentEvents) {
+    PaymentEvents["CREATE_PAYMENT"] = "create:payment";
+    PaymentEvents["VERIFY_PAYMENT"] = "verify:payment";
+    PaymentEvents["REFUND_PAYMENT"] = "refund:payment";
+    PaymentEvents["GET_PAYMENT"] = "get:payment";
+    PaymentEvents["PAYMENT_CREATED"] = "payment:created";
+    PaymentEvents["PAYMENT_COMPLETED"] = "payment:completed";
+    PaymentEvents["PAYMENT_FAILED"] = "payment:failed";
+    PaymentEvents["PAYMENT_REFUNDED"] = "payment:refunded";
+})(PaymentEvents || (exports.PaymentEvents = PaymentEvents = {}));
 //# sourceMappingURL=index.js.map

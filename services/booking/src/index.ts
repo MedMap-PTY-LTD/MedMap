@@ -10,57 +10,99 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 
-const corsOptions = {
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+// 🔥 Allow multiple origins (array is supported by the cors package)
+const allowedOrigins = [
+  'https://medmap.co.za',
+  'https://www.medmap.co.za',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  // add your Render preview URLs if any, e.g.:
+  // 'https://medmap-booking.onrender.com',
+];
+
+// Allow extra origins via env var (comma-separated)
+if (process.env.CLIENT_URL) {
+  process.env.CLIENT_URL.split(',').forEach(url => {
+    const trimmed = url.trim();
+    if (trimmed && !allowedOrigins.includes(trimmed)) {
+      allowedOrigins.push(trimmed);
+    }
+  });
+}
+
+const corsOptions: cors.CorsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, Postman, server-to-server)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    console.warn(`🚫 CORS blocked origin: ${origin}`);
+    return callback(new Error(`Origin ${origin} not allowed by CORS`));
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  // 🔥 Paystack sends these headers on webhook / API calls
+  exposedHeaders: ['Content-Length', 'X-Requested-With'],
 };
 
+// 🔥 CORS must be the FIRST middleware
 app.use(cors(corsOptions));
-app.use(express.json());
 
-// Health check
+// 🔥 Handle preflight for ALL routes (Express 4 needs this for nested routers)
+app.options('*', cors(corsOptions));
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // PayFast/ITN webhooks need this
+
+// ==================== HEALTH + TEST ====================
+
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'healthy', 
+  res.json({
+    status: 'healthy',
     service: 'booking-service',
     timestamp: new Date().toISOString(),
-    version: '1.0.0'
+    version: '1.0.0',
   });
 });
 
-// ==================== SIMPLE TEST ROUTES ====================
-
-// Test route - no auth
 app.get('/api/test', (req, res) => {
-  res.json({ 
-    success: true, 
+  res.json({
+    success: true,
     message: 'Booking service is running',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 });
 
-// ==================== SOCKET.IO SETUP ====================
+// ==================== ROUTES ====================
+import bookingsRouter from './routes/bookings';
+import payfastITNRouter from './routes/payfastITN';
+import refundsRouter from './routes/refunds';
+
+app.use(bookingsRouter);
+app.use(payfastITNRouter);
+app.use(refundsRouter);
+
+ //==================== SOCKET.IO SETUP ====================
 
 const io = new Server(httpServer, {
   cors: corsOptions,
   path: '/socket.io/',
   transports: ['websocket', 'polling'],
-  // Allow all connections - NO AUTH
   allowEIO3: true,
 });
 
-// Connection handler - NO AUTH CHECK
 io.on('connection', (socket) => {
   console.log(`🔌 Client connected: ${socket.id}`);
-  
-  // Send a welcome message
-  socket.emit('welcome', { 
+
+  socket.emit('welcome', {
     message: 'Connected to booking service',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 
-  // Ping test
   socket.on('ping', (callback) => {
     console.log('📡 Ping received');
     if (callback && typeof callback === 'function') {
@@ -70,10 +112,9 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Initialize socket handlers - NO AUTH REQUIRED
   const { SocketHandlers } = require('./handlers/socketHandlers');
   new SocketHandlers({ io, socket });
-  
+
   socket.on('disconnect', () => {
     console.log(`🔌 Client disconnected: ${socket.id}`);
   });
@@ -91,7 +132,7 @@ httpServer.listen(PORT, () => {
   console.log(`📅 Booking Service running on port ${PORT}`);
   console.log(`📍 Health check: http://localhost:${PORT}/health`);
   console.log(`🔌 WebSocket: ws://localhost:${PORT}/socket.io`);
-  console.log(`🔓 AUTH IS DISABLED - All connections allowed`);
+  console.log(`✅ Allowed CORS origins:`, allowedOrigins);
 });
 
 export { app, io, httpServer };
