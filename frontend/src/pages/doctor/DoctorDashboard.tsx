@@ -9,9 +9,7 @@ import {
   Clock,
   Users,
   DollarSign,
-  Settings,
   TrendingUp,
-  Eye,
   Edit,
   Shield,
   AlertCircle,
@@ -34,15 +32,10 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, orderBy, limit, serverTimestamp, DocumentData, DocumentReference, FieldValue } from 'firebase/firestore';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DoctorCalendar } from './DoctorCalendar';
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
   Tooltip as RechartsTooltip,
   Legend,
   ResponsiveContainer,
@@ -336,10 +329,10 @@ const DoctorDashboard = () => {
         consultationFee: parseFloat(formData.consultationFee) || 0,
         consultationDuration: parseInt(formData.consultationDuration) || 30,
         operatingHours: formData.operatingHours,
-        updatedAt: serverTimestamp(),
+        updatedAt : serverTimestamp(),
       };
       
-      await updateDoc(doctorRef, doctorUpdateData);
+     await updateDoc(doctorRef, doctorUpdateData);
       
       await updateDoc(userRef, {
         firstName: formData.firstName,
@@ -1208,3 +1201,7 @@ const DoctorDashboard = () => {
 };
 
 export default DoctorDashboard;
+
+function updateDoc(userRef: DocumentReference<DocumentData, DocumentData>, arg1: { firstName: any; lastName: any; phone: any; updatedAt: FieldValue; }) {
+  throw new Error('Function not implemented.');
+}
