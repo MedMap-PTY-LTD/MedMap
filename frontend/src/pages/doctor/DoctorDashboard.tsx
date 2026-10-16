@@ -32,9 +32,11 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, query, where, getDocs, orderBy, limit, serverTimestamp, DocumentData, DocumentReference, FieldValue } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, orderBy, limit, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DoctorCalendar } from './DoctorCalendar';
+import { getDoctorBookingStatistics } from '@/client/payfastClient';
+import { hasPaidMembershipAccess } from '@/lib/membershipAccess';
 import {
   Tooltip as RechartsTooltip,
   Legend,
@@ -60,6 +62,8 @@ interface DoctorProfile {
   qualifications: string[];
   experience: string;
   bio: string;
+  services: string[];
+  languages: string[];
   consultationFee: number;
   consultationDuration: number;
   operatingHours: any;
@@ -71,6 +75,10 @@ interface DoctorProfile {
   createdAt: any;
   updatedAt: any;
   rejectionReason?: string;
+  membershipPlanId: 'free' | 'member' | 'partner';
+  membershipStatus: string;
+  membershipPeriodEnd: string;
+  membershipGracePeriodEnd?: string | null;
 }
 
 interface BookingData {
@@ -92,6 +100,11 @@ const QUERY_KEYS = {
   doctorStats: 'doctorStats',
 };
 
+const parseProfileList = (value: unknown): string[] => {
+  const entries = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [];
+  return entries.map(item => String(item).trim()).filter(Boolean);
+};
+
 // ==================== DATA FETCHING FUNCTIONS ====================
 const fetchDoctorProfile = async (uid: string): Promise<DoctorProfile | null> => {
   if (!uid) return null;
@@ -105,6 +118,8 @@ const fetchDoctorProfile = async (uid: string): Promise<DoctorProfile | null> =>
     }
 
     const doctorData = doctorSnap.data();
+    const membershipIsCurrent = hasPaidMembershipAccess(doctorData.membershipStatus, doctorData.membershipPeriodEnd, doctorData.membershipGracePeriodEnd) &&
+      ['member', 'partner'].includes(doctorData.membershipPlanId);
     
     const userRef = doc(db, 'users', uid);
     const userSnap = await getDoc(userRef);
@@ -126,6 +141,8 @@ const fetchDoctorProfile = async (uid: string): Promise<DoctorProfile | null> =>
       qualifications: doctorData.qualifications || [],
       experience: doctorData.experience || '',
       bio: doctorData.bio || '',
+      services: Array.isArray(doctorData.services) ? doctorData.services : [],
+      languages: Array.isArray(doctorData.languages) ? doctorData.languages : [],
       consultationFee: doctorData.consultationFee || 0,
       consultationDuration: doctorData.consultationDuration || 30,
       operatingHours: doctorData.operatingHours || {},
@@ -133,10 +150,14 @@ const fetchDoctorProfile = async (uid: string): Promise<DoctorProfile | null> =>
       enrollmentCompleted: doctorData.enrollmentCompleted || false,
       rating: doctorData.rating || 0,
       reviewCount: doctorData.reviewCount || 0,
-      profileImage: doctorData.profileImage || userData.photoURL || '',
+      profileImage: doctorData.profileImage || doctorData.profilePicture || userData.photoURL || '',
       createdAt: doctorData.createdAt || userData.createdAt,
       updatedAt: doctorData.updatedAt || userData.updatedAt,
       rejectionReason: doctorData.rejectionReason || '',
+      membershipPlanId: membershipIsCurrent ? doctorData.membershipPlanId : 'free',
+      membershipStatus: doctorData.membershipStatus || 'free',
+      membershipPeriodEnd: doctorData.membershipPeriodEnd || '',
+      membershipGracePeriodEnd: doctorData.membershipGracePeriodEnd || null,
     };
   } catch (error) {
     console.error('Error fetching doctor profile:', error);
@@ -244,6 +265,17 @@ const DoctorDashboard = () => {
     refetchInterval: 30 * 1000,
   });
 
+  const {
+    data: bookingStatistics,
+  } = useQuery({
+    queryKey: [QUERY_KEYS.doctorStats, doctor?.uid],
+    queryFn: () => getDoctorBookingStatistics(doctor!.uid),
+    enabled: !!doctor && doctor.membershipPlanId !== 'free',
+    staleTime: 30 * 1000,
+    refetchInterval: 30 * 1000,
+    refetchOnWindowFocus: true,
+  });
+
   // ==================== DERIVED DATA ====================
   const pendingBookings = bookings.filter(b => b.status === 'pending');
   const upcomingBookings = bookings.filter(b => 
@@ -251,16 +283,17 @@ const DoctorDashboard = () => {
     b.status !== 'cancelled' &&
     b.status !== 'completed'
   );
+  const hasBasicBookingStats = doctor?.membershipPlanId === 'member' || doctor?.membershipPlanId === 'partner';
 
   const stats = {
-    totalBookings: bookings.length,
-    pendingBookings: pendingBookings.length,
-    completedBookings: bookings.filter(b => b.status === 'completed').length,
-    monthlyRevenue: bookings
+    totalBookings: bookingStatistics?.total ?? bookings.length,
+    pendingBookings: bookingStatistics?.pending ?? pendingBookings.length,
+    completedBookings: bookingStatistics?.completed ?? bookings.filter(b => b.status === 'completed').length,
+    monthlyRevenue: bookingStatistics?.revenue ?? bookings
       .filter(b => b.status === 'completed')
       .reduce((sum, b) => sum + (b.consultationFee || 0), 0),
     rating: doctor?.rating || 0,
-    totalPatients: new Set(bookings.map(b => b.patientId)).size,
+    totalPatients: bookingStatistics?.totalPatients ?? new Set(bookings.map(b => b.patientId)).size,
   };
 
   const statusCounts = bookings.reduce((acc: any, curr) => {
@@ -326,6 +359,8 @@ const DoctorDashboard = () => {
         qualifications: formData.qualifications || [],
         experience: formData.experience,
         bio: formData.bio,
+        services: parseProfileList(formData.services),
+        languages: parseProfileList(formData.languages),
         consultationFee: parseFloat(formData.consultationFee) || 0,
         consultationDuration: parseInt(formData.consultationDuration) || 30,
         operatingHours: formData.operatingHours,
@@ -565,6 +600,12 @@ const DoctorDashboard = () => {
             <p className="text-gray-600 mt-1">
               {doctor.practiceName || 'Your Practice'} • {doctor.specialization || 'Specialization not set'}
             </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Badge variant={doctor.membershipPlanId === 'free' ? 'secondary' : 'default'}>
+                {doctor.membershipPlanId === 'partner' ? 'Partner badge' : doctor.membershipPlanId === 'member' ? 'Member badge' : 'Free plan'}
+              </Badge>
+              <Button variant="link" className="h-auto p-0" onClick={() => navigate('/memberships')}>Manage membership</Button>
+            </div>
           </div>
           <div className="flex gap-2 mt-4 md:mt-0">
             <Button 
@@ -590,8 +631,20 @@ const DoctorDashboard = () => {
         {/* Verification Banner */}
         {renderVerificationBanner()}
 
+        {doctor.membershipStatus === 'past_due' && (
+          <Card className="mt-5 border-amber-200 bg-amber-50">
+            <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-semibold text-amber-950">Membership payment needs attention</p>
+                <p className="text-sm text-amber-900">Your benefits remain available through {doctor.membershipGracePeriodEnd ? new Date(doctor.membershipGracePeriodEnd).toLocaleDateString('en-ZA') : 'the seven-day grace period'}.</p>
+              </div>
+              <Button variant="outline" onClick={() => navigate('/memberships')}>Review membership</Button>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
+        {hasBasicBookingStats ? <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
           <Card>
             <CardContent className="pt-4">
               <div className="flex items-center justify-between">
@@ -620,7 +673,7 @@ const DoctorDashboard = () => {
             <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-600">Revenue</p>
+                  <p className="text-sm text-gray-600">Recorded Revenue</p>
                   <p className="text-2xl font-bold text-green-600">{formatCurrency(stats.monthlyRevenue)}</p>
                 </div>
                 <DollarSign className="w-8 h-8 text-green-600" />
@@ -641,7 +694,10 @@ const DoctorDashboard = () => {
               </div>
             </CardContent>
           </Card>
-        </div>
+        </div> : <Card className="mt-6 border-blue-200 bg-blue-50"><CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+          <p className="text-sm text-blue-900">Booking statistics are included with Member and Partner plans.</p>
+          <Button size="sm" onClick={() => navigate('/memberships')}>View plans</Button>
+        </CardContent></Card>}
 
         {/* Loading indicator for background refetching */}
         {isLoadingBookings && (
@@ -671,10 +727,9 @@ const DoctorDashboard = () => {
                 <User className="w-4 h-4" />
                 Profile
               </TabsTrigger>
-              <TabsTrigger value="analytics" className="flex items-center gap-2">
-                <TrendingUp className="w-4 h-4" />
-                Analytics
-              </TabsTrigger>
+              {hasBasicBookingStats && <TabsTrigger value="analytics" className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4" />Analytics
+              </TabsTrigger>}
             </TabsList>
 
             {/* Overview Tab */}
@@ -784,9 +839,15 @@ const DoctorDashboard = () => {
 
             {/* Calendar Tab */}
             <TabsContent value="calendar">
-              <DoctorCalendar 
+              {!hasBasicBookingStats && <Card className="mb-4 border-blue-200 bg-blue-50"><CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+                <p className="text-sm text-blue-900">Free includes a basic calendar. Full availability management and calendar statistics are included with Member and Partner.</p>
+                <Button size="sm" onClick={() => navigate('/memberships')}>View plans</Button>
+              </CardContent></Card>}
+              <DoctorCalendar
                 doctorId={doctor.uid} 
                 consultationDuration={doctor.consultationDuration || 30}
+                canManageAvailability={hasBasicBookingStats}
+                canViewStatistics={hasBasicBookingStats}
               />
             </TabsContent>
 
@@ -934,11 +995,12 @@ const DoctorDashboard = () => {
             </TabsContent>
 
             {/* Analytics Tab */}
-            <TabsContent value="analytics">
+            {hasBasicBookingStats && <TabsContent value="analytics">
+              {doctor.membershipPlanId === 'partner' && <Card className="mb-4 border-amber-200 bg-amber-50"><CardContent className="py-3 text-sm text-amber-900">Partner advanced statistics are coming soon. Basic booking statistics are available below.</CardContent></Card>}
               <div className="grid md:grid-cols-2 gap-6">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Booking Status</CardTitle>
+                    <CardTitle>Recent Booking Status</CardTitle>
                   </CardHeader>
                   <CardContent className="h-[300px]">
                     {bookingStatusData.length > 0 ? (
@@ -1001,7 +1063,7 @@ const DoctorDashboard = () => {
                   </CardContent>
                 </Card>
               </div>
-            </TabsContent>
+            </TabsContent>}
           </Tabs>
         </div>
       </div>
@@ -1143,6 +1205,26 @@ const DoctorDashboard = () => {
                       rows={4}
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="services">Services</Label>
+                    <Input
+                      id="services"
+                      value={Array.isArray(editForm.services) ? editForm.services.join(', ') : editForm.services || ''}
+                      onChange={(e) => setEditForm({...editForm, services: e.target.value})}
+                      placeholder="e.g., consultations, vaccinations"
+                    />
+                    <p className="text-xs text-gray-500">Separate services with commas.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="languages">Languages</Label>
+                    <Input
+                      id="languages"
+                      value={Array.isArray(editForm.languages) ? editForm.languages.join(', ') : editForm.languages || ''}
+                      onChange={(e) => setEditForm({...editForm, languages: e.target.value})}
+                      placeholder="e.g., English, isiZulu"
+                    />
+                    <p className="text-xs text-gray-500">Separate languages with commas.</p>
+                  </div>
                 </div>
               </div>
 
@@ -1201,7 +1283,3 @@ const DoctorDashboard = () => {
 };
 
 export default DoctorDashboard;
-
-function updateDoc(userRef: DocumentReference<DocumentData, DocumentData>, arg1: { firstName: any; lastName: any; phone: any; updatedAt: FieldValue; }) {
-  throw new Error('Function not implemented.');
-}

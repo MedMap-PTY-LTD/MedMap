@@ -2,6 +2,8 @@
 import { Router, Request } from 'express';
 import { isIP } from 'net';
 import { InvalidPayFastNotification, PaymentService } from '../services/PaymentService';
+import { PatientMembershipService } from '../services/PatientMembershipService';
+import { DoctorMembershipService } from '../services/DoctorMembershipService';
 
 const router = Router();
 
@@ -37,7 +39,19 @@ router.post(
   async (req, res) => {
     payfastNotificationHealth.receivedAt = new Date().toISOString();
     try {
-      await PaymentService.handleITN(req.body, notificationSource(req));
+      const payload = req.body || {};
+      const paymentReference = typeof payload.m_payment_id === 'string' ? payload.m_payment_id : '';
+      const token = typeof payload.token === 'string' ? payload.token : '';
+      const doctorMembershipNotification = paymentReference.startsWith('pfd_') ||
+        (!paymentReference.startsWith('pfm_') && !!token && await DoctorMembershipService.hasSubscriptionToken(token));
+      const patientMembershipNotification = paymentReference.startsWith('pfm_') || !!token;
+      if (doctorMembershipNotification) {
+        await DoctorMembershipService.handleITN(payload, notificationSource(req));
+      } else if (patientMembershipNotification) {
+        await PatientMembershipService.handleITN(payload, notificationSource(req));
+      } else {
+        await PaymentService.handleITN(payload, notificationSource(req));
+      }
       payfastNotificationHealth.outcome = 'accepted';
       res.status(200).send('OK');
     } catch (error: any) {

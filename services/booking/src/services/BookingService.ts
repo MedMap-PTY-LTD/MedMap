@@ -7,6 +7,9 @@ import {
   RescheduleHistory 
 } from '../types';
 import { BOOKING_FEE, PaymentService, PayFastCheckout } from './PaymentService';
+import { PATIENT_MEMBERSHIP_PLANS } from './PatientMembershipService';
+import { hasPaidMembershipAccess } from './membershipAccess';
+import { accountCreditRef, accountCreditTransactionRef } from './AccountCreditService';
 
 const MAX_RESCHEDULES = 2;
 const DEFAULT_CONSULTATION_DURATION = 30;
@@ -129,14 +132,17 @@ export class BookingService {
   // Create booking with transaction
   static async createBooking(
     bookingData: Omit<Booking, 'id' | 'status' | 'rescheduleCount' | 'maxReschedules' | 'rescheduleHistory' | 'createdAt' | 'updatedAt' | 'paymentStatus' | 'paymentId' | 'paymentReference'>
-  ): Promise<{ bookingId: string; error: string | null }> {
+  ): Promise<{ bookingId: string; bookingFee: number; bookingFeeCredit: number; bookingFeeTotal: number; membershipPlanId: string; freeBookingsRemaining: number; error: string | null }> {
     try {
       const bookingId = `booking_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      const creditRef = accountCreditRef(bookingData.patientId);
+      const debitLedgerRef = accountCreditTransactionRef(bookingData.patientId, `booking_${bookingId}_debit`);
       
       const result = await db.runTransaction(async (transaction) => {
         const availabilityRef = db.collection('doctorAvailability').doc(`${bookingData.doctorId}_${bookingData.appointmentDate}`);
+        const membershipRef = db.collection('patientMemberships').doc(bookingData.patientId);
 
-        const [existingBookingsSnapshot, availabilitySnap] = await Promise.all([
+        const [existingBookingsSnapshot, availabilitySnap, membershipSnap, creditSnap, debitLedgerSnap] = await Promise.all([
           transaction.get(
             db.collection('bookings')
               .where('doctorId', '==', bookingData.doctorId)
@@ -145,6 +151,9 @@ export class BookingService {
               .where('status', 'in', ['pending', 'confirmed', 'rescheduled'])
           ),
           transaction.get(availabilityRef),
+          transaction.get(membershipRef),
+          transaction.get(creditRef),
+          transaction.get(debitLedgerRef),
         ]);
 
         if (!existingBookingsSnapshot.empty) {
@@ -159,14 +168,78 @@ export class BookingService {
         }
 
         const now = new Date().toISOString();
+        const membership = membershipSnap.exists ? membershipSnap.data()! : undefined;
+        const membershipCurrent = !!membership && membership.audience === 'patient' && hasPaidMembershipAccess(membership);
+        let membershipPlanId = 'free';
+        let membershipFreeBooking = false;
+        let membershipFreeBookingPeriodStart: string | null = null;
+        let bookingFee = BOOKING_FEE;
+        let freeBookingsRemaining = 0;
+
+        if (membershipCurrent && membership?.audience === 'patient' && membership.planId === 'premium_plus') {
+          membershipPlanId = 'premium_plus';
+          membershipFreeBookingPeriodStart = membership.currentPeriodStart || null;
+          bookingFee = 0;
+        } else if (membershipCurrent && membership?.audience === 'patient' && membership.planId === 'basic_premium') {
+          membershipPlanId = 'basic_premium';
+          membershipFreeBookingPeriodStart = membership.currentPeriodStart || null;
+          const limit = PATIENT_MEMBERSHIP_PLANS.basic_premium.freeCompletedBookings;
+          const completed = Math.max(0, Number(membership.completedFreeBookings) || 0);
+          const reserved = Math.max(0, Number(membership.reservedFreeBookings) || 0);
+          freeBookingsRemaining = Math.max(0, limit - completed - reserved);
+          membershipFreeBooking = freeBookingsRemaining > 0;
+          bookingFee = membershipFreeBooking ? 0 : 8;
+          if (membershipFreeBooking) {
+            transaction.update(membershipRef, { reservedFreeBookings: reserved + 1, updatedAt: now });
+            freeBookingsRemaining = Math.max(0, freeBookingsRemaining - 1);
+          }
+        }
+
+        const assessedFeeCents = Math.max(0, Math.round(bookingFee * 100));
+        const availableCreditCents = bookingData.paymentEnvironment === 'live'
+          ? Math.max(0, Math.floor(Number(creditSnap.data()?.balanceCents) || 0))
+          : 0;
+        const creditAppliedCents = availableCreditCents >= assessedFeeCents
+          ? assessedFeeCents
+          : Math.min(availableCreditCents, Math.max(0, assessedFeeCents - 500));
+        const payableFeeCents = assessedFeeCents - creditAppliedCents;
+        if (creditAppliedCents > 0) {
+          if (debitLedgerSnap.exists) throw new Error('Account credit was already applied to this booking');
+          const creditNow = new Date().toISOString();
+          transaction.set(creditRef, {
+            userId: bookingData.patientId,
+            currency: 'ZAR',
+            balanceCents: availableCreditCents - creditAppliedCents,
+            updatedAt: creditNow,
+          }, { merge: true });
+          transaction.create(debitLedgerRef, {
+            userId: bookingData.patientId,
+            amountCents: -creditAppliedCents,
+            balanceAfterCents: availableCreditCents - creditAppliedCents,
+            kind: 'booking_fee_debit',
+            reason: 'Account credit applied to booking fee',
+            source: 'Booking fee',
+            bookingId,
+            createdAt: creditNow,
+          });
+        }
+
         const booking: Booking = {
           id: bookingId,
           ...bookingData,
+          bookingFee: payableFeeCents / 100,
+          bookingFeeTotal: assessedFeeCents / 100,
+          bookingFeeCreditCents: creditAppliedCents,
+          membershipPlanId,
+          membershipFreeBooking,
+          membershipFreeBookingPeriodStart,
           status: 'pending',
           paymentStatus: 'unpaid',
           rescheduleCount: 0,
           maxReschedules: MAX_RESCHEDULES,
           rescheduleHistory: [],
+          ...(creditAppliedCents > 0 && payableFeeCents === 0 ? { paymentMethod: 'account_credit' as const } : {}),
+          ...(creditAppliedCents > 0 && payableFeeCents > 0 ? { paymentMethod: 'mixed' as const } : {}),
           createdAt: now,
           updatedAt: now,
         };
@@ -187,13 +260,20 @@ export class BookingService {
           });
         }
 
-        return bookingId;
+        return {
+          bookingId,
+          bookingFee: payableFeeCents / 100,
+          bookingFeeCredit: creditAppliedCents / 100,
+          bookingFeeTotal: assessedFeeCents / 100,
+          membershipPlanId,
+          freeBookingsRemaining,
+        };
       });
 
-      return { bookingId: result, error: null };
+      return { ...result, error: null };
     } catch (error: any) {
       console.error('Error creating booking:', error);
-      return { bookingId: '', error: error.message };
+      return { bookingId: '', bookingFee: 0, bookingFeeCredit: 0, bookingFeeTotal: 0, membershipPlanId: 'free', freeBookingsRemaining: 0, error: error.message };
     }
   }
 
@@ -201,29 +281,42 @@ export class BookingService {
   static async createBookingWithPayment(
     bookingData: Omit<Booking, 'id' | 'status' | 'rescheduleCount' | 'maxReschedules' | 'rescheduleHistory' | 'createdAt' | 'updatedAt' | 'paymentStatus' | 'paymentId' | 'paymentReference'>,
     paymentMethod: string = 'card'
-  ): Promise<{ bookingId: string; checkout?: PayFastCheckout; error: string | null }> {
+  ): Promise<{ bookingId: string; checkout?: PayFastCheckout; bookingFee: number; bookingFeeCredit?: number; bookingFeeTotal?: number; membershipPlanId?: string; freeBookingsRemaining?: number; error: string | null }> {
     try {
       PaymentService.ensureConfigured();
     } catch (err: any) {
-      return { bookingId: '', error: err.message };
+      return { bookingId: '', bookingFee: 0, bookingFeeCredit: 0, bookingFeeTotal: 0, error: err.message };
     }
     const paymentEnvironment = PaymentService.currentMode();
-    const { bookingId, error } = await this.createBooking({
+    const created = await this.createBooking({
       ...bookingData,
-      bookingFee: BOOKING_FEE,
       paymentEnvironment,
       isTestBooking: paymentEnvironment === 'sandbox',
     });
+    const { bookingId, error, bookingFee } = created;
     if (error || !bookingId) {
-      return { bookingId: '', error };
+      return { bookingId: '', bookingFee: 0, error };
+    }
+
+    if (bookingFee === 0) {
+      const now = new Date().toISOString();
+      await db.collection('bookings').doc(bookingId).update({
+        status: 'confirmed',
+        paymentStatus: 'waived',
+        paymentMethod: created.bookingFeeCredit > 0 ? 'account_credit' : 'membership',
+        paidAt: now,
+        confirmedAt: now,
+        updatedAt: now,
+      });
+      return { bookingId, bookingFee, bookingFeeCredit: created.bookingFeeCredit, bookingFeeTotal: created.bookingFeeTotal, membershipPlanId: created.membershipPlanId, freeBookingsRemaining: created.freeBookingsRemaining, error: null };
     }
 
     try {
       const checkout = await PaymentService.createPaymentIntent(bookingId);
-      return { bookingId, checkout, error: null };
+      return { bookingId, checkout, bookingFee, bookingFeeCredit: created.bookingFeeCredit, bookingFeeTotal: created.bookingFeeTotal, membershipPlanId: created.membershipPlanId, freeBookingsRemaining: created.freeBookingsRemaining, error: null };
     } catch (err: any) {
       // Keep the booking so the patient can retry payment or cancel it.
-      return { bookingId, error: err.message };
+      return { bookingId, bookingFee, bookingFeeCredit: created.bookingFeeCredit, bookingFeeTotal: created.bookingFeeTotal, membershipPlanId: created.membershipPlanId, freeBookingsRemaining: created.freeBookingsRemaining, error: err.message };
     }
   }
 
@@ -314,6 +407,7 @@ export class BookingService {
       
       return {
         total: bookings.length,
+        totalPatients: new Set(bookings.map(booking => booking.patientId).filter(Boolean)).size,
         pending: bookings.filter(b => b.status === 'pending').length,
         confirmed: bookings.filter(b => b.status === 'confirmed').length,
         completed: bookings.filter(b => b.status === 'completed').length,
@@ -324,7 +418,7 @@ export class BookingService {
       };
     } catch (error) {
       console.error('Error getting booking stats:', error);
-      return { total: 0, pending: 0, confirmed: 0, completed: 0, cancelled: 0, revenue: 0 };
+      return { total: 0, totalPatients: 0, pending: 0, confirmed: 0, completed: 0, cancelled: 0, revenue: 0 };
     }
   }
 
@@ -443,7 +537,7 @@ export class BookingService {
         transaction.update(bookingRef, {
           appointmentDate: newDate,
           appointmentTime: newTime,
-          status: booking.paymentStatus === 'paid' ? 'rescheduled' : 'pending',
+          status: ['paid', 'waived'].includes(booking.paymentStatus) ? 'rescheduled' : 'pending',
           rescheduleCount: booking.rescheduleCount + 1,
           rescheduleHistory: [...(booking.rescheduleHistory || []), historyEntry],
           updatedAt: now,
@@ -485,26 +579,36 @@ export class BookingService {
     }
   }
 
-  // Cancel and queue any refund atomically with the payment notification.
+  // Cancellation retains the booking fee by default and queues paid fees for admin exception review.
   static async cancelBooking(
     bookingId: string,
     reason?: string
-  ): Promise<{ success: boolean; error: string | null; refundPending?: boolean }> {
+  ): Promise<{ success: boolean; error: string | null; creditReviewPending?: boolean }> {
     try {
       const bookingRef = db.collection('bookings').doc(bookingId);
-      const refundPending = await db.runTransaction(async transaction => {
+      const creditReviewPending = await db.runTransaction(async transaction => {
         const snapshot = await transaction.get(bookingRef);
         if (!snapshot.exists) throw new Error('Booking not found');
         const booking = snapshot.data() as Booking;
         if (booking.status === 'cancelled') throw new Error('Booking is already cancelled');
         if (booking.status === 'completed') throw new Error('Completed bookings cannot be cancelled');
         const availabilityRef = db.collection('doctorAvailability').doc(booking.doctorId + '_' + booking.appointmentDate);
-        const availability = await transaction.get(availabilityRef);
         const paymentRef = booking.paymentId ? db.collection('payments').doc(booking.paymentId) : null;
-        const payment = paymentRef ? await transaction.get(paymentRef) : null;
-        const paymentData = payment?.exists ? payment.data()! : {};
+        const totalFeeCents = Math.max(0, booking.bookingFeeTotal != null
+          ? Math.round(Number(booking.bookingFeeTotal) * 100)
+          : Math.round(Number(booking.bookingFee || 0) * 100) + Math.floor(Number(booking.bookingFeeCreditCents) || 0));
+        const refundReviewRef = db.collection('refundQueue').doc(`cancel_${bookingId}`);
+        const membershipRef = booking.membershipFreeBooking === true && !booking.membershipFreeBookingCountedAt &&
+          !booking.membershipFreeBookingReleasedAt
+          ? db.collection('patientMemberships').doc(booking.patientId)
+          : null;
+        const [availability, payment, membershipSnap] = await Promise.all([
+          transaction.get(availabilityRef),
+          paymentRef ? transaction.get(paymentRef) : Promise.resolve(null),
+          membershipRef ? transaction.get(membershipRef) : Promise.resolve(null),
+        ]);
         const now = new Date().toISOString();
-        const needsRefund = booking.paymentStatus === 'paid';
+        const needsCreditReview = booking.paymentStatus === 'paid' && totalFeeCents > 0;
 
         if (availability.exists) {
           const slots = (availability.data() as DoctorAvailability).slots.map(slot => {
@@ -515,30 +619,39 @@ export class BookingService {
           });
           transaction.update(availabilityRef, { slots, updatedAt: now });
         }
-        if (needsRefund) {
-          transaction.set(db.collection('refundQueue').doc(booking.paymentId || bookingId), {
+        if (needsCreditReview) {
+          transaction.set(refundReviewRef, {
             bookingId, paymentId: booking.paymentId || null,
             pfPaymentId: booking.pfPaymentId || null,
-            amount: paymentData.amount ?? booking.bookingFee ?? BOOKING_FEE,
+            patientId: booking.patientId,
+            amount: totalFeeCents / 100,
+            amountCents: totalFeeCents,
             customerEmail: booking.patientEmail || '', customerName: booking.patientName || '',
+            doctorName: booking.doctorName || '',
+            appointmentDate: booking.appointmentDate || '',
+            appointmentTime: booking.appointmentTime || '',
             reason: reason || 'Cancelled by patient',
-            environment: paymentData.environment ?? booking.paymentEnvironment ?? 'sandbox',
-            status: 'pending_manual_refund', createdAt: now,
+            environment: payment?.data()?.environment ?? booking.paymentEnvironment ?? 'sandbox',
+            reviewType: 'booking_cancellation',
+            status: 'pending_account_credit_review', createdAt: now,
           });
-          if (paymentRef && payment?.exists) {
-            transaction.update(paymentRef, { status: 'refund_pending', updatedAt: now });
-          }
+        }
+        if (membershipRef && membershipSnap?.exists &&
+            membershipSnap.data()?.currentPeriodStart === booking.membershipFreeBookingPeriodStart) {
+          const reserved = Math.max(0, Number(membershipSnap.data()?.reservedFreeBookings) || 0);
+          transaction.update(membershipRef, { reservedFreeBookings: Math.max(0, reserved - 1), updatedAt: now });
         }
         transaction.update(bookingRef, {
           status: 'cancelled', cancelledAt: now,
           cancellationReason: reason || 'Cancelled by patient',
-          paymentStatus: needsRefund ? 'refund_pending'
-            : booking.paymentStatus === 'pending' ? 'failed' : booking.paymentStatus,
+          ...(membershipRef ? { membershipFreeBookingReleasedAt: now } : {}),
+          ...(needsCreditReview ? { refundCreditStatus: 'pending_review' } : {}),
+          ...(booking.paymentStatus === 'pending' ? { paymentStatus: 'failed' } : {}),
           updatedAt: now,
         });
-        return needsRefund;
+        return needsCreditReview;
       });
-      return { success: true, error: null, refundPending };
+      return { success: true, error: null, creditReviewPending };
     } catch (error: any) {
       console.error('Error cancelling booking:', error);
       return { success: false, error: error.message };
@@ -592,15 +705,16 @@ export class BookingService {
   // 🔥 NEW: Get pending refunds (for admin dashboard)
   static async getPendingRefunds(): Promise<any[]> {
     try {
-      const snapshot = await db.collection('refundQueue')
-        .where('status', '==', 'pending_manual_refund')
-        .orderBy('createdAt', 'desc')
-        .get();
+      const [creditReviews, manualRefunds] = await Promise.all([
+        db.collection('refundQueue').where('status', '==', 'pending_account_credit_review').orderBy('createdAt', 'desc').get(),
+        db.collection('refundQueue').where('status', '==', 'pending_manual_refund').orderBy('createdAt', 'desc').get(),
+      ]);
 
       const refunds: any[] = [];
-      snapshot.forEach(doc => {
+      [...creditReviews.docs, ...manualRefunds.docs].forEach(doc => {
         refunds.push({ id: doc.id, ...doc.data() });
       });
+      refunds.sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
       return refunds;
     } catch (error) {
       console.error('Error getting pending refunds:', error);
@@ -620,27 +734,54 @@ export class BookingService {
         return { success: result.success, error: result.error };
       }
       const bookingRef = db.collection('bookings').doc(bookingId);
-      const bookingSnap = await bookingRef.get();
-      if (!bookingSnap.exists) return { success: false, error: 'Booking not found' };
-      const booking = bookingSnap.data() as Booking;
-      if ((status === 'confirmed' || status === 'completed') && booking.paymentStatus !== 'paid') {
-        return { success: false, error: 'Booking fee must be paid first' };
-      }
-      if (booking.status === 'cancelled') {
-        return { success: false, error: 'Cancelled bookings cannot be reopened' };
-      }
-      const updateData: any = {
-        status,
-        updatedAt: new Date().toISOString(),
-      };
+      await db.runTransaction(async transaction => {
+        const bookingSnap = await transaction.get(bookingRef);
+        if (!bookingSnap.exists) throw new Error('Booking not found');
+        const booking = bookingSnap.data() as Booking;
+        if ((status === 'confirmed' || status === 'completed') && !['paid', 'waived'].includes(booking.paymentStatus)) {
+          throw new Error('Booking fee must be paid first');
+        }
+        if (booking.status === 'cancelled') throw new Error('Cancelled bookings cannot be reopened');
 
-      if (status === 'confirmed') {
-        updateData.confirmedAt = new Date().toISOString();
-      } else if (status === 'completed') {
-        updateData.completedAt = new Date().toISOString();
-      }
+        const now = new Date().toISOString();
+        const updateData: Record<string, any> = { status, updatedAt: now };
+        if (status === 'confirmed') updateData.confirmedAt = now;
+        if (status === 'completed') updateData.completedAt = now;
 
-      await bookingRef.update(updateData);
+        if (status === 'completed' && booking.membershipFreeBooking === true && !booking.membershipFreeBookingCountedAt) {
+          const membershipRef = db.collection('patientMemberships').doc(booking.patientId);
+          const membershipSnap = await transaction.get(membershipRef);
+          updateData.membershipFreeBookingCountedAt = now;
+          transaction.update(bookingRef, updateData);
+          if (membershipSnap.exists) {
+            const membership = membershipSnap.data()!;
+            const periodMatches = membership.currentPeriodStart === booking.membershipFreeBookingPeriodStart;
+            if (membership.audience === 'patient' && membership.planId === 'basic_premium' && periodMatches) {
+              const completed = Math.max(0, Number(membership.completedFreeBookings) || 0);
+              const reserved = Math.max(0, Number(membership.reservedFreeBookings) || 0);
+              transaction.update(membershipRef, {
+                completedFreeBookings: Math.min(PATIENT_MEMBERSHIP_PLANS.basic_premium.freeCompletedBookings, completed + 1),
+                ...(booking.membershipFreeBookingReleasedAt ? {} : { reservedFreeBookings: Math.max(0, reserved - 1) }),
+                updatedAt: now,
+              });
+            }
+          }
+          return;
+        }
+        if (status === 'no-show' && booking.membershipFreeBooking === true &&
+            !booking.membershipFreeBookingCountedAt && !booking.membershipFreeBookingReleasedAt) {
+          const membershipRef = db.collection('patientMemberships').doc(booking.patientId);
+          const membershipSnap = await transaction.get(membershipRef);
+          updateData.membershipFreeBookingReleasedAt = now;
+          transaction.update(bookingRef, updateData);
+          if (membershipSnap.exists && membershipSnap.data()?.currentPeriodStart === booking.membershipFreeBookingPeriodStart) {
+            const reserved = Math.max(0, Number(membershipSnap.data()?.reservedFreeBookings) || 0);
+            transaction.update(membershipRef, { reservedFreeBookings: Math.max(0, reserved - 1), updatedAt: now });
+          }
+          return;
+        }
+        transaction.update(bookingRef, updateData);
+      });
       return { success: true, error: null };
     } catch (error: any) {
       console.error('Error updating booking status:', error);

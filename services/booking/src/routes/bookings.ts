@@ -76,6 +76,11 @@ router.post('/api/bookings/create-with-payment', async (req, res) => {
 
     res.json({
       bookingId: result.bookingId,
+      bookingFee: result.bookingFee,
+      bookingFeeCredit: result.bookingFeeCredit,
+      bookingFeeTotal: result.bookingFeeTotal,
+      membershipPlanId: result.membershipPlanId,
+      freeBookingsRemaining: result.freeBookingsRemaining,
       checkout: result.checkout,
     });
   } catch (error: any) {

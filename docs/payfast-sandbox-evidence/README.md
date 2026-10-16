@@ -2,6 +2,8 @@
 
 Test date: 15 October 2026. The hosted MedMap checkout was completed using PayFast sandbox virtual funds. The R10.00 booking fee was confirmed by a real PayFast ITN callback and validated by the Render booking service. MedMap showed the booking as Confirmed / Paid. No real money was charged and live payments remain disabled.
 
+This is a historical sandbox report for 15 October 2026, not the current payment-mode status. The user later confirmed that PayFast live payments have worked. The current Render blueprint now explicitly selects live mode; this local change has not been deployed from this checkout.
+
 The test booking was subsequently cancelled. Its status is `refund_pending` because the integration queues manual refunds rather than executing one. The appointment slot was checked in the hosted booking UI and was available again.
 
 Backend verification: 29 tests passed; booking service TypeScript check passed. Frontend production build passed. The exact callback deployment was `eea96b7`; cleanup UI and documentation were subsequently deployed in `e1407f6`.

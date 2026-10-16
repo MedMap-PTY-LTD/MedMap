@@ -19,10 +19,10 @@ import {
   orderBy,
   limit,
   startAfter,
-  DocumentData,
-  QueryDocumentSnapshot
+  DocumentData
 } from 'firebase/firestore';
 import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { hasPaidMembershipAccess } from '@/lib/membershipAccess';
 
 // ==================== TYPES ====================
 
@@ -35,6 +35,7 @@ interface Doctor {
   email: string;
   specialization: string;
   practiceName: string;
+  searchPracticeName: string;
   practiceAddress: string;
   city: string;
   province: string;
@@ -49,6 +50,9 @@ interface Doctor {
   qualifications?: string[];
   operatingHours?: any;
   isAvailable: boolean;
+  membershipPlanId: 'free' | 'member' | 'partner';
+  membershipFeatured: boolean;
+  isPaidMember: boolean;
   createdAt?: any;
 }
 
@@ -115,7 +119,12 @@ const fetchDoctors = async ({
       );
     }
 
-    const snapshot = await getDocs(q);
+    const [snapshot, featuredSnapshot] = await Promise.all([
+      getDocs(q),
+      pageParam
+        ? Promise.resolve(null)
+        : getDocs(query(collection(db, 'doctors'), where('membershipFeatured', '==', true))),
+    ]);
     
     // Get the last document for pagination
     const lastVisible = snapshot.docs[snapshot.docs.length - 1] || null;
@@ -123,9 +132,21 @@ const fetchDoctors = async ({
 
     // ✅ SIMPLIFIED MAPPING - Only use data from doctors collection
     const doctors: Doctor[] = [];
-    for (const docSnap of snapshot.docs) {
+    const documents = new Map<string, any>();
+    const now = Date.now();
+    featuredSnapshot?.docs.forEach(docSnap => {
       const data = docSnap.data();
-      const doctorId = docSnap.id;
+      const hasCurrentPartnerMembership = data.membershipPlanId === 'partner' &&
+        hasPaidMembershipAccess(data.membershipStatus, data.membershipPeriodEnd, data.membershipGracePeriodEnd, now);
+      if (hasCurrentPartnerMembership && data.verificationStatus === 'verified' &&
+          (!specialty || specialty === 'All Specialties' || data.specialization === specialty) &&
+          (!province || province === 'All Provinces' || data.province === province)) {
+        documents.set(docSnap.id, docSnap);
+      }
+    });
+    snapshot.docs.forEach(docSnap => documents.set(docSnap.id, docSnap));
+    for (const [doctorId, docSnap] of documents) {
+      const data = docSnap.data();
       
       // ✅ Get doctor data directly from the doctors collection
       // This avoids the nested user query
@@ -134,6 +155,10 @@ const fetchDoctors = async ({
       const practiceName = data.practiceName || '';
       const city = data.city || '';
       const province = data.province || '';
+      const membershipIsCurrent = hasPaidMembershipAccess(data.membershipStatus, data.membershipPeriodEnd, data.membershipGracePeriodEnd) &&
+        ['member', 'partner'].includes(data.membershipPlanId);
+      const membershipPlanId = membershipIsCurrent ? data.membershipPlanId : 'free';
+      const isPaidMember = membershipPlanId !== 'free';
 
       // Check if search term matches
       if (search) {
@@ -156,27 +181,32 @@ const fetchDoctors = async ({
         fullName: fullName,
         email: data.email || '',
         specialization: specialization,
-        practiceName: practiceName,
-        practiceAddress: data.practiceAddress || '',
+        practiceName: isPaidMember ? practiceName : '',
+        searchPracticeName: practiceName,
+        practiceAddress: isPaidMember ? data.practiceAddress || '' : '',
         city: city,
         province: province,
         consultationFee: data.consultationFee || 0,
         consultationDuration: data.consultationDuration || 30,
         verificationStatus: data.verificationStatus || 'pending',
-        rating: data.rating || 0,
-        reviewCount: data.reviewCount || 0,
-        yearsExperience: data.yearsExperience || 0,
-        profileImage: data.profileImage || '',
-        bio: data.bio || '',
+        rating: isPaidMember ? data.rating || 0 : 0,
+        reviewCount: isPaidMember ? data.reviewCount || 0 : 0,
+        yearsExperience: isPaidMember ? data.yearsExperience || 0 : 0,
+        profileImage: isPaidMember ? data.profileImage || data.profilePicture || '' : '',
+        bio: isPaidMember ? data.bio || '' : '',
         qualifications: data.qualifications || [],
         operatingHours: data.operatingHours || {},
         isAvailable: data.isAvailable !== undefined ? data.isAvailable : true,
+        membershipPlanId,
+        membershipFeatured: membershipPlanId === 'partner' && data.membershipFeatured === true,
+        isPaidMember,
         createdAt: data.createdAt,
       });
     }
 
     // Sort by rating or name
     doctors.sort((a, b) => {
+      if (a.membershipFeatured !== b.membershipFeatured) return a.membershipFeatured ? -1 : 1;
       if (a.rating !== b.rating) {
         return b.rating - a.rating;
       }
@@ -325,7 +355,13 @@ const DoctorSearch = () => {
   // ==================== DERIVED DATA ====================
 
   const allDoctors = useMemo(() => {
-    return data?.pages.flatMap(page => page.doctors) || [];
+    const doctors = data?.pages.flatMap(page => page.doctors) || [];
+    return Array.from(new Map(doctors.map(doctor => [doctor.id, doctor])).values())
+      .sort((a, b) => {
+        if (a.membershipFeatured !== b.membershipFeatured) return a.membershipFeatured ? -1 : 1;
+        if (a.rating !== b.rating) return b.rating - a.rating;
+        return a.fullName.localeCompare(b.fullName);
+      });
   }, [data]);
 
   const filteredDoctors = useMemo(() => {
@@ -337,7 +373,7 @@ const DoctorSearch = () => {
       filtered = filtered.filter(doctor =>
         doctor.fullName.toLowerCase().includes(term) ||
         doctor.specialization.toLowerCase().includes(term) ||
-        doctor.practiceName.toLowerCase().includes(term) ||
+        doctor.searchPracticeName.toLowerCase().includes(term) ||
         doctor.city.toLowerCase().includes(term) ||
         doctor.province.toLowerCase().includes(term)
       );
@@ -605,7 +641,9 @@ const DoctorSearch = () => {
                   <div className="flex flex-col md:flex-row items-start gap-6">
                     {/* Doctor Avatar */}
                     <div className="w-24 h-24 bg-gradient-to-br from-blue-600 to-blue-400 rounded-2xl flex items-center justify-center text-white text-2xl font-bold flex-shrink-0">
-                      {getInitials(doctor.fullName)}
+                      {doctor.profileImage ? (
+                        <img src={doctor.profileImage} alt={`Dr. ${doctor.fullName}`} className="h-full w-full rounded-2xl object-cover" />
+                      ) : getInitials(doctor.fullName)}
                     </div>
 
                     <div className="flex-1 min-w-0">
@@ -619,6 +657,12 @@ const DoctorSearch = () => {
                             {doctor.verificationStatus === 'verified' && (
                               <Shield className="h-5 w-5 text-green-600" />
                             )}
+                            {doctor.membershipPlanId !== 'free' && (
+                              <Badge className={doctor.membershipPlanId === 'partner' ? 'bg-amber-100 text-amber-900' : 'bg-blue-100 text-blue-900'}>
+                                {doctor.membershipPlanId === 'partner' ? 'Partner' : 'Member'}
+                              </Badge>
+                            )}
+                            {doctor.membershipFeatured && <Badge className="bg-purple-100 text-purple-900">Featured</Badge>}
                           </div>
                           <p className="text-blue-600 font-semibold">{doctor.specialization}</p>
                           <p className="text-sm text-muted-foreground">{doctor.practiceName}</p>
@@ -654,12 +698,14 @@ const DoctorSearch = () => {
                           )}
                         </div>
                         <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            {renderStars(doctor.rating)}
-                            <span className="text-xs text-muted-foreground">
-                              ({doctor.reviewCount} review{doctor.reviewCount !== 1 ? 's' : ''})
-                            </span>
-                          </div>
+                          {doctor.isPaidMember ? (
+                            <div className="flex items-center gap-2">
+                              {renderStars(doctor.rating)}
+                              <span className="text-xs text-muted-foreground">
+                                ({doctor.reviewCount} review{doctor.reviewCount !== 1 ? 's' : ''})
+                              </span>
+                            </div>
+                          ) : <span className="text-xs text-muted-foreground">Reviews and ratings for Member and Partner providers</span>}
                           {doctor.isAvailable && (
                             <Badge variant="secondary" className="bg-green-100 text-green-800">
                               Available Today

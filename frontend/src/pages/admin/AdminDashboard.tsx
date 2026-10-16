@@ -60,6 +60,7 @@ import {
   ArrowUpDown,
   RefreshCw
 } from 'lucide-react';
+import AccountCredits from './AccountCredits';
 
 // ==================== TYPES ====================
 interface UserProfile {
@@ -976,6 +977,7 @@ const AdminDashboard = () => {
                 <TabsTrigger value="patients" className="flex-1 text-xs sm:text-sm">Patients</TabsTrigger>
                 <TabsTrigger value="ambassadors" className="flex-1 text-xs sm:text-sm">Ambassadors</TabsTrigger>
                 <TabsTrigger value="users" className="flex-1 text-xs sm:text-sm">All Users</TabsTrigger>
+                <TabsTrigger value="account-credits" className="flex-1 text-xs sm:text-sm">Account Credits</TabsTrigger>
                 <TabsTrigger value="referrals" className="flex-1 text-xs sm:text-sm">Referrals</TabsTrigger>
                 <TabsTrigger value="settings" className="flex-1 text-xs sm:text-sm">Settings</TabsTrigger>
               </TabsList>
@@ -1956,6 +1958,10 @@ const AdminDashboard = () => {
                   </div>
                 </CardContent>
               </Card>
+            </TabsContent>
+
+            <TabsContent value="account-credits">
+              <AccountCredits />
             </TabsContent>
 
             {/* ==================== REFERRALS TAB ==================== */}

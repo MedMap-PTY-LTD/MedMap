@@ -25,10 +25,10 @@ const PayFastSuccess = () => {
       try {
         const details = await getBookingPaymentDetails(bookingId);
         if (cancelled) return;
-        setStatus(details.paymentStatus);
+        setStatus(details.bookingFee === 0 ? 'membership-covered' : details.paymentStatus);
         setPaymentEnvironment(details.paymentEnvironment);
         setBookingFee(details.bookingFee ?? 10);
-        if (details.paymentStatus !== 'paid' && attempts++ < 15) {
+        if (!['paid', 'waived'].includes(details.paymentStatus) && attempts++ < 15) {
           timer = window.setTimeout(check, 2000);
         }
       } catch (err: unknown) {
@@ -50,10 +50,14 @@ const PayFastSuccess = () => {
         <Card>
           <CardContent className="pt-8 space-y-5 text-center">
             <h1 className="text-2xl font-semibold">
-              {status === 'paid' ? 'Booking fee payment confirmed' : 'Checking your booking fee'}
+              {status === 'membership-covered'
+                ? 'Booking confirmed with your membership'
+                : status === 'paid' ? 'Booking fee payment confirmed' : 'Checking your booking fee'}
             </h1>
             <p className="text-muted-foreground">
-              {error || (status === 'paid'
+              {error || (status === 'membership-covered'
+                ? 'Your membership covered the booking fee. The consultation fee is paid separately at the doctor’s office.'
+                : status === 'paid'
                 ? paymentEnvironment === 'sandbox'
                   ? `PayFast confirmed the R${bookingFee.toFixed(2)} sandbox test. No real money was charged and no real consultation was purchased.`
                   : paymentEnvironment === 'live'

@@ -33,11 +33,15 @@ import { Booking, BookingSlot } from '@/lib/firebase';
 interface DoctorCalendarProps {
   doctorId: string;
   consultationDuration?: number;
+  canManageAvailability?: boolean;
+  canViewStatistics?: boolean;
 }
 
 export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({ 
   doctorId, 
-  consultationDuration = 30 
+  consultationDuration = 30,
+  canManageAvailability = true,
+  canViewStatistics = true,
 }) => {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -142,13 +146,14 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
 
   const refreshAll = useCallback(async () => {
     setLoading(true);
-    await Promise.all([
+    const refreshes = [
       refreshSlots(),
       refreshBookings(),
-      refreshStats(),
-    ]);
+    ];
+    if (canViewStatistics) refreshes.push(refreshStats());
+    await Promise.all(refreshes);
     setLoading(false);
-  }, [refreshSlots, refreshBookings, refreshStats]);
+  }, [refreshSlots, refreshBookings, refreshStats, canViewStatistics]);
 
   // Effects
   useEffect(() => {
@@ -388,7 +393,7 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
         <div className="text-center py-8 text-gray-500">
           <Clock className="w-12 h-12 mx-auto mb-4 opacity-50" />
           <p>No slots available for this day</p>
-          <Button 
+          {canManageAvailability ? <Button
             variant="outline" 
             size="sm" 
             className="mt-2"
@@ -399,7 +404,7 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
           >
             <Settings className="w-4 h-4 mr-2" />
             Manage Availability
-          </Button>
+          </Button> : <p className="mt-3 text-sm text-gray-500">Full availability management is included with Member and Partner plans.</p>}
         </div>
       );
     }
@@ -485,7 +490,7 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
           );
         })}
 
-        <Button 
+        {canManageAvailability && <Button
           variant="outline" 
           size="sm" 
           className="w-full mt-2"
@@ -496,7 +501,7 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
         >
           <Settings className="w-4 h-4 mr-2" />
           Manage Availability
-        </Button>
+        </Button>}
       </div>
     );
   };
@@ -526,7 +531,7 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
       </div>
 
       {/* Stats */}
-      {stats && (
+      {stats && canViewStatistics && (
         <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
           <Card>
             <CardContent className="p-3 text-center">

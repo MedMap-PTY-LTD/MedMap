@@ -153,6 +153,8 @@ const BookingHistory = () => {
     switch (status) {
       case 'paid':
         return <Badge className="bg-success text-success-foreground">Paid</Badge>;
+      case 'waived':
+        return <Badge className="bg-green-100 text-green-800">Membership covered</Badge>;
       case 'pending':
         return <Badge variant="secondary">Pending</Badge>;
       case 'failed':

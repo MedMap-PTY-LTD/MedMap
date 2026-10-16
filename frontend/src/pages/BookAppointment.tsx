@@ -15,7 +15,14 @@ import Header from '@/components/Header';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { useBookingSocket } from '@/hooks/useBookingSocket';
-import { createBookingAndPay, getPayFastConfig, type PayFastPublicConfig } from '@/client/payfastClient';
+import {
+  createBookingAndPay,
+  getAccountCreditSummary,
+  getPayFastConfig,
+  getPatientBookingFeeQuote,
+  type PayFastPublicConfig,
+  type PatientBookingFeeQuote,
+} from '@/client/payfastClient';
 import { format, startOfWeek, addDays, isSameDay, isPast, parseISO, isToday } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -69,6 +76,10 @@ const BookAppointment = () => {
   const [currentWeek, setCurrentWeek] = useState(new Date());
   const [payFastConfig, setPayFastConfig] = useState<PayFastPublicConfig | null>(null);
   const [paymentConfigError, setPaymentConfigError] = useState('');
+  const [bookingFeeQuote, setBookingFeeQuote] = useState<PatientBookingFeeQuote | null>(null);
+  const [bookingFeeError, setBookingFeeError] = useState('');
+  const [accountCreditCents, setAccountCreditCents] = useState(0);
+  const [accountCreditError, setAccountCreditError] = useState('');
 
   // Socket for real-time booking
   const { getSlots, isConnected } = useBookingSocket();
@@ -82,6 +93,30 @@ const BookAppointment = () => {
       });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    setAccountCreditCents(0);
+    setAccountCreditError('');
+    if (!user?.uid) return () => { active = false; };
+    getPatientBookingFeeQuote()
+      .then(quote => { if (active) setBookingFeeQuote(quote); })
+      .catch(error => {
+        if (active) setBookingFeeError(error instanceof Error ? error.message : 'Membership booking fee is unavailable');
+      });
+    return () => { active = false; };
+  }, [user?.uid]);
+
+  useEffect(() => {
+    let active = true;
+    if (!user?.uid) return () => { active = false; };
+    getAccountCreditSummary()
+      .then(summary => { if (active) setAccountCreditCents(Math.max(0, Number(summary.balanceCents) || 0)); })
+      .catch(error => {
+        if (active) setAccountCreditError(error instanceof Error ? error.message : 'Account credit is unavailable');
+      });
+    return () => { active = false; };
+  }, [user?.uid]);
 
   // ==================== GENERATE DEFAULT SLOTS ====================
 
@@ -272,7 +307,10 @@ const BookAppointment = () => {
         appointmentTime: selectedTime,
         ...(patientNotes.trim() ? { notes: patientNotes.trim() } : {}),
       };
-      await createBookingAndPay(bookingData);
+      const result = await createBookingAndPay(bookingData);
+      if (result.bookingFee === 0) {
+        navigate(`/payfast/success?bookingId=${encodeURIComponent(result.bookingId)}`);
+      }
     } catch (err: any) {
       console.error('Booking error:', err);
       toast({
@@ -290,8 +328,8 @@ const BookAppointment = () => {
     return new Intl.NumberFormat('en-ZA', {
       style: 'currency',
       currency: 'ZAR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
+      minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+      maximumFractionDigits: 2,
     }).format(amount);
   };
 
@@ -360,6 +398,15 @@ const BookAppointment = () => {
   const goToNextWeek = () => {
     setCurrentWeek(prev => addDays(prev, 7));
   };
+
+  const assessedBookingFee = bookingFeeQuote?.bookingFee ?? payFastConfig?.bookingFee ?? 10;
+  const assessedBookingFeeCents = Math.max(0, Math.round(assessedBookingFee * 100));
+  const estimatedCreditAppliedCents = payFastConfig?.mode === 'live'
+    ? (accountCreditCents >= assessedBookingFeeCents
+      ? assessedBookingFeeCents
+      : Math.min(accountCreditCents, Math.max(0, assessedBookingFeeCents - 500)))
+    : 0;
+  const estimatedBookingFeeDue = Math.max(0, assessedBookingFeeCents - estimatedCreditAppliedCents) / 100;
 
   // ==================== LOADING STATE ====================
 
@@ -607,9 +654,36 @@ const BookAppointment = () => {
                             </div>
                             <Separator className="bg-blue-200" />
                             <div className="flex justify-between">
-                              <span className="text-blue-900">Booking fee payable now</span>
-                              <span className="text-blue-900">{formatCurrency(payFastConfig?.bookingFee ?? 10)}</span>
+                              <span className="text-blue-900">Booking fee</span>
+                              <span className="text-blue-900">{formatCurrency(assessedBookingFee)}</span>
                             </div>
+                            {accountCreditCents > 0 && (
+                              <>
+                                <div className="flex justify-between">
+                                  <span className="text-blue-700">Account credit available</span>
+                                  <span className="font-medium text-blue-900">{formatCurrency(accountCreditCents / 100)}</span>
+                                </div>
+                                {estimatedCreditAppliedCents > 0 && (
+                                  <div className="flex justify-between">
+                                    <span className="text-blue-700">Credit applied</span>
+                                    <span className="font-medium text-blue-900">−{formatCurrency(estimatedCreditAppliedCents / 100)}</span>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                            <div className="flex justify-between font-semibold">
+                              <span className="text-blue-900">Payable now</span>
+                              <span className="text-blue-900">{formatCurrency(estimatedBookingFeeDue)}</span>
+                            </div>
+                            {bookingFeeQuote?.freeBookingEligible && (
+                              <p className="text-xs text-green-700">Your Basic Premium plan covers this fee. This booking counts toward your five free bookings when the appointment is completed.</p>
+                            )}
+                            {bookingFeeQuote?.planId === 'premium_plus' && (
+                              <p className="text-xs text-green-700">Premium Plus includes bookings with no booking fee.</p>
+                            )}
+                            {bookingFeeQuote?.planId === 'basic_premium' && bookingFeeQuote.bookingFee === 8 && (
+                              <p className="text-xs text-blue-700">Your five free completed bookings for this membership period have been used.</p>
+                            )}
                             <p className="text-xs text-blue-600 mt-1">The consultation fee is paid separately at the doctor's office.</p>
                           </div>
                         </CardContent>
@@ -617,18 +691,24 @@ const BookAppointment = () => {
                     )}
 
                     {payFastConfig?.mode === 'sandbox' && (
-                      <p className="text-sm font-semibold text-amber-800">Sandbox testing only. No real money is charged. This creates a test booking, not a real consultation.</p>
+                      <p className="text-sm font-semibold text-amber-800">Sandbox testing only. No real money is charged, and account credit is not used. This creates a test booking, not a real consultation.</p>
                     )}
                     {payFastConfig?.mode === 'live' && (
-                      <p className="text-sm font-semibold text-blue-800">You’ll pay the booking fee through PayFast. The consultation fee is paid separately at the doctor’s office.</p>
+                      <p className="text-sm font-semibold text-blue-800">Available account credit is applied to the booking fee first. Any remaining amount is paid through PayFast. The consultation fee is paid separately at the doctor’s office.</p>
                     )}
                     {paymentConfigError && (
                       <p className="text-sm font-semibold text-destructive">PayFast is temporarily unavailable: {paymentConfigError}</p>
                     )}
+                    {bookingFeeError && (
+                      <p className="text-sm font-semibold text-destructive">Membership pricing is unavailable: {bookingFeeError}</p>
+                    )}
+                    {accountCreditError && (
+                      <p className="text-sm text-muted-foreground">Account credit could not be loaded; the booking service will still apply any available balance at checkout.</p>
+                    )}
                     {/* Book Button */}
                     <Button
                       onClick={handleBooking}
-                      disabled={!user || !selectedDate || !selectedTime || isBooking || !isConnected || !payFastConfig}
+                      disabled={!user || !selectedDate || !selectedTime || isBooking || !isConnected || !payFastConfig || !bookingFeeQuote}
                       className="w-full bg-blue-600 hover:bg-blue-700 text-white h-12 text-lg"
                     >
                       {isBooking ? (
@@ -651,7 +731,11 @@ const BookAppointment = () => {
                       ) : (
                         <>
                           <Calendar className="w-5 h-5 mr-2" />
-                          {payFastConfig.mode === 'sandbox' ? 'Continue to PayFast Sandbox' : `Pay ${formatCurrency(payFastConfig.bookingFee)} booking fee`}
+                          {payFastConfig.mode === 'sandbox'
+                            ? (bookingFeeQuote.bookingFee === 0 ? 'Confirm booking' : 'Continue to PayFast Sandbox')
+                            : bookingFeeQuote.bookingFee === 0
+                              ? 'Confirm booking (no booking fee)'
+                            : `Pay ${formatCurrency(estimatedBookingFeeDue)} booking fee`}
                         </>
                       )}
                     </Button>

@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
+import { hasPaidMembershipAccess } from '@/lib/membershipAccess';
 import {
   Star,
   MapPin,
@@ -50,6 +51,8 @@ interface DoctorProfileData {
   bio?: string;
   experience?: string;
   qualifications?: string[];
+  services: string[];
+  languages: string[];
   operatingHours?: {
     monday?: { isOpen: boolean; start: string; end: string };
     tuesday?: { isOpen: boolean; start: string; end: string };
@@ -63,6 +66,9 @@ interface DoctorProfileData {
   rating?: number;
   reviewCount?: number;
   profileImage?: string;
+  location?: string;
+  membershipPlanId: 'free' | 'member' | 'partner';
+  membershipFeatured: boolean;
   createdAt?: any;
   updatedAt?: any;
 }
@@ -103,6 +109,10 @@ const DoctorProfile = () => {
       const userRef = doc(db, 'users', doctorId!);
       const userSnap = await getDoc(userRef);
       const userData = userSnap.exists() ? userSnap.data() : {};
+      const membershipIsCurrent = hasPaidMembershipAccess(doctorData.membershipStatus, doctorData.membershipPeriodEnd, doctorData.membershipGracePeriodEnd) &&
+        ['member', 'partner'].includes(doctorData.membershipPlanId);
+      const membershipPlanId = membershipIsCurrent ? doctorData.membershipPlanId : 'free';
+      const isPaidMember = membershipPlanId !== 'free';
 
       // Combine the data
       const combinedData: DoctorProfileData = {
@@ -111,23 +121,28 @@ const DoctorProfile = () => {
         lastName: userData.lastName || doctorData.lastName || '',
         fullName: userData.fullName || doctorData.fullName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
         email: userData.email || doctorData.email || '',
-        phone: userData.phone || doctorData.phone || '',
+        phone: isPaidMember ? userData.phone || doctorData.phone || '' : '',
         specialization: doctorData.specialization || '',
         hpcsaNumber: doctorData.hpcsaNumber || '',
-        practiceName: doctorData.practiceName || '',
-        practiceAddress: doctorData.practiceAddress || '',
-        practicePhone: doctorData.practicePhone || '',
-        practiceEmail: doctorData.practiceEmail || '',
+        practiceName: isPaidMember ? doctorData.practiceName || '' : '',
+        practiceAddress: isPaidMember ? doctorData.practiceAddress || '' : '',
+        practicePhone: isPaidMember ? doctorData.practicePhone || '' : '',
+        practiceEmail: isPaidMember ? doctorData.practiceEmail || '' : '',
+        location: [doctorData.city, doctorData.province].filter(Boolean).join(', '),
         consultationFee: doctorData.consultationFee || 0,
         consultationDuration: doctorData.consultationDuration || 30,
-        bio: doctorData.bio || '',
-        experience: doctorData.experience || '',
-        qualifications: doctorData.qualifications || [],
-        operatingHours: doctorData.operatingHours || {},
+        bio: isPaidMember ? doctorData.bio || '' : '',
+        experience: isPaidMember ? doctorData.experience || '' : '',
+        qualifications: isPaidMember ? doctorData.qualifications || [] : [],
+        services: isPaidMember && Array.isArray(doctorData.services) ? doctorData.services : [],
+        languages: isPaidMember && Array.isArray(doctorData.languages) ? doctorData.languages : [],
+        operatingHours: isPaidMember ? doctorData.operatingHours || {} : {},
         verificationStatus: doctorData.verificationStatus || 'pending',
-        rating: doctorData.rating || 0,
-        reviewCount: doctorData.reviewCount || 0,
-        profileImage: doctorData.profileImage || userData.photoURL || '',
+        rating: isPaidMember ? doctorData.rating || 0 : 0,
+        reviewCount: isPaidMember ? doctorData.reviewCount || 0 : 0,
+        profileImage: isPaidMember ? doctorData.profileImage || doctorData.profilePicture || userData.photoURL || '' : '',
+        membershipPlanId,
+        membershipFeatured: membershipPlanId === 'partner' && doctorData.membershipFeatured === true,
         createdAt: doctorData.createdAt || userData.createdAt,
         updatedAt: doctorData.updatedAt || userData.updatedAt,
       };
@@ -256,9 +271,16 @@ const DoctorProfile = () => {
                         ) : null}
                         {doctor.verificationStatus.charAt(0).toUpperCase() + doctor.verificationStatus.slice(1)}
                       </Badge>
+                      {doctor.membershipPlanId !== 'free' && (
+                        <Badge className={doctor.membershipPlanId === 'partner' ? 'bg-amber-100 text-amber-900' : 'bg-blue-100 text-blue-900'}>
+                          {doctor.membershipPlanId === 'partner' ? 'Partner badge' : 'Member badge'}
+                        </Badge>
+                      )}
+                      {doctor.membershipFeatured && <Badge className="bg-purple-100 text-purple-900">Featured listing</Badge>}
+                      {doctor.location && <span className="text-sm text-gray-600">{doctor.location}</span>}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  {doctor.membershipPlanId !== 'free' ? <div className="flex items-center gap-2">
                     <div className="flex items-center">
                       <Star className="w-5 h-5 text-yellow-400 fill-yellow-400" />
                       <span className="ml-1 text-lg font-semibold text-gray-900">
@@ -268,7 +290,7 @@ const DoctorProfile = () => {
                     <span className="text-sm text-gray-500">
                       ({doctor.reviewCount || 0} reviews)
                     </span>
-                  </div>
+                  </div> : <span className="text-sm text-gray-500">Reviews and ratings are available to Member and Partner providers.</span>}
                 </div>
               </div>
             </div>
@@ -280,7 +302,7 @@ const DoctorProfile = () => {
           {/* Left Column - Details */}
           <div className="lg:col-span-2 space-y-6">
             {/* About */}
-            <Card>
+            {doctor.membershipPlanId !== 'free' ? <Card>
               <CardHeader>
                 <CardTitle className="text-lg">About Dr. {doctor.fullName}</CardTitle>
               </CardHeader>
@@ -309,6 +331,20 @@ const DoctorProfile = () => {
                   </div>
                 )}
 
+                {doctor.services.length > 0 && (
+                  <div className="mt-4">
+                    <h4 className="text-sm font-semibold text-gray-700">Services</h4>
+                    <p className="text-gray-600">{doctor.services.join(', ')}</p>
+                  </div>
+                )}
+
+                {doctor.languages.length > 0 && (
+                  <div className="mt-4">
+                    <h4 className="text-sm font-semibold text-gray-700">Languages</h4>
+                    <p className="text-gray-600">{doctor.languages.join(', ')}</p>
+                  </div>
+                )}
+
                 {doctor.hpcsaNumber && (
                   <div className="mt-4">
                     <h4 className="text-sm font-semibold text-gray-700">HPCSA Number</h4>
@@ -316,7 +352,7 @@ const DoctorProfile = () => {
                   </div>
                 )}
               </CardContent>
-            </Card>
+            </Card> : <Card><CardContent className="pt-6 text-sm text-gray-600">Enhanced profile details are available to Member and Partner providers.</CardContent></Card>}
 
             {/* Operating Hours */}
             {doctor.operatingHours && Object.keys(doctor.operatingHours).length > 0 && (
@@ -354,7 +390,7 @@ const DoctorProfile = () => {
           {/* Right Column - Contact & Actions */}
           <div className="space-y-6">
             {/* Contact Information */}
-            <Card>
+            {doctor.membershipPlanId !== 'free' && <Card>
               <CardHeader>
                 <CardTitle className="text-lg">Contact Information</CardTitle>
               </CardHeader>
@@ -407,7 +443,7 @@ const DoctorProfile = () => {
                   </div>
                 )}
               </CardContent>
-            </Card>
+            </Card>}
 
             {/* Consultation Fee */}
             <Card>
@@ -448,7 +484,7 @@ const DoctorProfile = () => {
             </Card>
 
             {/* Quick Stats */}
-            <Card>
+            {doctor.membershipPlanId !== 'free' && <Card>
               <CardContent className="pt-6">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="text-center">
@@ -463,7 +499,7 @@ const DoctorProfile = () => {
                   </div>
                 </div>
               </CardContent>
-            </Card>
+            </Card>}
 
             {/* Verification Badge */}
             {doctor.verificationStatus === 'verified' && (

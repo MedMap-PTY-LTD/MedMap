@@ -6,6 +6,8 @@ interface SocketHandlerDependencies {
 export declare class SocketHandlers {
     private io;
     private socket;
+    private get user();
+    private canAccess;
     constructor({ io, socket }: SocketHandlerDependencies);
     private registerHandlers;
     private handleJoinDoctor;

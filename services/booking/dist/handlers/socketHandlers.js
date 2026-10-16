@@ -4,6 +4,12 @@ exports.SocketHandlers = void 0;
 const BookingService_1 = require("../services/BookingService");
 const types_1 = require("../types");
 class SocketHandlers {
+    get user() {
+        return this.socket.data.authUser;
+    }
+    canAccess(patientId, doctorId) {
+        return this.user.admin || this.user.uid === patientId || this.user.uid === doctorId;
+    }
     constructor({ io, socket }) {
         this.io = io;
         this.socket = socket;
@@ -56,10 +62,14 @@ class SocketHandlers {
     }
     // ==================== ROOM HANDLERS ====================
     handleJoinDoctor(doctorId) {
+        if (doctorId !== this.user.uid && !this.user.admin)
+            return;
         this.socket.join(`doctor_${doctorId}`);
         console.log(`👨‍⚕️ Client ${this.socket.id} joined doctor room: ${doctorId}`);
     }
     handleJoinPatient(patientId) {
+        if (patientId !== this.user.uid && !this.user.admin)
+            return;
         this.socket.join(`patient_${patientId}`);
         console.log(`👤 Client ${this.socket.id} joined patient room: ${patientId}`);
     }
@@ -74,27 +84,7 @@ class SocketHandlers {
     // ==================== BOOKING HANDLERS ====================
     async handleCreateBooking(data, callback) {
         try {
-            console.log('📝 Creating booking:', data);
-            const result = await BookingService_1.BookingService.createBooking(data);
-            if (result.bookingId) {
-                // Emit to doctor and patient rooms
-                this.io.to(`doctor_${data.doctorId}`).emit(types_1.BookingEvents.BOOKING_CREATED, {
-                    bookingId: result.bookingId,
-                    ...data,
-                });
-                this.io.to(`patient_${data.patientId}`).emit(types_1.BookingEvents.BOOKING_CREATED, {
-                    bookingId: result.bookingId,
-                    ...data,
-                });
-                // Emit availability update
-                this.io.to(`doctor_${data.doctorId}`).emit(types_1.BookingEvents.AVAILABILITY_UPDATED, {
-                    doctorId: data.doctorId,
-                    date: data.appointmentDate,
-                    time: data.appointmentTime,
-                    isAvailable: false,
-                });
-            }
-            callback(result);
+            callback({ bookingId: '', error: 'Use the PayFast checkout to create a booking' });
         }
         catch (error) {
             console.error('❌ Error creating booking:', error);
@@ -107,6 +97,10 @@ class SocketHandlers {
             const booking = await BookingService_1.BookingService.getBooking(data.bookingId);
             if (!booking) {
                 callback({ success: false, error: 'Booking not found' });
+                return;
+            }
+            if (!this.canAccess(booking.patientId, booking.doctorId)) {
+                callback({ success: false, error: 'Forbidden' });
                 return;
             }
             const result = await BookingService_1.BookingService.rescheduleBooking(data.bookingId, data.newDate, data.newTime, data.reason);
@@ -155,6 +149,10 @@ class SocketHandlers {
                 callback({ success: false, error: 'Booking not found' });
                 return;
             }
+            if (!this.canAccess(booking.patientId, booking.doctorId)) {
+                callback({ success: false, error: 'Forbidden' });
+                return;
+            }
             const result = await BookingService_1.BookingService.cancelBooking(data.bookingId, data.reason);
             if (result.success) {
                 // Emit to doctor and patient rooms
@@ -187,6 +185,10 @@ class SocketHandlers {
             const booking = await BookingService_1.BookingService.getBooking(data.bookingId);
             if (!booking) {
                 callback({ success: false, error: 'Booking not found' });
+                return;
+            }
+            if (booking.doctorId !== this.user.uid && !this.user.admin) {
+                callback({ success: false, error: 'Forbidden' });
                 return;
             }
             const result = await BookingService_1.BookingService.updateBookingStatus(data.bookingId, data.status, data.reason);
@@ -243,6 +245,10 @@ class SocketHandlers {
     }
     async handleGetBookings(data, callback) {
         try {
+            if (data.userId !== this.user.uid && !this.user.admin) {
+                callback({ success: false, error: 'Forbidden', bookings: [] });
+                return;
+            }
             console.log('📋 Getting bookings for:', data);
             let bookings = [];
             if (data.role === 'doctor') {
@@ -261,6 +267,10 @@ class SocketHandlers {
     }
     async handleGetUpcoming(data, callback) {
         try {
+            if (data.doctorId !== this.user.uid && !this.user.admin) {
+                callback({ success: false, error: 'Forbidden', bookings: [] });
+                return;
+            }
             console.log('📅 Getting upcoming bookings for:', data);
             const bookings = await BookingService_1.BookingService.getUpcomingBookings(data.doctorId);
             console.log(`✅ Found ${bookings.length} upcoming bookings`);
@@ -273,6 +283,10 @@ class SocketHandlers {
     }
     async handleGetStats(data, callback) {
         try {
+            if (data.doctorId !== this.user.uid && !this.user.admin) {
+                callback({ success: false, error: 'Forbidden', stats: null });
+                return;
+            }
             console.log('📊 Getting stats for:', data);
             const stats = await BookingService_1.BookingService.getBookingStats(data.doctorId);
             callback({ success: true, stats });
@@ -284,6 +298,10 @@ class SocketHandlers {
     }
     async handleSetAvailability(data, callback) {
         try {
+            if (data.doctorId !== this.user.uid && !this.user.admin) {
+                callback({ success: false, error: 'Forbidden' });
+                return;
+            }
             console.log('📝 Setting availability for:', { doctorId: data.doctorId, date: data.date, slots: data.slots?.length });
             const result = await BookingService_1.BookingService.setDayAvailability(data.doctorId, data.date, data.slots);
             if (result.success) {

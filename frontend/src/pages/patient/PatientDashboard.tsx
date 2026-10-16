@@ -49,6 +49,8 @@ import { serverTimestamp } from 'firebase/firestore';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { getAccountCreditSummary, getPatientMembership } from '@/client/payfastClient';
+import { hasPaidMembershipAccess } from '@/lib/membershipAccess';
 
 // ==================== TYPES ====================
 interface PatientProfile {
@@ -89,6 +91,8 @@ interface Doctor {
   reviewCount: number;
   profileImage?: string;
   verificationStatus: string;
+  membershipPlanId: 'free' | 'member' | 'partner';
+  membershipFeatured: boolean;
 }
 
 interface Booking {
@@ -108,10 +112,13 @@ interface Booking {
 }
 
 interface Membership {
-  tier: 'basic' | 'premium';
-  startDate: any;
-  endDate: any;
-  features: string[];
+  planId: 'free' | 'basic_premium' | 'premium_plus';
+  status: 'active' | 'past_due' | 'expired';
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  completedFreeBookings: number;
+  freeBookingsRemaining: number;
+  cancelAtPeriodEnd: boolean;
 }
 
 // ==================== QUERY KEYS ====================
@@ -120,6 +127,7 @@ const QUERY_KEYS = {
   patientBookings: 'patientBookings',
   availableDoctors: 'availableDoctors',
   membership: 'membership',
+  accountCredit: 'accountCredit',
 };
 
 // ==================== DATA FETCHING FUNCTIONS ====================
@@ -246,6 +254,10 @@ const fetchAvailableDoctors = async (): Promise<Doctor[]> => {
       const userRef = doc(db, 'users', docSnap.id);
       const userSnap = await getDoc(userRef);
       const userData = userSnap.exists() ? userSnap.data() : {};
+      const membershipIsCurrent = hasPaidMembershipAccess(data.membershipStatus, data.membershipPeriodEnd, data.membershipGracePeriodEnd) &&
+        ['member', 'partner'].includes(data.membershipPlanId);
+      const membershipPlanId = membershipIsCurrent ? data.membershipPlanId : 'free';
+      const isPaidMember = membershipPlanId !== 'free';
       
       doctors.push({
         id: docSnap.id,
@@ -254,15 +266,19 @@ const fetchAvailableDoctors = async (): Promise<Doctor[]> => {
         fullName: userData.fullName || data.fullName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
         email: userData.email || data.email || '',
         specialization: data.specialization || '',
-        practiceName: data.practiceName || '',
-        practiceAddress: data.practiceAddress || '',
+        practiceName: isPaidMember ? data.practiceName || '' : '',
+        practiceAddress: isPaidMember ? data.practiceAddress || '' : '',
         consultationFee: data.consultationFee || 0,
-        rating: data.rating || 0,
-        reviewCount: data.reviewCount || 0,
-        profileImage: data.profileImage || '',
+        rating: isPaidMember ? data.rating || 0 : 0,
+        reviewCount: isPaidMember ? data.reviewCount || 0 : 0,
+        profileImage: isPaidMember ? data.profileImage || '' : '',
         verificationStatus: data.verificationStatus || 'pending',
+        membershipPlanId,
+        membershipFeatured: membershipPlanId === 'partner' && data.membershipFeatured === true,
       });
     }
+
+    doctors.sort((a, b) => Number(b.membershipFeatured) - Number(a.membershipFeatured));
     
     return doctors;
   } catch (error) {
@@ -275,23 +291,10 @@ const fetchMembership = async (uid: string): Promise<Membership | null> => {
   if (!uid) return null;
 
   try {
-    const membershipRef = doc(db, 'memberships', uid);
-    const membershipSnap = await getDoc(membershipRef);
-    
-    if (membershipSnap.exists()) {
-      const data = membershipSnap.data();
-      return {
-        tier: data.tier || 'basic',
-        startDate: data.startDate || null,
-        endDate: data.endDate || null,
-        features: data.features || [],
-      };
-    }
-    
-    return { tier: 'basic', startDate: null, endDate: null, features: [] };
+    return await getPatientMembership();
   } catch (error) {
     console.error('Error fetching membership:', error);
-    return { tier: 'basic', startDate: null, endDate: null, features: [] };
+    return { planId: 'free', status: 'active', currentPeriodStart: null, currentPeriodEnd: null, completedFreeBookings: 0, freeBookingsRemaining: 0, cancelAtPeriodEnd: false };
   }
 };
 
@@ -439,8 +442,8 @@ const SidebarContent = ({
         >
           <Shield className="w-5 h-5 flex-shrink-0" />
           <span className="truncate">Membership</span>
-          {membership?.tier === 'premium' && (
-            <Badge className="ml-auto bg-purple-100 text-purple-800 text-xs flex-shrink-0">Premium</Badge>
+          {membership?.planId === 'premium_plus' && (
+            <Badge className="ml-auto bg-purple-100 text-purple-800 text-xs flex-shrink-0">Premium Plus</Badge>
           )}
         </button>
         
@@ -539,6 +542,14 @@ const PatientDashboard = () => {
     gcTime: 10 * 60 * 1000,
   });
 
+  const { data: accountCredit } = useQuery({
+    queryKey: [QUERY_KEYS.accountCredit, user?.uid],
+    queryFn: () => getAccountCreditSummary().catch(() => ({ balanceCents: 0, currency: 'ZAR' as const, transactions: [] })),
+    enabled: !!user && profile?.role === 'patient',
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: true,
+  });
+
   // ==================== DERIVED DATA ====================
   const now = new Date();
   const upcomingBookings = bookings.filter(b => 
@@ -553,8 +564,9 @@ const PatientDashboard = () => {
     pendingBookings: pendingBookings.length,
     completedBookings: completedBookings.length,
     cancelledBookings: bookings.filter(b => b.status === 'cancelled').length,
-    membershipType: membership?.tier || 'basic',
-    freeBookingsRemaining: Math.max(0, 3 - completedBookings.length)
+    membershipType: membership?.planId || 'free',
+    completedFreeBookings: membership?.completedFreeBookings || 0,
+    freeBookingsRemaining: membership?.freeBookingsRemaining || 0
   };
 
   const recentBookings = bookings.slice(0, 5);
@@ -912,6 +924,31 @@ const PatientDashboard = () => {
                 </Card>
               </div>
 
+              <Card className="mb-6 border-blue-100 bg-blue-50/60 shadow-sm">
+                <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                  <div>
+                    <p className="text-sm text-blue-800">Account credit</p>
+                    <p className="text-2xl font-bold text-blue-950">
+                      {new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR' }).format((accountCredit?.balanceCents || 0) / 100)}
+                    </p>
+                    <p className="text-xs text-blue-800">Credit is applied automatically to future booking fees.</p>
+                  </div>
+                  <Button variant="outline" className="border-blue-200 bg-white text-blue-700" onClick={() => navigate('/search')}>
+                    Book with credit
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {membership?.status === 'past_due' && (
+                <Card className="mb-6 border-amber-200 bg-amber-50 shadow-sm">
+                  <CardContent className="space-y-2 p-4">
+                    <p className="font-semibold text-amber-950">Membership payment needs attention</p>
+                    <p className="text-sm text-amber-900">Your benefits remain available through {membership.gracePeriodEnd ? new Date(membership.gracePeriodEnd).toLocaleDateString('en-ZA') : 'the seven-day grace period'}. Review your membership to resolve the payment.</p>
+                    <Button variant="outline" size="sm" onClick={() => navigate('/memberships')}>Review membership</Button>
+                  </CardContent>
+                </Card>
+              )}
+
               <div className="grid lg:grid-cols-3 gap-4 sm:gap-6">
                 {/* Recent Bookings */}
                 <div className="lg:col-span-2">
@@ -1031,29 +1068,43 @@ const PatientDashboard = () => {
                         </div>
                         <div className="min-w-0">
                           <h3 className="font-semibold text-gray-900 text-sm sm:text-base">
-                            {stats.membershipType === 'premium' ? 'Premium Member' : 'Basic Member'}
+                            {stats.membershipType === 'premium_plus'
+                              ? 'Premium Plus Member'
+                              : stats.membershipType === 'basic_premium'
+                                ? 'Basic Premium Member'
+                                : 'Free Member'}
                           </h3>
                           <p className="text-xs sm:text-sm text-gray-600 truncate">
-                            {stats.membershipType === 'premium' 
-                              ? 'Unlimited bookings • Priority support' 
-                              : `${stats.freeBookingsRemaining} free bookings remaining`}
+                            {stats.membershipType === 'premium_plus'
+                                ? 'No booking fees • Family and priority features coming soon'
+                              : stats.membershipType === 'basic_premium'
+                                ? `${stats.completedFreeBookings} of 5 free bookings completed • ${stats.freeBookingsRemaining} available to book free`
+                                : 'R10 booking fee per booking'}
                           </p>
                         </div>
                       </div>
                       
-                      {stats.membershipType === 'basic' && (
+                      {stats.membershipType === 'basic_premium' && (
                         <>
-                          <Progress 
-                            value={(stats.freeBookingsRemaining / 3) * 100} 
+                          <Progress
+                            value={(stats.completedFreeBookings / 5) * 100}
                             className="h-2 mb-4"
                           />
                           <Button 
                             className="w-full bg-blue-600 hover:bg-blue-700 text-sm"
                             onClick={() => navigate('/memberships')}
                           >
-                            Upgrade to Premium
+                            View membership plans
                           </Button>
                         </>
+                      )}
+                      {stats.membershipType === 'free' && (
+                        <Button
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-sm"
+                          onClick={() => navigate('/memberships')}
+                        >
+                          View membership plans
+                        </Button>
                       )}
                     </CardContent>
                   </Card>

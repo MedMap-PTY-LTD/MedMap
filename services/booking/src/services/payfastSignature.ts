@@ -18,3 +18,13 @@ export function payFastSignature(
   if (passphrase?.trim()) parameters.push(`passphrase=${payFastEncode(passphrase)}`);
   return crypto.createHash('md5').update(parameters.join('&')).digest('hex');
 }
+
+// PayFast's recurring-billing API uses alphabetically sorted parameters,
+// unlike its custom checkout signature which preserves field order.
+export function payFastApiSignature(fields: Record<string, string>, passphrase: string): string {
+  const parameters = Object.entries({ ...fields, passphrase })
+    .filter(([, value]) => value !== '')
+    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+    .map(([key, value]) => `${key}=${payFastEncode(value)}`);
+  return crypto.createHash('md5').update(parameters.join('&')).digest('hex');
+}

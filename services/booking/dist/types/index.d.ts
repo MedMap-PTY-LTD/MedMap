@@ -14,7 +14,7 @@ export interface RescheduleHistory {
     rescheduledAt: any;
     reason?: string;
 }
-export type PaymentStatus = 'unpaid' | 'pending' | 'paid' | 'failed' | 'refund_pending' | 'refunded';
+export type PaymentStatus = 'unpaid' | 'pending' | 'paid' | 'waived' | 'failed' | 'refund_pending' | 'credited' | 'refunded';
 export interface Booking {
     id: string;
     doctorId: string;
@@ -30,6 +30,18 @@ export interface Booking {
     status: 'pending' | 'confirmed' | 'rescheduled' | 'completed' | 'cancelled' | 'no-show';
     notes?: string;
     consultationFee: number;
+    bookingFee?: number;
+    bookingFeeTotal?: number;
+    bookingFeeCreditCents?: number;
+    membershipPlanId?: string;
+    membershipFreeBooking?: boolean;
+    membershipFreeBookingPeriodStart?: string | null;
+    membershipFreeBookingCountedAt?: string;
+    membershipFreeBookingReleasedAt?: string;
+    paymentMethod?: 'payfast' | 'membership' | 'account_credit' | 'mixed';
+    paymentEnvironment?: 'sandbox' | 'live';
+    isTestBooking?: boolean;
+    paidAt?: any;
     rescheduleCount: number;
     maxReschedules: number;
     rescheduleHistory: RescheduleHistory[];
@@ -40,6 +52,9 @@ export interface Booking {
     pfPaymentId?: string;
     refundReference?: string;
     refundedAt?: any;
+    refundCreditStatus?: 'pending_review' | 'credited' | 'declined';
+    refundCreditAmountCents?: number;
+    refundCreditAt?: string;
     createdAt: any;
     updatedAt: any;
     cancelledAt?: any;
@@ -55,6 +70,7 @@ export interface DoctorAvailability {
 }
 export interface BookingStats {
     total: number;
+    totalPatients: number;
     pending: number;
     confirmed: number;
     completed: number;
@@ -89,6 +105,7 @@ export interface PaymentRecord {
     currency: string;
     status: PaymentStatus;
     provider: string;
+    environment?: 'sandbox' | 'live';
     customerEmail: string;
     customerName: string;
     paymentMethod: string;
@@ -115,7 +132,7 @@ export interface RefundQueueItem {
     customerEmail: string;
     customerName: string;
     reason?: string;
-    status: 'pending_manual_refund' | 'completed' | 'cancelled';
+    status: 'pending_manual_refund' | 'pending_account_credit_review' | 'completed' | 'cancelled' | 'credited_to_account' | 'declined';
     refundReference?: string;
     processedAt?: any;
     createdAt: any;

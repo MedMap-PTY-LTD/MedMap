@@ -1,8 +1,10 @@
-# PayFast live-mode activation
+# PayFast live-mode deployment
 
-The application can create live PayFast checkout sessions, but it remains in sandbox mode unless the booking service is explicitly configured for live. The live flow charges the current R10 booking fee. The consultation fee remains payable at the doctor's office.
+The booking service supports PayFast live checkout for the current R10 booking fee. The Render blueprint now explicitly sets `PAYFAST_MODE=live`; keep this explicit because the application falls back to sandbox when the variable is unset. The consultation fee remains payable at the doctor's office.
 
-## Before activation
+The user has confirmed live PayFast payments have worked. This repository contains no production merchant credentials or transaction records, so this note documents configuration rather than independently verifying a live transaction. The blueprint change is local and has not been deployed from this checkout.
+
+## Required live settings
 
 - Confirm the PayFast merchant account is verified and its live Merchant ID and Merchant Key are available.
 - If a security passphrase is enabled in PayFast, use that exact value. The passphrase is optional for this one-time checkout flow; omit `PAYFAST_LIVE_PASSPHRASE` if the PayFast account has none.
@@ -11,7 +13,7 @@ The application can create live PayFast checkout sessions, but it remains in san
 
 ## Render environment
 
-In the Render Dashboard, open the `medmap-booking-service` service and its Environment page. Set:
+In the Render Dashboard, open the `medmap-booking-service` service and its Environment page. The blueprint sets the mode and declares the secret variables below; enter or confirm the actual live values there:
 
 | Variable | Value |
 | --- | --- |
@@ -32,9 +34,9 @@ Saving environment variables on Render triggers a deploy/restart unless Save onl
 
 1. Review the code diff and confirm the merchant values are not in Git.
 2. Keep GitHub `main` unchanged until the release is approved. A push to `main` deploys the Netlify frontend and may also trigger Render if its service is set to auto-deploy from that branch; confirm the Render service's Auto-Deploy setting first.
-3. Set the four live-mode environment values in Render and deploy the reviewed backend revision.
+3. Confirm the live-mode setting and required live merchant values in Render, then deploy the reviewed backend revision.
 4. Confirm `GET /health` reports `paymentMode: live` and the `www.payfast.co.za` process/validation origins.
-5. Place one clearly identified live test booking only after the merchant owner approves it. It will charge the real R10 booking fee and incur PayFast's normal transaction fee.
-6. Confirm the PayFast hosted page, accepted ITN, confirmed booking status, and booking history. If any step fails, return Render to `PAYFAST_MODE=sandbox` and redeploy; do not disable signature, source-IP, or server-side ITN validation.
+5. If another live transaction is needed to verify the deployed revision, use a clearly identified booking and account for the real R10 booking fee and PayFast's normal transaction fee.
+6. Confirm the PayFast hosted page, accepted ITN, confirmed booking status, and booking history. If a live step fails, stop the rollout and resolve it before accepting more live payments. Do not switch the production service to sandbox or disable signature, source-IP, or server-side ITN validation.
 
-Returning to sandbox requires setting `PAYFAST_MODE=sandbox` in Render and redeploying. It does not reverse completed live transactions or process refunds. Refunds remain manual in the PayFast merchant dashboard.
+Sandbox mode is for an isolated test deployment only; it must not be used as a fallback for production live payments. This phase does not change refund handling. Existing booking refunds remain manual in the PayFast merchant dashboard.

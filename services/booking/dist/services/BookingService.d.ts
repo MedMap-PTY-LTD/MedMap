@@ -1,16 +1,26 @@
 import { Booking, BookingSlot, BookingStats } from '../types';
+import { PayFastCheckout } from './PaymentService';
 export declare class BookingService {
     static generateDefaultSlots(date: string, duration?: number): BookingSlot[];
     static getAvailableSlots(doctorId: string, date: string): Promise<BookingSlot[]>;
     static updateSlotAvailability(doctorId: string, date: string, time: string, isAvailable: boolean, bookingId?: string): Promise<void>;
     static createBooking(bookingData: Omit<Booking, 'id' | 'status' | 'rescheduleCount' | 'maxReschedules' | 'rescheduleHistory' | 'createdAt' | 'updatedAt' | 'paymentStatus' | 'paymentId' | 'paymentReference'>): Promise<{
         bookingId: string;
+        bookingFee: number;
+        bookingFeeCredit: number;
+        bookingFeeTotal: number;
+        membershipPlanId: string;
+        freeBookingsRemaining: number;
         error: string | null;
     }>;
     static createBookingWithPayment(bookingData: Omit<Booking, 'id' | 'status' | 'rescheduleCount' | 'maxReschedules' | 'rescheduleHistory' | 'createdAt' | 'updatedAt' | 'paymentStatus' | 'paymentId' | 'paymentReference'>, paymentMethod?: string): Promise<{
         bookingId: string;
-        paymentUrl?: string;
-        formHtml?: string;
+        checkout?: PayFastCheckout;
+        bookingFee: number;
+        bookingFeeCredit?: number;
+        bookingFeeTotal?: number;
+        membershipPlanId?: string;
+        freeBookingsRemaining?: number;
         error: string | null;
     }>;
     static getBooking(bookingId: string): Promise<Booking | null>;
@@ -25,7 +35,7 @@ export declare class BookingService {
     static cancelBooking(bookingId: string, reason?: string): Promise<{
         success: boolean;
         error: string | null;
-        refundPending?: boolean;
+        creditReviewPending?: boolean;
     }>;
     static markRefundProcessed(bookingId: string, refundReference?: string): Promise<{
         success: boolean;

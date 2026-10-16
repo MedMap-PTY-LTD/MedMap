@@ -22,8 +22,10 @@ export type PaymentStatus =
   | 'unpaid'
   | 'pending'
   | 'paid'
+  | 'waived'
   | 'failed'
   | 'refund_pending'   // 🔥 waiting for admin to process in PayFast dashboard
+  | 'credited'
   | 'refunded';
 
 export interface Booking {
@@ -42,6 +44,14 @@ export interface Booking {
   notes?: string;
   consultationFee: number;
   bookingFee?: number;
+  bookingFeeTotal?: number;
+  bookingFeeCreditCents?: number;
+  membershipPlanId?: string;
+  membershipFreeBooking?: boolean;
+  membershipFreeBookingPeriodStart?: string | null;
+  membershipFreeBookingCountedAt?: string;
+  membershipFreeBookingReleasedAt?: string;
+  paymentMethod?: 'payfast' | 'membership' | 'account_credit' | 'mixed';
   paymentEnvironment?: 'sandbox' | 'live';
   isTestBooking?: boolean;
   paidAt?: any;
@@ -57,6 +67,9 @@ export interface Booking {
   pfPaymentId?: string;        // 🔥 PayFast's transaction ID (pf_payment_id) — needed for manual refunds
   refundReference?: string;    // 🔥 reference from PayFast dashboard when admin processes refund
   refundedAt?: any;            // 🔥 timestamp when refund was marked complete
+  refundCreditStatus?: 'pending_review' | 'credited' | 'declined';
+  refundCreditAmountCents?: number;
+  refundCreditAt?: string;
 
   createdAt: any;
   updatedAt: any;
@@ -75,6 +88,7 @@ export interface DoctorAvailability {
 
 export interface BookingStats {
   total: number;
+  totalPatients: number;
   pending: number;
   confirmed: number;
   completed: number;
@@ -144,7 +158,7 @@ export interface RefundQueueItem {
   customerEmail: string;
   customerName: string;
   reason?: string;
-  status: 'pending_manual_refund' | 'completed' | 'cancelled';
+  status: 'pending_manual_refund' | 'pending_account_credit_review' | 'completed' | 'cancelled' | 'credited_to_account' | 'declined';
   refundReference?: string;     // 🔥 reference from PayFast after admin refunds
   processedAt?: any;
   createdAt: any;

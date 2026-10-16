@@ -13,7 +13,7 @@ export interface PayFastCheckout {
   fields: Record<string, string>;
 }
 
-interface PayFastConfiguration {
+export interface PayFastConfiguration {
   mode: PayFastMode;
   merchantId: string;
   merchantKey: string;
@@ -55,7 +55,7 @@ function selectedMode(): PayFastMode {
   return 'sandbox';
 }
 
-function configuration(mode: PayFastMode = selectedMode()): PayFastConfiguration {
+export function configuration(mode: PayFastMode = selectedMode()): PayFastConfiguration {
   let merchantId: string;
   let merchantKey: string;
   let passphrase: string | undefined;
@@ -108,7 +108,7 @@ async function verifySource(sourceIp: string): Promise<void> {
   }
 }
 
-function checkoutFor(booking: Booking, reference: string, config: PayFastConfiguration): PayFastCheckout {
+function checkoutFor(booking: Booking, reference: string, amount: number, config: PayFastConfiguration): PayFastCheckout {
   const returnUrl = new URL('/payfast/success', config.clientUrl);
   const cancelUrl = new URL('/payfast/cancel', config.clientUrl);
   returnUrl.searchParams.set('bookingId', booking.id);
@@ -125,7 +125,7 @@ function checkoutFor(booking: Booking, reference: string, config: PayFastConfigu
     name_last: config.mode === 'sandbox' ? 'Sandbox' : nameParts.join(' '),
     email_address: config.mode === 'sandbox' ? 'sandbox@example.com' : (booking.patientEmail || ''),
     m_payment_id: reference,
-    amount: BOOKING_FEE.toFixed(2),
+    amount: amount.toFixed(2),
     item_name: 'MedMap Booking Fee',
     item_description: `Booking ${booking.id}`,
   };
@@ -133,7 +133,7 @@ function checkoutFor(booking: Booking, reference: string, config: PayFastConfigu
   return { mode: config.mode, action: config.processUrl, fields };
 }
 
-function notificationConfigurations(active: PayFastConfiguration): PayFastConfiguration[] {
+export function notificationConfigurations(active: PayFastConfiguration): PayFastConfiguration[] {
   const otherMode: PayFastMode = active.mode === 'sandbox' ? 'live' : 'sandbox';
   try {
     // Accept delayed notifications for an existing payment after a mode switch,
@@ -142,6 +142,41 @@ function notificationConfigurations(active: PayFastConfiguration): PayFastConfig
   } catch {
     return [active];
   }
+}
+
+export async function verifyPayFastNotification(
+  payload: Record<string, unknown>,
+  sourceIp: string,
+): Promise<{ fields: Record<string, string>; matchedConfig: PayFastConfiguration }> {
+  const activeConfig = configuration();
+  if (!payload || Object.values(payload).some(value => typeof value !== 'string')) {
+    throw new InvalidPayFastNotification('Malformed PayFast notification');
+  }
+  const fields = payload as Record<string, string>;
+  const received = fields.signature || '';
+  if (!/^[a-f0-9]{32}$/i.test(received)) {
+    throw new InvalidPayFastNotification('Invalid PayFast signature');
+  }
+  const receivedSignature = Buffer.from(received.toLowerCase());
+  const matchedConfig = notificationConfigurations(activeConfig).find(candidate => {
+    if (fields.merchant_id !== candidate.merchantId) return false;
+    const expected = payFastSignature(fields, candidate.passphrase, true);
+    return crypto.timingSafeEqual(receivedSignature, Buffer.from(expected));
+  });
+  if (!matchedConfig) throw new InvalidPayFastNotification('Invalid PayFast signature or merchant');
+  await verifySource(sourceIp);
+
+  const confirmation = await fetch(matchedConfig.validateUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(fields).toString(),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!confirmation.ok) throw new Error(`PayFast validation unavailable (${confirmation.status})`);
+  if ((await confirmation.text()).trim() !== 'VALID') {
+    throw new InvalidPayFastNotification('PayFast rejected the notification');
+  }
+  return { fields, matchedConfig };
 }
 
 export class PaymentService {
@@ -186,66 +221,41 @@ export class PaymentService {
       if (booking.status !== 'pending' || ['paid', 'refund_pending', 'refunded'].includes(booking.paymentStatus)) {
         throw new Error('This booking cannot be paid');
       }
+      const amount = Number(booking.bookingFee ?? BOOKING_FEE);
+      if (!Number.isFinite(amount) || amount < 5) throw new Error('PayFast checkout requires at least R5.00; apply enough account credit or pay the minimum amount');
 
       if (booking.paymentId) {
         const existing = await transaction.get(db.collection('payments').doc(booking.paymentId));
         if (existing.exists && existing.data()?.status === 'pending' &&
-            existing.data()?.environment === config.mode && existing.data()?.amount === BOOKING_FEE &&
+            existing.data()?.environment === config.mode && existing.data()?.amount === amount &&
             existing.data()?.reference === booking.paymentId) {
-          return { booking, reference: booking.paymentId };
+          return { booking, reference: booking.paymentId, amount };
         }
       }
 
       const reference = `pf_${crypto.randomUUID()}`;
       const now = new Date().toISOString();
       transaction.set(db.collection('payments').doc(reference), {
-        paymentId: reference, bookingId, reference, amount: BOOKING_FEE,
+        paymentId: reference, bookingId, reference, amount,
         currency: 'ZAR', provider: 'payfast', environment: config.mode, status: 'pending',
         createdAt: now, updatedAt: now,
       });
       transaction.update(bookingRef, {
-        bookingFee: BOOKING_FEE, paymentEnvironment: config.mode, isTestBooking: config.mode === 'sandbox',
+        bookingFee: amount, paymentEnvironment: config.mode, isTestBooking: config.mode === 'sandbox',
         paymentId: reference, paymentReference: reference, paymentStatus: 'pending', updatedAt: now,
       });
-      return { booking, reference };
+      return { booking, reference, amount };
     });
-    return checkoutFor(result.booking, result.reference, config);
+    return checkoutFor(result.booking, result.reference, result.amount, config);
   }
 
   static async handleITN(payload: Record<string, unknown>, sourceIp: string): Promise<void> {
-    const activeConfig = configuration();
-    if (!payload || Object.values(payload).some(value => typeof value !== 'string')) {
-      throw new InvalidPayFastNotification('Malformed PayFast notification');
-    }
-    const fields = payload as Record<string, string>;
-    const received = fields.signature || '';
-    if (!/^[a-f0-9]{32}$/i.test(received)) {
-      throw new InvalidPayFastNotification('Invalid PayFast signature');
-    }
-    const receivedSignature = Buffer.from(received.toLowerCase());
-    const matchedConfig = notificationConfigurations(activeConfig).find(candidate => {
-      if (fields.merchant_id !== candidate.merchantId) return false;
-      const expected = payFastSignature(fields, candidate.passphrase, true);
-      return crypto.timingSafeEqual(receivedSignature, Buffer.from(expected));
-    });
-    if (!matchedConfig) throw new InvalidPayFastNotification('Invalid PayFast signature or merchant');
-
+    const { fields, matchedConfig } = await verifyPayFastNotification(payload, sourceIp);
     if (!fields.m_payment_id || !/^[A-Za-z0-9_-]{1,100}$/.test(fields.pf_payment_id || '') ||
-        !Number.isFinite(Number(fields.amount_gross)) || Number(fields.amount_gross) !== BOOKING_FEE) {
+        !Number.isFinite(Number(fields.amount_gross)) || Number(fields.amount_gross) <= 0 || fields.token) {
       throw new InvalidPayFastNotification('PayFast merchant, reference, or amount mismatch');
     }
-    await verifySource(sourceIp);
-
-    const confirmation = await fetch(matchedConfig.validateUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams(fields).toString(),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!confirmation.ok) throw new Error(`PayFast validation unavailable (${confirmation.status})`);
-    if ((await confirmation.text()).trim() !== 'VALID') {
-      throw new InvalidPayFastNotification('PayFast rejected the notification');
-    }
+    const amountGross = Number(fields.amount_gross);
 
     const paymentRef = db.collection('payments').doc(fields.m_payment_id);
     await db.runTransaction(async transaction => {
@@ -253,7 +263,7 @@ export class PaymentService {
       if (!paymentSnap.exists) throw new InvalidPayFastNotification('Unknown payment reference');
       const payment = paymentSnap.data()!;
       if (payment.provider !== 'payfast' || payment.environment !== matchedConfig.mode ||
-          payment.reference !== fields.m_payment_id || payment.amount !== BOOKING_FEE || !payment.bookingId) {
+          payment.reference !== fields.m_payment_id || payment.amount !== amountGross || !payment.bookingId) {
         throw new InvalidPayFastNotification('Payment record mismatch');
       }
       const bookingRef = db.collection('bookings').doc(payment.bookingId);
@@ -273,7 +283,7 @@ export class PaymentService {
         if (fields.payment_status === 'COMPLETE') {
           transaction.set(db.collection('refundQueue').doc(`duplicate_${fields.pf_payment_id}`), {
             bookingId: payment.bookingId, paymentId: paymentRef.id,
-            pfPaymentId: fields.pf_payment_id, amount: BOOKING_FEE,
+            pfPaymentId: fields.pf_payment_id, amount: payment.amount,
             customerEmail: booking.patientEmail, customerName: booking.patientName,
             reason: 'Duplicate PayFast charge for one payment reference',
             environment: matchedConfig.mode, status: 'pending_manual_refund', createdAt: now,
@@ -292,7 +302,7 @@ export class PaymentService {
           // Late payments need a manual refund; a cancelled slot must never be revived.
           transaction.set(db.collection('refundQueue').doc(paymentRef.id), {
             bookingId: payment.bookingId, paymentId: paymentRef.id,
-            pfPaymentId: fields.pf_payment_id, amount: BOOKING_FEE,
+            pfPaymentId: fields.pf_payment_id, amount: payment.amount,
             customerEmail: booking.patientEmail, customerName: booking.patientName,
             reason: 'Payment arrived after booking was cancelled or replaced',
             environment: matchedConfig.mode, status: 'pending_manual_refund', createdAt: now,
