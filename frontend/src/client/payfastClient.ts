@@ -129,12 +129,37 @@ export interface PayFastPublicConfig {
 
 const serviceUrl = (import.meta.env.VITE_BOOKING_SERVICE_URL || 'https://medmap-f4ob.onrender.com').replace(/\/$/, '');
 
+const API_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 12_000];
+
+async function fetchWithTransientRetry(url: string, options: RequestInit = {}): Promise<Response> {
+  const method = (options.method || 'GET').toUpperCase();
+  const canRetry = method === 'GET';
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const response = await fetch(url, options);
+      if (!canRetry || ![502, 503, 504].includes(response.status) || attempt >= API_RETRY_DELAYS_MS.length) {
+        return response;
+      }
+    } catch (error) {
+      if (!canRetry || attempt >= API_RETRY_DELAYS_MS.length) {
+        if (canRetry && error instanceof TypeError) {
+          throw new Error('The booking service is temporarily unavailable. Please try again shortly.');
+        }
+        throw error;
+      }
+    }
+
+    await new Promise(resolve => setTimeout(resolve, API_RETRY_DELAYS_MS[attempt]));
+  }
+}
+
 async function request(path: string, options: RequestInit = {}) {
   await auth.authStateReady();
   const user = auth.currentUser;
   if (!user) throw new Error('Please sign in to continue');
   const token = await user.getIdToken();
-  const response = await fetch(`${serviceUrl}${path}`, {
+  const response = await fetchWithTransientRetry(`${serviceUrl}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -142,14 +167,14 @@ async function request(path: string, options: RequestInit = {}) {
       ...options.headers,
     },
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Booking service request failed');
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `Booking service request failed (${response.status})`);
   return data;
 }
 
 export async function getPayFastConfig(): Promise<PayFastPublicConfig> {
-  const response = await fetch(`${serviceUrl}/api/payments/payfast/config`, { cache: 'no-store' });
-  const data = await response.json();
+  const response = await fetchWithTransientRetry(`${serviceUrl}/api/payments/payfast/config`, { cache: 'no-store' });
+  const data = await response.json().catch(() => ({}));
   if (!response.ok || !['sandbox', 'live'].includes(data.mode) ||
       !Number.isFinite(data.bookingFee) || data.currency !== 'ZAR') {
     throw new Error(data.error || 'Payment configuration is unavailable');
