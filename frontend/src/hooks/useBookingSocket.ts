@@ -11,6 +11,30 @@ export interface BookingEvents {
   onAvailabilityUpdated?: (data: any) => void;
 }
 
+const waitForSocketConnection = (
+  currentSocket: ReturnType<typeof getBookingSocket>,
+  timeoutMs = 90_000,
+): Promise<boolean> => new Promise(resolve => {
+  if (currentSocket.connected) {
+    resolve(true);
+    return;
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const finish = (connected: boolean) => {
+    if (timeout) clearTimeout(timeout);
+    currentSocket.off('connect', onConnect);
+    resolve(connected);
+  };
+  const onConnect = () => finish(true);
+
+  currentSocket.once('connect', onConnect);
+  timeout = setTimeout(() => finish(currentSocket.connected), timeoutMs);
+
+  // Cover a reconnect between the initial check and listener registration.
+  if (currentSocket.connected) finish(true);
+});
+
 export function useBookingSocket(events?: BookingEvents) {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
@@ -218,24 +242,28 @@ export function useBookingSocket(events?: BookingEvents) {
   }, [isConnected]);
 
   // Update booking status
-  const updateBookingStatus = useCallback((data: { 
+  const updateBookingStatus = useCallback(async (data: {
     bookingId: string; 
     status: 'pending' | 'confirmed' | 'rescheduled' | 'completed' | 'cancelled' | 'no-show'; 
     reason?: string 
   }): Promise<{ success: boolean; error: string | null }> => {
-    return new Promise((resolve) => {
-      if (!socket.current || !isConnected) {
-        resolve({ success: false, error: 'Not connected to booking service' });
-        return;
-      }
-      
-      console.log('📊 Updating booking status:', data);
-      socket.current.emit('update:booking-status', data, (response: any) => {
+    const currentSocket = socket.current;
+    if (!currentSocket.connected && !(await waitForSocketConnection(currentSocket))) {
+      return { success: false, error: 'Booking service is still unavailable. Please try again.' };
+    }
+
+    console.log('📊 Updating booking status:', data);
+    return new Promise(resolve => {
+      currentSocket.timeout(30_000).emit('update:booking-status', data, (error: Error | null, response: any) => {
+        if (error) {
+          resolve({ success: false, error: 'Booking service did not respond. Please try again.' });
+          return;
+        }
         console.log('📊 Update status response:', response);
-        resolve(response);
+        resolve(response || { success: false, error: 'Booking service returned an empty response.' });
       });
     });
-  }, [isConnected]);
+  }, []);
 
   // ==================== QUERY OPERATIONS ====================
 

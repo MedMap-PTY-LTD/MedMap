@@ -6,7 +6,6 @@ import { auth } from './firebase';
 let socketInstance: Socket | null = null;
 let authUnsubscribe: (() => void) | null = null;
 let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 10;
 
 export const getBookingSocket = (): Socket => {
   if (!socketInstance) {
@@ -25,7 +24,9 @@ export const getBookingSocket = (): Socket => {
         }
       },
       reconnection: true,
-      reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
+      // The booking service can be temporarily unavailable while it starts or
+      // recovers. Keep retrying so a signed-in user does not need to reload.
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       timeout: 10000,
@@ -49,9 +50,6 @@ export const getBookingSocket = (): Socket => {
     socketInstance.on('connect_error', (error) => {
       console.error('❌ Connection error:', error);
       reconnectAttempts++;
-      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        console.error('❌ Max reconnection attempts reached');
-      }
     });
 
     socketInstance.on('reconnect', (attemptNumber) => {
