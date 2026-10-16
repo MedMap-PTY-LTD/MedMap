@@ -131,7 +131,7 @@ class PatientMembershipService {
         const reference = `pfm_${crypto_1.default.randomUUID()}`;
         const paymentRef = firebase_1.db.collection('membershipPayments').doc(reference);
         const now = new Date().toISOString();
-        await firebase_1.db.runTransaction(async (transaction) => {
+        const checkoutReference = await firebase_1.db.runTransaction(async (transaction) => {
             const membershipSnap = await transaction.get(membershipRef);
             const existing = membershipSnap.exists ? membershipSnap.data() : undefined;
             if (isCurrent(existing)) {
@@ -146,6 +146,13 @@ class PatientMembershipService {
                 const pending = pendingSnap.exists ? pendingSnap.data() : undefined;
                 const pendingAge = pending?.createdAt ? Date.now() - Date.parse(pending.createdAt) : Infinity;
                 if (pending?.status === 'pending' && pendingAge < 30 * 60 * 1000) {
+                    // Older checkout records were signed with the wrong recurring-field
+                    // order. Let the same plan retry once using the corrected signature.
+                    if (Number(pending.checkoutSignatureVersion || 1) < 2 &&
+                        pending.userId === userId && pending.audience === 'patient' && pending.planId === planId) {
+                        transaction.set(pendingRef, { checkoutSignatureVersion: 2, updatedAt: now }, { merge: true });
+                        return existing.pendingCheckoutId;
+                    }
                     throw new Error('A membership payment is already in progress. Please finish or wait 30 minutes before retrying.');
                 }
             }
@@ -162,6 +169,7 @@ class PatientMembershipService {
                 provider: 'payfast',
                 environment: 'live',
                 status: 'pending',
+                checkoutSignatureVersion: 2,
                 createdAt: now,
                 updatedAt: now,
             });
@@ -171,6 +179,7 @@ class PatientMembershipService {
                 pendingCheckoutId: reference,
                 updatedAt: now,
             }, { merge: true });
+            return reference;
         });
         const clientUrl = config.clientUrl;
         const returnUrl = new URL('/memberships?payment=success', clientUrl).toString();
@@ -186,20 +195,20 @@ class PatientMembershipService {
             name_first: firstName.slice(0, 100),
             name_last: lastName.join(' ').slice(0, 100),
             email_address: email.slice(0, 100),
-            m_payment_id: reference,
+            m_payment_id: checkoutReference,
             amount: plan.amount.toFixed(2),
             item_name: `MedMap ${plan.name}`,
             item_description: `${plan.name} patient membership, billed quarterly`,
+            payment_method: 'cc',
             subscription_type: '1',
+            recurring_amount: plan.amount.toFixed(2),
             frequency: String(plan.frequency),
             cycles: '0',
-            recurring_amount: plan.amount.toFixed(2),
-            payment_method: 'cc',
             subscription_notify_email: 'true',
             subscription_notify_webhook: 'true',
             subscription_notify_buyer: 'true',
         };
-        return { reference, planId, amount: plan.amount, checkout: payFastCheckout(fields, config) };
+        return { reference: checkoutReference, planId, amount: plan.amount, checkout: payFastCheckout(fields, config) };
     }
     static async cancelRenewal(userId) {
         const config = ensureLiveRecurringConfig();
