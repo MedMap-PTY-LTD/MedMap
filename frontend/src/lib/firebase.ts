@@ -9,6 +9,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
   sendEmailVerification,
+  sendPasswordResetEmail,
   onAuthStateChanged,
   User as FirebaseUser,
 } from 'firebase/auth';
@@ -639,6 +640,22 @@ export const authService = {
   
   // Reset password
   resetPassword: async (email: string) => {
+    const sendWithFirebase = async () => {
+      try {
+        await sendPasswordResetEmail(auth, email);
+        return { error: null };
+      } catch (error: any) {
+        // Keep Firebase's account-enumeration protection even when the backend
+        // email service is unavailable.
+        if (error?.code === 'auth/user-not-found') return { error: null };
+        if (error?.code === 'auth/invalid-email') return { error: 'Enter a valid email address.' };
+        if (error?.code === 'auth/too-many-requests') {
+          return { error: 'Too many reset requests. Please wait a while and try again.' };
+        }
+        return { error: 'Password reset is temporarily unavailable. Please try again later.' };
+      }
+    };
+
     try {
       const serviceUrl = (import.meta.env.VITE_BOOKING_SERVICE_URL || 'https://medmap-f4ob.onrender.com').replace(/\/$/, '');
       const response = await fetch(`${serviceUrl}/api/auth/forgot-password`, {
@@ -648,13 +665,18 @@ export const authService = {
       });
       const data = await response.json().catch(() => ({}));
 
+      // The backend sends through Resend when its server-side mail settings
+      // are present. Firebase Auth can still send the reset email if that
+      // optional mail configuration is missing.
+      if (response.status === 503) return sendWithFirebase();
+
       if (!response.ok) {
         return { error: data.error || 'Password reset is temporarily unavailable. Please try again later.' };
       }
 
       return { error: null };
-    } catch (error: any) {
-      return { error: 'Could not connect to the password reset service. Please try again later.' };
+    } catch {
+      return sendWithFirebase();
     }
   },
   
