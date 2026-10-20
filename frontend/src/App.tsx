@@ -59,6 +59,7 @@ const ManualAdminSetup = lazy(() => import("./pages/ManualAdminSetup"));
 
 // Auth Routes
 const SignIn = lazy(() => import("./pages/auth/SignIn"));
+const ForgotPassword = lazy(() => import("./pages/auth/ForgotPassword"));
 const SignUpSelection = lazy(() => import("./pages/auth/SignUpSelection"));
 const PatientSignUp = lazy(() => import("./pages/patient/PatientSignUp"));
 const DoctorSignUp = lazy(() => import("./pages/doctor/DoctorSignUp"));
@@ -137,6 +138,7 @@ const App = () => {
                   {/* ===== AUTH ROUTES ===== */}
                   <Route path="/signin" element={<SignIn />} />
                   <Route path="/login" element={<Navigate to="/signin" replace />} />
+                  <Route path="/forgot-password" element={<ForgotPassword />} />
                   <Route path="/signup" element={<SignUpSelection />} />
                   <Route path="/signup/patient" element={<PatientSignUp />} />
                   <Route path="/signup/doctor" element={<DoctorSignUp />} />

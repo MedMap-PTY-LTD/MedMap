@@ -94,11 +94,13 @@ import payfastITNRouter, { payfastNotificationHealth } from './routes/payfastITN
 import { createRefundsRouter } from './routes/refunds';
 import membershipsRouter from './routes/memberships';
 import accountCreditsRouter from './routes/accountCredits';
+import authRouter from './routes/auth';
 
 app.use(bookingsRouter);
 app.use(payfastITNRouter);
 app.use(membershipsRouter);
 app.use(accountCreditsRouter);
+app.use(authRouter);
 
  //==================== SOCKET.IO SETUP ====================
 

@@ -9,7 +9,6 @@ import {
   signInWithEmailAndPassword,
   signOut,
   sendEmailVerification,
-  sendPasswordResetEmail,
   onAuthStateChanged,
   User as FirebaseUser,
 } from 'firebase/auth';
@@ -640,15 +639,22 @@ export const authService = {
   
   // Reset password
   resetPassword: async (email: string) => {
-    if (!isFirebaseInitialized()) {
-      return { error: 'Firebase is not initialized.' };
-    }
-    
     try {
-      await sendPasswordResetEmail(auth, email);
+      const serviceUrl = (import.meta.env.VITE_BOOKING_SERVICE_URL || 'https://medmap-f4ob.onrender.com').replace(/\/$/, '');
+      const response = await fetch(`${serviceUrl}/api/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        return { error: data.error || 'Password reset is temporarily unavailable. Please try again later.' };
+      }
+
       return { error: null };
     } catch (error: any) {
-      return { error: error.message };
+      return { error: 'Could not connect to the password reset service. Please try again later.' };
     }
   },
   
