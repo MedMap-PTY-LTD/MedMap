@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Heart, Clock, Shield, MapPin, Star, ArrowRight, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -7,54 +7,90 @@ import HeroSection from '@/components/HeroSection';
 import DoctorCard from '@/pages/doctor/components/DoctorCard';
 import { useNavigate, Link } from 'react-router-dom';
 import Footer from '@/components/Footer';
+import { collection, getDocs, limit, query, where } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { isPublicDoctorProfile } from '@/lib/doctorVisibility';
+
+interface FeaturedDoctor {
+  id: string;
+  name: string;
+  specialty: string;
+  location: string;
+  province: string;
+  rating: number;
+  reviews: number;
+  price: string;
+  availability: string;
+  image?: string;
+  verified: boolean;
+  languages: string[];
+  experience: string;
+  membershipFeatured: boolean;
+}
 
 const Index = () => {
   const navigate = useNavigate();
-  // Sample doctor data for demo
-  const sampleDoctors = [
-    {
-      id: '1',
-      name: 'Thabo Mthembu',
-      specialty: 'Cardiologist',
-      location: 'Sandton',
-      province: 'Gauteng',
-      rating: 4.9,
-      reviews: 127,
-      price: 'R450',
-      availability: 'Available Today',
-      verified: true,
-      languages: ['English', 'Zulu', 'Afrikaans'],
-      experience: '15 years'
-    },
-    {
-      id: '2',
-      name: 'Sarah Williams',
-      specialty: 'General Practitioner',
-      location: 'Cape Town',
-      province: 'Western Cape',
-      rating: 4.8,
-      reviews: 89,
-      price: 'R350',
-      availability: 'Available Tomorrow',
-      verified: true,
-      languages: ['English', 'Afrikaans'],
-      experience: '12 years'
-    },
-    {
-      id: '3',
-      name: 'Nomsa Dlamini',
-      specialty: 'Pediatrician',
-      location: 'Durban',
-      province: 'KwaZulu-Natal',
-      rating: 4.9,
-      reviews: 156,
-      price: 'R400',
-      availability: 'Available Today',
-      verified: true,
-      languages: ['English', 'Zulu', 'Sotho'],
-      experience: '18 years'
-    }
-  ];
+  const [featuredDoctors, setFeaturedDoctors] = useState<FeaturedDoctor[]>([]);
+  const [isLoadingFeaturedDoctors, setIsLoadingFeaturedDoctors] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadFeaturedDoctors = async () => {
+      try {
+        const doctorsQuery = query(
+          collection(db, 'doctors'),
+          where('verificationStatus', '==', 'verified'),
+          limit(20)
+        );
+        const snapshot = await getDocs(doctorsQuery);
+        if (!isMounted) return;
+
+        const doctors = snapshot.docs
+          .filter((doctorDoc) => isPublicDoctorProfile(doctorDoc.data()))
+          .map((doctorDoc) => {
+          const data = doctorDoc.data();
+          const fullName = data.fullName || `${data.firstName || ''} ${data.lastName || ''}`.trim();
+          const experienceYears = Number(data.yearsExperience) || 0;
+          const languages = Array.isArray(data.languages)
+            ? data.languages.filter((language: unknown): language is string => typeof language === 'string')
+            : [];
+
+          return {
+            id: doctorDoc.id,
+            name: fullName || 'Doctor',
+            specialty: data.specialization || 'General Practitioner',
+            location: data.city || data.practiceAddress || 'South Africa',
+            province: data.province || '',
+            rating: Number(data.rating) || 0,
+            reviews: Number(data.reviewCount) || 0,
+            price: `R${Number(data.consultationFee) || 0}`,
+            availability: 'View availability',
+            image: data.profileImage || data.profilePicture || undefined,
+            verified: true,
+            languages,
+            experience: experienceYears ? `${experienceYears} years` : 'Not specified',
+            membershipFeatured: data.membershipFeatured === true,
+          } satisfies FeaturedDoctor;
+        });
+
+        doctors.sort((left, right) =>
+          Number(right.membershipFeatured) - Number(left.membershipFeatured) ||
+          right.rating - left.rating ||
+          right.reviews - left.reviews
+        );
+        setFeaturedDoctors(doctors.slice(0, 3));
+      } catch (error) {
+        console.error('Error fetching featured doctors:', error);
+        if (isMounted) setFeaturedDoctors([]);
+      } finally {
+        if (isMounted) setIsLoadingFeaturedDoctors(false);
+      }
+    };
+
+    void loadFeaturedDoctors();
+    return () => { isMounted = false; };
+  }, []);
 
   const features = [
     {
@@ -122,11 +158,17 @@ const Index = () => {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-8 sm:mb-12">
-            {sampleDoctors.map((doctor, index) => (
-              <DoctorCard key={index} doctor={doctor} />
-            ))}
-          </div>
+          {isLoadingFeaturedDoctors ? (
+            <p className="mb-8 sm:mb-12 text-center text-slate-600" role="status">Loading verified doctors…</p>
+          ) : featuredDoctors.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-8 sm:mb-12">
+              {featuredDoctors.map((doctor) => (
+                <DoctorCard key={doctor.id} doctor={doctor} />
+              ))}
+            </div>
+          ) : (
+            <p className="mb-8 sm:mb-12 text-center text-slate-600">No verified doctors are available yet.</p>
+          )}
 
           <div className="text-center">
             <Button 

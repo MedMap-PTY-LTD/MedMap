@@ -23,6 +23,7 @@ import {
 } from 'firebase/firestore';
 import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { hasPaidMembershipAccess } from '@/lib/membershipAccess';
+import { isPublicDoctorProfile } from '@/lib/doctorVisibility';
 
 // ==================== TYPES ====================
 
@@ -136,6 +137,7 @@ const fetchDoctors = async ({
     const now = Date.now();
     featuredSnapshot?.docs.forEach(docSnap => {
       const data = docSnap.data();
+      if (!isPublicDoctorProfile(data)) return;
       const hasCurrentPartnerMembership = data.membershipPlanId === 'partner' &&
         hasPaidMembershipAccess(data.membershipStatus, data.membershipPeriodEnd, data.membershipGracePeriodEnd, now);
       if (hasCurrentPartnerMembership && data.verificationStatus === 'verified' &&
@@ -144,7 +146,9 @@ const fetchDoctors = async ({
         documents.set(docSnap.id, docSnap);
       }
     });
-    snapshot.docs.forEach(docSnap => documents.set(docSnap.id, docSnap));
+    snapshot.docs.forEach(docSnap => {
+      if (isPublicDoctorProfile(docSnap.data())) documents.set(docSnap.id, docSnap);
+    });
     for (const [doctorId, docSnap] of documents) {
       const data = docSnap.data();
       
@@ -235,7 +239,7 @@ const fetchSpecialties = async (): Promise<string[]> => {
     const specialties = new Set<string>();
     snapshot.docs.forEach(doc => {
       const data = doc.data();
-      if (data.specialization) {
+      if (isPublicDoctorProfile(data) && data.specialization) {
         specialties.add(data.specialization);
       }
     });
@@ -257,7 +261,7 @@ const fetchProvinces = async (): Promise<string[]> => {
     const provinces = new Set<string>();
     snapshot.docs.forEach(doc => {
       const data = doc.data();
-      if (data.province) {
+      if (isPublicDoctorProfile(data) && data.province) {
         provinces.add(data.province);
       }
     });

@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { useBookingSocket } from '@/hooks/useBookingSocket';
+import { isPublicDoctorProfile } from '@/lib/doctorVisibility';
 import { format, startOfWeek, addDays, isSameDay, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Calendar, Clock, User, Stethoscope, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -84,6 +85,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       const doctorList: Doctor[] = [];
       for (const docSnap of snapshot.docs) {
         const data = docSnap.data();
+        if (!isPublicDoctorProfile(data)) continue;
         const userRef = doc(db, 'users', docSnap.id);
         const userSnap = await getDoc(userRef);
         const userData = userSnap.exists() ? userSnap.data() : {};

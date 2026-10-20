@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent } from '@/components/ui/card';
 import { DoctorsRepo } from '@/backend/repositories/doctors';
+import { isPublicDoctorProfile } from '@/lib/doctorVisibility';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import RealtimeStatusBar from '@/components/RealtimeStatusBar';
@@ -204,10 +205,10 @@ const OptimizedDoctorSearch = memo(() => {
 
   const fetchDoctors = useCallback(async () => {
     try {
-      const doctorsData = await DoctorsRepo.list();
+      const doctorsData = await DoctorsRepo.list({ verified: true });
       
       // DoctorsRepo.list() already enriches with user profile data
-      setDoctors(doctorsData as any[]);
+      setDoctors(doctorsData.filter(isPublicDoctorProfile) as any[]);
     } catch (error: any) {
       const errMsg = (error && (error.message || error.details || error.hint || error.error)) || String(error) || 'Failed to load doctors';
       try {

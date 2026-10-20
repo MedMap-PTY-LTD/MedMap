@@ -40,7 +40,7 @@ export interface Booking {
   appointmentDate: string;
   appointmentTime: string;
   endTime: string;
-  status: 'pending' | 'confirmed' | 'rescheduled' | 'completed' | 'cancelled' | 'no-show';
+  status: 'pending' | 'unconfirmed' | 'live' | 'confirmed' | 'rescheduled' | 'completed' | 'cancelled' | 'no-show';
   notes?: string;
   consultationFee: number;
   bookingFee?: number;

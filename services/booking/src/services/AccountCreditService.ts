@@ -84,31 +84,63 @@ export class AccountCreditService {
     reason: string;
     adminUid: string;
     adminEmail: string;
-  }): Promise<{ balanceCents: number; transactionId: string; alreadyProcessed?: boolean }> {
+  }): Promise<{
+    balanceCents: number;
+    transactionId: string;
+    alreadyProcessed?: boolean;
+    bookingId?: string;
+    patientId?: string;
+    doctorId?: string;
+    bookingCancelled?: boolean;
+  }> {
     const queueRef = db.collection('refundQueue').doc(input.queueId);
     return db.runTransaction(async transaction => {
       const queueSnap = await transaction.get(queueRef);
       if (!queueSnap.exists) throw new Error('Refund review not found');
       const queue = queueSnap.data()!;
+      const bookingId = typeof queue.bookingId === 'string' ? queue.bookingId : '';
+      const bookingRef = bookingId ? db.collection('bookings').doc(bookingId) : null;
+      const bookingSnap = bookingRef ? await transaction.get(bookingRef) : null;
+      const booking = bookingSnap?.exists ? bookingSnap.data() : undefined;
+      const userId = String(queue.patientId || booking?.patientId || '');
+      if (!userId) throw new Error('Refund review has no patient account');
+      const isCancellationRefund = queue.reviewType === 'booking_cancellation' || booking?.paymentStatus === 'refund_pending';
+      const canCancelBooking = !!booking && ['pending', 'unconfirmed', 'live', 'confirmed', 'rescheduled'].includes(String(booking.status));
+      const now = new Date().toISOString();
+
       if (queue.status === 'credited_to_account') {
-        const userId = String(queue.patientId || '');
-        if (!userId) throw new Error('Refund review has no patient account');
         const account = await transaction.get(accountCreditRef(userId));
+        if (bookingRef && booking) {
+          const bookingUpdate: Record<string, any> = {
+            refundCreditStatus: 'credited',
+            refundCreditAmountCents: Math.max(0, Math.floor(Number(queue.creditAmountCents) || 0)),
+            refundCreditAt: queue.processedAt || now,
+            updatedAt: now,
+          };
+          if (isCancellationRefund) bookingUpdate.paymentStatus = 'credited';
+          if (isCancellationRefund && canCancelBooking) {
+            bookingUpdate.status = 'cancelled';
+            bookingUpdate.cancelledAt = booking.cancelledAt || now;
+            bookingUpdate.cancellationReason = booking.cancellationReason || queue.reason || 'Cancelled with refund';
+          }
+          transaction.update(bookingRef, bookingUpdate);
+          if (isCancellationRefund && booking.paymentId) {
+            transaction.set(db.collection('payments').doc(booking.paymentId), { status: 'credited', updatedAt: now }, { merge: true });
+          }
+        }
         return {
           balanceCents: Math.max(0, Math.floor(Number(account.data()?.balanceCents) || 0)),
           transactionId: String(queue.creditTransactionId || ''),
           alreadyProcessed: true,
+          ...(bookingId ? { bookingId } : {}),
+          ...(booking ? { patientId: String(booking.patientId || userId), doctorId: String(booking.doctorId || '') } : { patientId: userId }),
+          bookingCancelled: isCancellationRefund && (!!booking && (canCancelBooking || booking.status === 'cancelled')),
         };
       }
       if (!['pending_account_credit_review', 'pending_manual_refund'].includes(String(queue.status))) {
         throw new Error('This refund review has already been resolved');
       }
 
-      const bookingId = typeof queue.bookingId === 'string' ? queue.bookingId : '';
-      const bookingRef = bookingId ? db.collection('bookings').doc(bookingId) : null;
-      const bookingSnap = bookingRef ? await transaction.get(bookingRef) : null;
-      const userId = String(queue.patientId || bookingSnap?.data()?.patientId || '');
-      if (!userId) throw new Error('Refund review has no patient account');
       const amountCents = Math.max(0, Math.floor(Number(queue.amountCents) || Math.round(Number(queue.amount || 0) * 100)));
       if (!Number.isSafeInteger(amountCents) || amountCents <= 0) throw new Error('Refund review amount is invalid');
 
@@ -123,8 +155,6 @@ export class AccountCreditService {
       const currentBalance = Math.max(0, Math.floor(Number(accountSnap.data()?.balanceCents) || 0));
       const balanceCents = currentBalance + amountCents;
       if (!Number.isSafeInteger(balanceCents)) throw new Error('Account credit balance exceeds the supported limit');
-      const now = new Date().toISOString();
-
       transaction.set(accountRef, { userId, currency: 'ZAR', balanceCents, updatedAt: now }, { merge: true });
       transaction.create(ledgerRef, {
         userId,
@@ -148,20 +178,31 @@ export class AccountCreditService {
         processedAt: now,
       });
       if (bookingRef && bookingSnap?.exists) {
-        transaction.update(bookingRef, {
+        const bookingUpdate: Record<string, any> = {
           refundCreditStatus: 'credited',
           refundCreditAmountCents: amountCents,
           refundCreditAt: now,
           refundCreditAdminUid: input.adminUid,
           updatedAt: now,
-        });
-        if (queue.reviewType === 'booking_cancellation' || bookingSnap.data()?.paymentStatus === 'refund_pending') {
-          const paymentId = bookingSnap.data()?.paymentId;
-          transaction.update(bookingRef, { paymentStatus: 'credited' });
-          if (paymentId) transaction.set(db.collection('payments').doc(paymentId), { status: 'credited', updatedAt: now }, { merge: true });
+        };
+        if (isCancellationRefund) bookingUpdate.paymentStatus = 'credited';
+        if (isCancellationRefund && canCancelBooking) {
+          bookingUpdate.status = 'cancelled';
+          bookingUpdate.cancelledAt = booking?.cancelledAt || now;
+          bookingUpdate.cancellationReason = booking?.cancellationReason || queue.reason || 'Cancelled with refund';
+        }
+        transaction.update(bookingRef, bookingUpdate);
+        if (isCancellationRefund && booking?.paymentId) {
+          transaction.set(db.collection('payments').doc(booking.paymentId), { status: 'credited', updatedAt: now }, { merge: true });
         }
       }
-      return { balanceCents, transactionId: ledgerId };
+      return {
+        balanceCents,
+        transactionId: ledgerId,
+        ...(bookingId ? { bookingId } : {}),
+        ...(booking ? { patientId: String(booking.patientId || userId), doctorId: String(booking.doctorId || '') } : { patientId: userId }),
+        bookingCancelled: isCancellationRefund && (!!booking && (canCancelBooking || booking.status === 'cancelled')),
+      };
     });
   }
 

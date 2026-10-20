@@ -1,5 +1,5 @@
 // pages/patient/PatientDashboard.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -49,8 +49,10 @@ import { serverTimestamp } from 'firebase/firestore';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { getAccountCreditSummary, getPatientMembership } from '@/client/payfastClient';
+import { getAccountCreditSummary, getPatientBookings, getPatientMembership } from '@/client/payfastClient';
 import { hasPaidMembershipAccess } from '@/lib/membershipAccess';
+import { isPublicDoctorProfile } from '@/lib/doctorVisibility';
+import { useBookingSocket } from '@/hooks/useBookingSocket';
 
 // ==================== TYPES ====================
 interface PatientProfile {
@@ -103,7 +105,7 @@ interface Booking {
   doctorSpecialization: string;
   appointmentDate: string;
   appointmentTime: string;
-  status: 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'rescheduled' | 'no-show';
+  status: 'pending' | 'unconfirmed' | 'live' | 'confirmed' | 'completed' | 'cancelled' | 'rescheduled' | 'no-show';
   notes?: string;
   consultationFee: number;
   rescheduleCount?: number;
@@ -178,62 +180,25 @@ const fetchPatientBookings = async (uid: string): Promise<Booking[]> => {
   if (!uid) return [];
 
   try {
-    const bookingsRef = collection(db, 'bookings');
-    const q = query(
-      bookingsRef,
-      where('patientId', '==', uid),
-      orderBy('appointmentDate', 'desc'),
-      limit(50)
-    );
-    
-    const bookingsSnap = await getDocs(q);
-    const bookings: Booking[] = [];
-
-    for (const docSnap of bookingsSnap.docs) {
-      const data = docSnap.data();
-      
-      let doctorName = 'Unknown Doctor';
-      let doctorSpecialization = '';
-      
-      if (data.doctorId) {
-        try {
-          const doctorRef = doc(db, 'doctors', data.doctorId);
-          const doctorSnap = await getDoc(doctorRef);
-          if (doctorSnap.exists()) {
-            const doctorData = doctorSnap.data();
-            const doctorUserRef = doc(db, 'users', data.doctorId);
-            const doctorUserSnap = await getDoc(doctorUserRef);
-            const doctorUserData = doctorUserSnap.exists() ? doctorUserSnap.data() : {};
-            
-            doctorName = doctorUserData.fullName || `${doctorUserData.firstName || ''} ${doctorUserData.lastName || ''}`.trim() || 'Unknown Doctor';
-            doctorSpecialization = doctorData.specialization || '';
-          }
-        } catch (e) {
-          console.error('Error fetching doctor info:', e);
-        }
-      }
-      
-      bookings.push({
-        id: docSnap.id,
-        doctorId: data.doctorId || '',
-        patientId: data.patientId || '',
-        doctorName: doctorName,
-        doctorSpecialization: doctorSpecialization,
-        appointmentDate: data.appointmentDate || '',
-        appointmentTime: data.appointmentTime || '',
-        status: data.status || 'pending',
-        notes: data.notes || '',
-        consultationFee: data.consultationFee || 0,
-        rescheduleCount: data.rescheduleCount || 0,
-        maxReschedules: data.maxReschedules || 2,
-        createdAt: data.createdAt || null,
-      });
-    }
-    
-    return bookings;
+    const rows = await getPatientBookings(uid);
+    return (Array.isArray(rows) ? rows : []).map((data: any) => ({
+      id: String(data.id || ''),
+      doctorId: data.doctorId || '',
+      patientId: data.patientId || uid,
+      doctorName: data.doctorName || 'Unknown Doctor',
+      doctorSpecialization: data.doctorSpecialization || '',
+      appointmentDate: data.appointmentDate || '',
+      appointmentTime: data.appointmentTime || '',
+      status: data.status || 'pending',
+      notes: data.notes || '',
+      consultationFee: Number(data.consultationFee) || 0,
+      rescheduleCount: Number(data.rescheduleCount) || 0,
+      maxReschedules: Number(data.maxReschedules) || 2,
+      createdAt: data.createdAt || null,
+    }));
   } catch (error) {
-    console.log('No bookings found or bookings collection not yet created');
-    return [];
+    console.error('Error fetching patient bookings:', error);
+    throw error;
   }
 };
 
@@ -250,6 +215,7 @@ const fetchAvailableDoctors = async (): Promise<Doctor[]> => {
 
     for (const docSnap of doctorsSnap.docs) {
       const data = docSnap.data();
+      if (!isPublicDoctorProfile(data)) continue;
       
       const userRef = doc(db, 'users', docSnap.id);
       const userSnap = await getDoc(userRef);
@@ -285,6 +251,15 @@ const fetchAvailableDoctors = async (): Promise<Doctor[]> => {
     console.error('Error fetching available doctors:', error);
     return [];
   }
+};
+
+const getAppointmentDateTime = (booking: Pick<Booking, 'appointmentDate' | 'appointmentTime'>): Date => {
+  const date = booking.appointmentDate.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+  const time = booking.appointmentTime.match(/^(\d{1,2}):(\d{2})/)?.slice(1).map(Number);
+  if (!date) return new Date(booking.appointmentDate);
+  const hours = String(time?.[0] ?? 0).padStart(2, '0');
+  const minutes = String(time?.[1] ?? 0).padStart(2, '0');
+  return new Date(`${date}T${hours}:${minutes}:00+02:00`);
 };
 
 const fetchMembership = async (uid: string): Promise<Membership | null> => {
@@ -474,8 +449,32 @@ const PatientDashboard = () => {
   const { user, profile, signOut } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  const syncBookingStatus = useCallback((data: any, statusOverride?: Booking['status']) => {
+    const bookingId = typeof data?.bookingId === 'string' ? data.bookingId : '';
+    const status = statusOverride || data?.status;
+    if (!bookingId || !user?.uid || typeof status !== 'string') return;
+    const queryKey = [QUERY_KEYS.patientBookings, user.uid];
+    queryClient.setQueryData<Booking[]>(queryKey, current => current?.map(booking =>
+      booking.id === bookingId ? { ...booking, status: status as Booking['status'] } : booking
+    ));
+    void queryClient.invalidateQueries({ queryKey });
+  }, [queryClient, user?.uid]);
+  const handleBookingCancelled = useCallback((data: any) => syncBookingStatus(data, 'cancelled'), [syncBookingStatus]);
+  const handleBookingUpdated = useCallback((data: any) => syncBookingStatus(data), [syncBookingStatus]);
+  const { joinPatientRoom, leavePatientRoom } = useBookingSocket({
+    onBookingCancelled: handleBookingCancelled,
+    onBookingUpdated: handleBookingUpdated,
+  });
+
+  useEffect(() => {
+    if (!user?.uid || profile?.role !== 'patient') return;
+    joinPatientRoom(user.uid);
+    return () => leavePatientRoom(user.uid);
+  }, [user?.uid, profile?.role, joinPatientRoom, leavePatientRoom]);
   
   const [activeTab, setActiveTab] = useState('overview');
+  const [appointmentFilter, setAppointmentFilter] = useState<'all' | 'upcoming' | 'past'>('all');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
   // Profile editing states
@@ -484,6 +483,11 @@ const PatientDashboard = () => {
   const [allergiesInput, setAllergiesInput] = useState('');
   const [conditionsInput, setConditionsInput] = useState('');
   const [medicationsInput, setMedicationsInput] = useState('');
+
+  const showAppointments = (filter: 'all' | 'upcoming' | 'past') => {
+    setAppointmentFilter(filter);
+    setActiveTab('appointments');
+  };
 
   // ==================== QUERIES ====================
   
@@ -552,24 +556,34 @@ const PatientDashboard = () => {
 
   // ==================== DERIVED DATA ====================
   const now = new Date();
-  const upcomingBookings = bookings.filter(b => 
-    new Date(b.appointmentDate) >= now && b.status !== 'cancelled'
-  );
-  const completedBookings = bookings.filter(b => b.status === 'completed');
-  const pendingBookings = bookings.filter(b => b.status === 'pending');
+  const visibleBookings = bookings.filter(b => b.status !== 'pending' && b.status !== 'unconfirmed');
+  const activeBookingStatuses = new Set(['confirmed', 'rescheduled', 'live']);
+  const upcomingBookings = visibleBookings.filter(b =>
+    activeBookingStatuses.has(b.status) && getAppointmentDateTime(b).getTime() >= now.getTime()
+  ).sort((left, right) => getAppointmentDateTime(left).getTime() - getAppointmentDateTime(right).getTime());
+  const pastBookings = visibleBookings.filter(b =>
+    b.status === 'completed' || b.status === 'no-show' || getAppointmentDateTime(b).getTime() < now.getTime()
+  ).sort((left, right) => getAppointmentDateTime(right).getTime() - getAppointmentDateTime(left).getTime());
+  const noShowBookings = visibleBookings.filter(b => b.status === 'no-show');
+  const displayedAppointments = appointmentFilter === 'upcoming'
+    ? upcomingBookings
+    : appointmentFilter === 'past'
+      ? pastBookings
+      : visibleBookings;
   
   const stats = {
-    totalBookings: bookings.length,
+    totalBookings: visibleBookings.length,
     upcomingBookings: upcomingBookings.length,
-    pendingBookings: pendingBookings.length,
-    completedBookings: completedBookings.length,
-    cancelledBookings: bookings.filter(b => b.status === 'cancelled').length,
+    pastBookings: pastBookings.length,
+    completedBookings: visibleBookings.filter(b => b.status === 'completed').length,
+    noShowBookings: noShowBookings.length,
+    cancelledBookings: visibleBookings.filter(b => b.status === 'cancelled').length,
     membershipType: membership?.planId || 'free',
     completedFreeBookings: membership?.completedFreeBookings || 0,
     freeBookingsRemaining: membership?.freeBookingsRemaining || 0
   };
 
-  const recentBookings = bookings.slice(0, 5);
+  const recentBookings = visibleBookings.slice(0, 5);
 
   // ==================== MUTATIONS ====================
   
@@ -867,7 +881,19 @@ const PatientDashboard = () => {
             <>
               {/* Quick Stats - Mobile Responsive Grid */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6 mb-6 lg:mb-8">
-                <Card className="border-0 shadow-sm">
+                <Card
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`View all ${stats.totalBookings} bookings`}
+                  onClick={() => showAppointments('all')}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      showAppointments('all');
+                    }
+                  }}
+                  className="border-0 shadow-sm cursor-pointer transition hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                >
                   <CardContent className="p-3 sm:p-4 md:p-6">
                     <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
                       <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -881,7 +907,19 @@ const PatientDashboard = () => {
                   </CardContent>
                 </Card>
 
-                <Card className="border-0 shadow-sm">
+                <Card
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`View ${stats.upcomingBookings} upcoming appointments`}
+                  onClick={() => showAppointments('upcoming')}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      showAppointments('upcoming');
+                    }
+                  }}
+                  className="border-0 shadow-sm cursor-pointer transition hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                >
                   <CardContent className="p-3 sm:p-4 md:p-6">
                     <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
                       <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-green-100 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -895,21 +933,46 @@ const PatientDashboard = () => {
                   </CardContent>
                 </Card>
 
-                <Card className="border-0 shadow-sm">
+                <Card
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`View ${stats.pastBookings} past bookings, including ${stats.noShowBookings} no-shows`}
+                  onClick={() => showAppointments('past')}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      showAppointments('past');
+                    }
+                  }}
+                  className="border-0 shadow-sm cursor-pointer transition hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                >
                   <CardContent className="p-3 sm:p-4 md:p-6">
                     <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
                       <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-purple-100 rounded-xl flex items-center justify-center flex-shrink-0">
                         <Activity className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-purple-600" />
                       </div>
                       <div className="min-w-0">
-                        <p className="text-[10px] sm:text-xs md:text-sm text-gray-600">Completed</p>
-                        <p className="text-base sm:text-xl md:text-2xl font-bold text-gray-900">{stats.completedBookings}</p>
+                        <p className="text-[10px] sm:text-xs md:text-sm text-gray-600">Past Bookings</p>
+                        <p className="text-base sm:text-xl md:text-2xl font-bold text-gray-900">{stats.pastBookings}</p>
+                        <p className="text-[9px] sm:text-[10px] text-gray-500">Includes {stats.noShowBookings} no-shows</p>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className="border-0 shadow-sm">
+                <Card
+                  role="button"
+                  tabIndex={0}
+                  aria-label="View membership details"
+                  onClick={() => navigate('/memberships')}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      navigate('/memberships');
+                    }
+                  }}
+                  className="border-0 shadow-sm cursor-pointer transition hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                >
                   <CardContent className="p-3 sm:p-4 md:p-6">
                     <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
                       <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -958,7 +1021,7 @@ const PatientDashboard = () => {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setActiveTab('appointments')}
+                        onClick={() => showAppointments('all')}
                         className="text-blue-600 hover:text-blue-700 text-xs sm:text-sm"
                       >
                         View All
@@ -1116,18 +1179,36 @@ const PatientDashboard = () => {
           {activeTab === 'appointments' && (
             <Card className="border-0 shadow-sm">
               <CardHeader>
-                <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">All Appointments</CardTitle>
+                <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">
+                  {appointmentFilter === 'upcoming' ? 'Upcoming Appointments' : appointmentFilter === 'past' ? 'Past Bookings' : 'All Appointments'}
+                </CardTitle>
               </CardHeader>
               <CardContent>
+                <Tabs
+                  value={appointmentFilter}
+                  onValueChange={(value) => setAppointmentFilter(value as 'all' | 'upcoming' | 'past')}
+                  className="mb-4"
+                >
+                  <TabsList className="grid w-full max-w-md grid-cols-3">
+                    <TabsTrigger value="all">All ({visibleBookings.length})</TabsTrigger>
+                    <TabsTrigger value="upcoming">Upcoming ({upcomingBookings.length})</TabsTrigger>
+                    <TabsTrigger value="past">Past ({pastBookings.length})</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+                {appointmentFilter === 'past' && stats.noShowBookings > 0 && (
+                  <p className="mb-3 text-sm text-gray-600">Past bookings include {stats.noShowBookings} no-show{stats.noShowBookings === 1 ? '' : 's'}.</p>
+                )}
                 {isLoadingBookings ? (
                   <div className="flex justify-center py-12">
                     <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
                   </div>
-                ) : bookings.length === 0 ? (
+                ) : displayedAppointments.length === 0 ? (
                   <div className="text-center py-12">
                     <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                    <h3 className="text-lg font-semibold mb-2">No appointments yet</h3>
-                    <p className="text-gray-600 mb-4">Book your first appointment to get started</p>
+                    <h3 className="text-lg font-semibold mb-2">No {appointmentFilter === 'all' ? 'appointments' : appointmentFilter + ' bookings'} found</h3>
+                    <p className="text-gray-600 mb-4">
+                      {appointmentFilter === 'all' ? 'Book your first appointment to get started.' : `There are no ${appointmentFilter} bookings to display.`}
+                    </p>
                     <Button
                       className="bg-blue-600 hover:bg-blue-700"
                       onClick={() => navigate('/search')}
@@ -1136,33 +1217,35 @@ const PatientDashboard = () => {
                     </Button>
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {bookings.map((booking) => (
-                      <div key={booking.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 bg-gray-50 rounded-lg gap-2 sm:gap-3">
-                        <div className="flex items-center gap-3 sm:gap-4">
-                          <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                            <Stethoscope className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600" />
-                          </div>
-                          <div className="min-w-0">
-                            <h4 className="font-medium text-gray-900 text-sm sm:text-base truncate">
-                              {booking.doctorName || 'Unknown Doctor'}
-                            </h4>
-                            <p className="text-xs sm:text-sm text-gray-600 truncate">{booking.doctorSpecialization}</p>
-                            <p className="text-[10px] sm:text-xs text-gray-500">
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[640px] text-left text-sm">
+                      <thead className="border-b text-xs uppercase text-gray-500">
+                        <tr>
+                          <th className="px-3 py-3 font-medium">Doctor</th>
+                          <th className="px-3 py-3 font-medium">Appointment</th>
+                          <th className="px-3 py-3 font-medium">Status</th>
+                          <th className="px-3 py-3 text-right font-medium">Consultation fee</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {displayedAppointments.map((booking) => (
+                          <tr key={booking.id}>
+                            <td className="px-3 py-3">
+                              <p className="font-medium text-gray-900">{booking.doctorName || 'Unknown Doctor'}</p>
+                              <p className="text-xs text-gray-600">{booking.doctorSpecialization}</p>
+                            </td>
+                            <td className="px-3 py-3 text-gray-700">
                               {formatDate(booking.appointmentDate)} at {formatTime(booking.appointmentTime)}
-                            </p>
-                            {booking.rescheduleCount && booking.rescheduleCount > 0 && (
-                              <p className="text-[10px] text-purple-600">
-                                Rescheduled {booking.rescheduleCount}/{booking.maxReschedules} times
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <div className="text-left sm:text-right flex-shrink-0">
-                          {getStatusBadge(booking.status)}
-                        </div>
-                      </div>
-                    ))}
+                              {booking.rescheduleCount && booking.rescheduleCount > 0 && (
+                                <p className="text-xs text-purple-600">Rescheduled {booking.rescheduleCount}/{booking.maxReschedules} times</p>
+                              )}
+                            </td>
+                            <td className="px-3 py-3">{getStatusBadge(booking.status)}</td>
+                            <td className="px-3 py-3 text-right font-medium">R{booking.consultationFee.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </CardContent>

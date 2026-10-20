@@ -9,6 +9,7 @@ import { authenticateToken } from './middleware/auth';
 dotenv.config();
 import { PaymentService } from './services/PaymentService';
 import { MembershipLifecycleService } from './services/MembershipLifecycleService';
+import { AppointmentLifecycleService } from './services/AppointmentLifecycleService';
 
 const app = express();
 app.set('trust proxy', 1); // Render's edge proxy forwards the original PayFast IP.
@@ -90,13 +91,12 @@ app.get('/api/test', (req, res) => {
 // ==================== ROUTES ====================
 import bookingsRouter from './routes/bookings';
 import payfastITNRouter, { payfastNotificationHealth } from './routes/payfastITN';
-import refundsRouter from './routes/refunds';
+import { createRefundsRouter } from './routes/refunds';
 import membershipsRouter from './routes/memberships';
 import accountCreditsRouter from './routes/accountCredits';
 
 app.use(bookingsRouter);
 app.use(payfastITNRouter);
-app.use(refundsRouter);
 app.use(membershipsRouter);
 app.use(accountCreditsRouter);
 
@@ -108,6 +108,8 @@ const io = new Server(httpServer, {
   transports: ['websocket', 'polling'],
   allowEIO3: true,
 });
+
+app.use(createRefundsRouter(io));
 
 io.use(async (socket, next) => {
   try {
@@ -153,6 +155,7 @@ const PORT = process.env.PORT || 3001;
 
 httpServer.listen(PORT, () => {
   MembershipLifecycleService.start();
+  AppointmentLifecycleService.start(io);
   console.log(`📅 Booking Service running on port ${PORT}`);
   console.log(`📍 Health check: http://localhost:${PORT}/health`);
   console.log(`🔌 WebSocket: ws://localhost:${PORT}/socket.io`);
