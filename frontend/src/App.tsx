@@ -67,6 +67,10 @@ const AmbassadorSignUp = lazy(() => import("./pages/ambassador/AmbassadorSignUp"
 
 // Dashboard Routes
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
+const ClinicManagement = lazy(() => import("./pages/admin/ClinicManagement"));
+const ClinicSetupPreview = lazy(() => import("./pages/admin/ClinicSetupPreview"));
+const ClinicWorkspacePreview = lazy(() => import("./pages/admin/ClinicWorkspacePreview"));
+const ClinicPublicProfile = lazy(() => import("./pages/ClinicPublicProfile"));
 const DoctorDashboard = lazy(() => import("./pages/doctor/DoctorDashboard"));
 const PatientDashboard = lazy(() => import("./pages/patient/PatientDashboard"));
 const AmbassadorPortal = lazy(() => import("./pages/ambassador/AmbassadorPortal"));
@@ -102,6 +106,25 @@ const ProtectedRoute = () => {
   return <Outlet />;
 };
 
+// Clinic prototype routes require an admin in production. Local browser demos
+// can be opened with ?preview=1 without signing in; that bypass is DEV-only.
+const ClinicAdminRoute = ({ children }: { children: React.ReactNode }) => {
+  const { user, profile, isLoading } = useAuth();
+  const previewRequested = new URLSearchParams(window.location.search).get('preview') === '1';
+  const localPreview = import.meta.env.DEV && (
+    previewRequested || window.sessionStorage.getItem('medmap-clinic-admin-preview') === '1'
+  );
+
+  if (localPreview) {
+    window.sessionStorage.setItem('medmap-clinic-admin-preview', '1');
+    return <>{children}</>;
+  }
+  if (isLoading) return <PageLoader />;
+  if (!user) return <Navigate to="/signin" replace />;
+  if (profile?.role !== 'admin') return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+};
+
 // ==================== APP COMPONENT ====================
 const App = () => {
   return (
@@ -134,6 +157,10 @@ const App = () => {
                   <Route path="/careers" element={<Careers />} />
                   <Route path="/contact" element={<Contact />} />
                   <Route path="/ambassador-programme" element={<AmbassadorProgramme />} />
+                  <Route path="/clinics/:slug" element={<ClinicPublicProfile />} />
+                  <Route path="/admin/clinics" element={<ClinicAdminRoute><ClinicManagement /></ClinicAdminRoute>} />
+                  <Route path="/admin/clinics/setup/:inviteId" element={<ClinicAdminRoute><ClinicSetupPreview /></ClinicAdminRoute>} />
+                  <Route path="/admin/clinics/workspace/:clinicId" element={<ClinicAdminRoute><ClinicWorkspacePreview /></ClinicAdminRoute>} />
                   
                   {/* ===== AUTH ROUTES ===== */}
                   <Route path="/signin" element={<SignIn />} />
