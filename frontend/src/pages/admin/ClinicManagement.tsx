@@ -206,7 +206,7 @@ const ClinicManagement = () => {
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Organisation management</h1>
             <p className="mt-1 max-w-2xl text-sm text-slate-600 sm:text-base">
-              Invite a clinic, let its team complete setup, then review and publish its profile.
+              Invite a clinic, review its application, and preview the clinic and doctor workspaces.
             </p>
           </div>
           <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:max-w-sm">
@@ -265,7 +265,7 @@ const ClinicManagement = () => {
                     </Button>
                     <Button variant="outline" onClick={() => navigate('/admin/clinics/workspace/demo-harbourview')}>
                       <Eye className="mr-2 h-4 w-4" />
-                      View clinic workspace
+                      Preview clinic admin workspace
                     </Button>
                   </div>
                 </CardContent>

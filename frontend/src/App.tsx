@@ -70,6 +70,7 @@ const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
 const ClinicManagement = lazy(() => import("./pages/admin/ClinicManagement"));
 const ClinicSetupPreview = lazy(() => import("./pages/admin/ClinicSetupPreview"));
 const ClinicWorkspacePreview = lazy(() => import("./pages/admin/ClinicWorkspacePreview"));
+const ClinicDoctorPortalPreview = lazy(() => import("./pages/admin/ClinicDoctorPortalPreview"));
 const ClinicPublicProfile = lazy(() => import("./pages/ClinicPublicProfile"));
 const DoctorDashboard = lazy(() => import("./pages/doctor/DoctorDashboard"));
 const PatientDashboard = lazy(() => import("./pages/patient/PatientDashboard"));
@@ -160,6 +161,7 @@ const App = () => {
                   <Route path="/clinics/:slug" element={<ClinicPublicProfile />} />
                   <Route path="/admin/clinics" element={<ClinicAdminRoute><ClinicManagement /></ClinicAdminRoute>} />
                   <Route path="/admin/clinics/setup/:inviteId" element={<ClinicAdminRoute><ClinicSetupPreview /></ClinicAdminRoute>} />
+                  <Route path="/admin/clinics/workspace/:clinicId/doctors/:doctorId" element={<ClinicAdminRoute><ClinicDoctorPortalPreview /></ClinicAdminRoute>} />
                   <Route path="/admin/clinics/workspace/:clinicId" element={<ClinicAdminRoute><ClinicWorkspacePreview /></ClinicAdminRoute>} />
                   
                   {/* ===== AUTH ROUTES ===== */}
