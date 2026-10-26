@@ -1,6 +1,13 @@
 export type ClinicType = 'clinic' | 'hospital';
 export type ClinicStatus = 'draft' | 'pending_review' | 'changes_requested' | 'active' | 'rejected';
 
+export interface ClinicCreditTopUp {
+  id: string;
+  amount: number;
+  addedAt: string;
+  note: string;
+}
+
 export interface ClinicApplication {
   id: string;
   slug: string;
@@ -22,6 +29,7 @@ export interface ClinicApplication {
   submittedAt: string;
   approvedAt?: string;
   reviewNote?: string;
+  creditTopUps?: ClinicCreditTopUp[];
 }
 
 export interface ClinicInvitation {
@@ -62,6 +70,7 @@ const initialDemoState: ClinicPrototypeState = {
       practitioners: ['Dr Alex Example', 'Dr Sam Example'],
       status: 'pending_review',
       submittedAt: '2026-10-22T08:30:00.000Z',
+      creditTopUps: [],
     },
   ],
   invitations: [

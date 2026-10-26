@@ -1,25 +1,33 @@
 import { useMemo, useState } from 'react';
+import type { FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
-  Banknote,
   Building2,
   CalendarDays,
   CheckCircle2,
   CircleHelp,
+  Coins,
   ExternalLink,
   Eye,
   MapPin,
+  Plus,
   ReceiptText,
   ShieldCheck,
   Stethoscope,
   Users,
+  WalletCards,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { readClinicPrototypeState, slugifyClinicName } from '@/lib/clinicPrototypeStore';
+import { useToast } from '@/hooks/use-toast';
+import { createClinicId, readClinicPrototypeState, slugifyClinicName, writeClinicPrototypeState } from '@/lib/clinicPrototypeStore';
+import type { ClinicCreditTopUp } from '@/lib/clinicPrototypeStore';
 
 const demoBookingEvents = [
   { id: 'MM-4102', date: '23 Oct 2026', time: '09:00', doctorIndex: 0, service: 'GP consultation', status: 'Confirmed' },
@@ -32,8 +40,12 @@ const ClinicWorkspacePreview = () => {
   const { clinicId = '' } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { toast } = useToast();
   const activeTab = searchParams.get('tab') || 'overview';
-  const [state] = useState(() => readClinicPrototypeState());
+  const [state, setState] = useState(() => readClinicPrototypeState());
+  const [creditDialogOpen, setCreditDialogOpen] = useState(false);
+  const [creditAmount, setCreditAmount] = useState('');
+  const [creditNote, setCreditNote] = useState('');
   const clinic = useMemo(() => state.applications.find((item) => item.id === clinicId), [state, clinicId]);
 
   if (!clinic) {
@@ -53,6 +65,35 @@ const ClinicWorkspacePreview = () => {
     ...booking,
     doctorName: clinic.practitioners[booking.doctorIndex] || clinic.practitioners[0] || 'Unassigned practitioner',
   }));
+  const creditTopUps = clinic.creditTopUps || [];
+  const creditsLoaded = creditTopUps.reduce((total, topUp) => total + topUp.amount, 0);
+
+  const handleAddCredits = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const amount = Number(creditAmount);
+    if (!Number.isSafeInteger(amount) || amount <= 0) {
+      toast({ title: 'Enter a valid amount', description: 'Credits must be a whole number greater than zero.', variant: 'destructive' });
+      return;
+    }
+
+    const topUp: ClinicCreditTopUp = {
+      id: createClinicId('credit'),
+      amount,
+      addedAt: new Date().toISOString(),
+      note: creditNote.trim() || 'Demo credit allocation',
+    };
+    const updatedClinic = { ...clinic, creditTopUps: [topUp, ...creditTopUps] };
+    const nextState = {
+      ...state,
+      applications: state.applications.map((application) => application.id === clinic.id ? updatedClinic : application),
+    };
+    writeClinicPrototypeState(nextState);
+    setState(nextState);
+    setCreditAmount('');
+    setCreditNote('');
+    setCreditDialogOpen(false);
+    toast({ title: 'Demo credits added', description: `${amount.toLocaleString()} credits added to this browser's prototype.` });
+  };
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -95,7 +136,7 @@ const ClinicWorkspacePreview = () => {
             <TabsList className="inline-flex h-auto min-w-full justify-start gap-1 rounded-xl border border-slate-200 bg-white p-1 sm:min-w-0">
               <TabsTrigger value="overview">Organisation</TabsTrigger>
               <TabsTrigger value="doctors">Doctors & access</TabsTrigger>
-              <TabsTrigger value="billing">Bookings & billing</TabsTrigger>
+              <TabsTrigger value="billing">Credits & usage</TabsTrigger>
             </TabsList>
           </div>
 
@@ -149,16 +190,53 @@ const ClinicWorkspacePreview = () => {
           </TabsContent>
 
           <TabsContent value="billing" className="space-y-5">
-            <SectionHeading title="Booking usage & month-end billing" description="A sample view of booking activity MedMap could reconcile for the clinic each month." />
-            <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><CircleHelp className="mt-0.5 h-4 w-4 shrink-0" /><p><strong>Billing rules need agreement.</strong> The credit unit, which booking events count, cancellation handling, and price per credit are open clarifications. No amount on this demo is an invoice or a final rate.</p></div>
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+              <SectionHeading title="Credits & usage" description="Track sample credit allocations and booking activity for the organisation." />
+              <Button onClick={() => setCreditDialogOpen(true)}><Plus className="mr-2 h-4 w-4" />Add demo credits</Button>
+            </div>
+            <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><CircleHelp className="mt-0.5 h-4 w-4 shrink-0" /><p><strong>Usage rules are still being agreed.</strong> This preview records sample credit top-ups and booking events, but does not deduct credits or calculate charges. Which booking statuses count and how cancellations are treated are still to be confirmed.</p></div>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <Metric label="Sample booking events" value={String(bookingRows.length)} icon={CalendarDays} />
-              <Metric label="Credit conversion" value="To be agreed" icon={Banknote} />
-              <Metric label="Rate per credit" value="To be agreed" icon={CircleHelp} />
-              <Metric label="Month-end total" value="Pending rules" icon={ReceiptText} />
+              <Metric label="Credits loaded" value={creditsLoaded.toLocaleString()} icon={WalletCards} />
+              <Metric label="Booking events" value={String(bookingRows.length)} icon={CalendarDays} />
+              <Metric label="Credits used" value="Pending rules" icon={Coins} />
+              <Metric label="Estimated charge" value="Rate pending" icon={ReceiptText} />
+            </div>
+            <Card className="border-blue-100 bg-gradient-to-br from-blue-50 to-white shadow-sm">
+              <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-700"><WalletCards className="h-5 w-5" /></div>
+                  <div><p className="font-semibold text-slate-900">Credit balance</p><p className="mt-1 text-sm text-slate-600">Available balance will be calculated once usage and cancellation rules are agreed.</p></div>
+                </div>
+                <Badge variant="outline" className="w-fit border-amber-300 bg-amber-50 text-amber-800">Calculation pending</Badge>
+              </CardContent>
+            </Card>
+            <div className="grid gap-5 lg:grid-cols-2">
+              <Card className="border-slate-200 shadow-sm">
+                <CardHeader><CardTitle className="text-base">Credit top-ups</CardTitle><CardDescription>Sample credits added to the clinic account in this browser preview.</CardDescription></CardHeader>
+                <CardContent className="space-y-3">
+                  {creditTopUps.length === 0 ? (
+                    <EmptyState title="No demo credits added" text="Use Add demo credits to preview a credit allocation." />
+                  ) : creditTopUps.map((topUp) => (
+                    <div key={topUp.id} className="flex items-center justify-between gap-4 rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+                      <div className="flex min-w-0 items-center gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700"><Plus className="h-4 w-4" /></div><div className="min-w-0"><p className="truncate text-sm font-medium text-slate-900">{topUp.note}</p><p className="text-xs text-slate-500">{formatDate(topUp.addedAt)}</p></div></div>
+                      <span className="shrink-0 font-semibold text-emerald-700">+{topUp.amount.toLocaleString()}</span>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+              <Card className="border-slate-200 shadow-sm">
+                <CardHeader><CardTitle className="text-base">Usage summary</CardTitle><CardDescription>Booking activity is visible while its credit impact is being agreed.</CardDescription></CardHeader>
+                <CardContent className="space-y-3">
+                  {(['Confirmed', 'Completed', 'Cancelled'] as const).map((status) => {
+                    const count = bookingRows.filter((booking) => booking.status === status).length;
+                    return <div key={status} className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3"><span className="text-sm text-slate-700">{status} bookings</span><span className="font-semibold text-slate-900">{count}</span></div>;
+                  })}
+                  <div className="rounded-lg border border-dashed border-slate-300 px-4 py-3 text-sm text-slate-600">Credit deductions by status: <strong className="font-semibold text-slate-900">Pending policy</strong></div>
+                </CardContent>
+              </Card>
             </div>
             <Card className="overflow-hidden border-slate-200 shadow-sm">
-              <CardHeader><CardTitle className="text-base">Sample booking ledger</CardTitle><CardDescription>Example activity for October 2026. Credit and fee treatment is intentionally left undecided.</CardDescription></CardHeader>
+              <CardHeader><CardTitle className="text-base">Sample booking ledger</CardTitle><CardDescription>Example activity for October 2026. Each booking is shown for visibility; no credits are deducted in this prototype.</CardDescription></CardHeader>
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[760px] text-left text-sm">
@@ -181,6 +259,17 @@ const ClinicWorkspacePreview = () => {
         </Tabs>
         <p className="text-center text-xs text-slate-500">This is a meeting prototype. It uses sample data and does not create real doctor accounts, track live bookings, or issue invoices.</p>
       </main>
+
+      <Dialog open={creditDialogOpen} onOpenChange={setCreditDialogOpen}>
+        <DialogContent>
+          <form onSubmit={handleAddCredits} className="space-y-5">
+            <DialogHeader><DialogTitle>Add demo credits</DialogTitle><DialogDescription>Add sample credits to preview how an organisation credit top-up could appear. This does not create a payment or invoice.</DialogDescription></DialogHeader>
+            <div className="space-y-2"><Label htmlFor="demo-credit-amount">Credit amount</Label><Input id="demo-credit-amount" type="number" min="1" step="1" inputMode="numeric" required value={creditAmount} onChange={(event) => setCreditAmount(event.target.value)} placeholder="e.g. 100" /><p className="text-xs text-slate-500">Credits are shown as units; the price per credit is still to be agreed.</p></div>
+            <div className="space-y-2"><Label htmlFor="demo-credit-note">Note <span className="font-normal text-slate-500">(optional)</span></Label><Input id="demo-credit-note" value={creditNote} onChange={(event) => setCreditNote(event.target.value)} placeholder="e.g. Initial allocation" /></div>
+            <DialogFooter><Button type="button" variant="outline" onClick={() => setCreditDialogOpen(false)}>Cancel</Button><Button type="submit"><Plus className="mr-2 h-4 w-4" />Add demo credits</Button></DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
