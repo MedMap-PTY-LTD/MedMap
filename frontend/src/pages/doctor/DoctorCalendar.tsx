@@ -404,7 +404,7 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
           >
             <Settings className="w-4 h-4 mr-2" />
             Manage Availability
-          </Button> : <p className="mt-3 text-sm text-gray-500">Full availability management is included with Member and Partner plans.</p>}
+          </Button> : <p className="mt-3 text-sm text-gray-500">Schedule management is not available for this account.</p>}
         </div>
       );
     }

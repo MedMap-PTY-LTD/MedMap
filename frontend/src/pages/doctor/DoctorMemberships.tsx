@@ -25,7 +25,7 @@ const plans = [
     features: [
       'Listed in search, patient bookings, and booking notifications',
       'Basic profile: name, specialty, and location',
-      'Basic calendar and availability tools',
+      'Basic calendar with schedule management',
       'Standard search placement',
       'Email and in-app help',
     ],

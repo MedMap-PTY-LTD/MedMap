@@ -283,7 +283,7 @@ const DoctorDashboard = () => {
     b.status !== 'cancelled' &&
     b.status !== 'completed'
   );
-  const hasBasicBookingStats = doctor?.membershipPlanId === 'member' || doctor?.membershipPlanId === 'partner';
+  const canViewBookingStatistics = doctor?.membershipPlanId === 'member' || doctor?.membershipPlanId === 'partner';
 
   const stats = {
     totalBookings: bookingStatistics?.total ?? bookings.length,
@@ -644,7 +644,7 @@ const DoctorDashboard = () => {
         )}
 
         {/* Stats Cards */}
-        {hasBasicBookingStats ? <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
+        {canViewBookingStatistics ? <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
           <Card>
             <CardContent className="pt-4">
               <div className="flex items-center justify-between">
@@ -727,7 +727,7 @@ const DoctorDashboard = () => {
                 <User className="w-4 h-4" />
                 Profile
               </TabsTrigger>
-              {hasBasicBookingStats && <TabsTrigger value="analytics" className="flex items-center gap-2">
+              {canViewBookingStatistics && <TabsTrigger value="analytics" className="flex items-center gap-2">
                 <TrendingUp className="w-4 h-4" />Analytics
               </TabsTrigger>}
             </TabsList>
@@ -839,15 +839,15 @@ const DoctorDashboard = () => {
 
             {/* Calendar Tab */}
             <TabsContent value="calendar">
-              {!hasBasicBookingStats && <Card className="mb-4 border-blue-200 bg-blue-50"><CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
-                <p className="text-sm text-blue-900">Free includes a basic calendar. Full availability management and calendar statistics are included with Member and Partner.</p>
+              {!canViewBookingStatistics && <Card className="mb-4 border-blue-200 bg-blue-50"><CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+                <p className="text-sm text-blue-900">Free (Basic) includes calendar and schedule management. Member and Partner add booking statistics and additional practice tools.</p>
                 <Button size="sm" onClick={() => navigate('/memberships')}>View plans</Button>
               </CardContent></Card>}
               <DoctorCalendar
                 doctorId={doctor.uid} 
                 consultationDuration={doctor.consultationDuration || 30}
-                canManageAvailability={hasBasicBookingStats}
-                canViewStatistics={hasBasicBookingStats}
+                canManageAvailability
+                canViewStatistics={canViewBookingStatistics}
               />
             </TabsContent>
 
@@ -995,7 +995,7 @@ const DoctorDashboard = () => {
             </TabsContent>
 
             {/* Analytics Tab */}
-            {hasBasicBookingStats && <TabsContent value="analytics">
+            {canViewBookingStatistics && <TabsContent value="analytics">
               {doctor.membershipPlanId === 'partner' && <Card className="mb-4 border-amber-200 bg-amber-50"><CardContent className="py-3 text-sm text-amber-900">Partner advanced statistics are coming soon. Basic booking statistics are available below.</CardContent></Card>}
               <div className="grid md:grid-cols-2 gap-6">
                 <Card>
