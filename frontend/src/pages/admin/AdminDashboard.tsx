@@ -426,6 +426,8 @@ const AdminDashboard = () => {
   const [selectedAmbassador, setSelectedAmbassador] = useState<AmbassadorProfile | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [generatedReferralCode, setGeneratedReferralCode] = useState('');
+  const [generatedReferralAmbassadorId, setGeneratedReferralAmbassadorId] = useState('');
+  const [referralEmailStatus, setReferralEmailStatus] = useState<{ sent: boolean; email?: string; error?: string } | null>(null);
   const [approvingAmbassadorId, setApprovingAmbassadorId] = useState<string | null>(null);
   const [interviewStatus, setInterviewStatus] = useState<'pending' | 'scheduled' | 'completed' | 'passed' | 'failed'>('pending');
   const [interviewNotes, setInterviewNotes] = useState('');
@@ -571,14 +573,26 @@ const AdminDashboard = () => {
       if (result.error) {
         throw new Error(result.error);
       }
-      return { referralCode: result.referralCode };
+      return {
+        ambassadorId,
+        referralCode: result.referralCode,
+        referralEmailSent: result.referralEmailSent,
+        referralEmail: result.referralEmail,
+        referralEmailError: result.referralEmailError,
+      };
     },
     onSuccess: (data) => {
       setGeneratedReferralCode(data.referralCode || '');
+      setGeneratedReferralAmbassadorId(data.ambassadorId);
+      setReferralEmailStatus(data.referralEmailSent
+        ? { sent: true, email: data.referralEmail || undefined }
+        : { sent: false, error: data.referralEmailError || 'The referral email could not be sent. Please try again.' });
       setShowReferralCodeDialog(true);
       toast({ 
         title: 'Success', 
-        description: `Ambassador approved! Referral code: ${data.referralCode}` 
+        description: data.referralEmailSent
+          ? `Ambassador approved and referral code emailed to ${data.referralEmail}.`
+          : `Ambassador approved and code created. Email delivery failed; you can retry from the dialog.`,
       });
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.dashboard] });
     },
@@ -588,6 +602,19 @@ const AdminDashboard = () => {
         description: error.message || 'Failed to approve ambassador.', 
         variant: 'destructive' 
       });
+    },
+  });
+
+  const referralEmailMutation = useMutation({
+    mutationFn: (ambassadorId: string) => adminService.sendAmbassadorReferralCode(ambassadorId),
+    onSuccess: (data) => {
+      setReferralEmailStatus({ sent: true, email: data.email });
+      toast({ title: 'Referral email sent', description: `Sent to ${data.email}.` });
+    },
+    onError: (error: any) => {
+      const message = error.message || 'The referral email could not be sent. Please try again.';
+      setReferralEmailStatus({ sent: false, error: message });
+      toast({ title: 'Email not sent', description: message, variant: 'destructive' });
     },
   });
 
@@ -2413,6 +2440,21 @@ const AdminDashboard = () => {
                 Approve Ambassador
               </Button>
             )}
+            {selectedAmbassador?.applicationStatus === 'approved' && selectedAmbassador?.referralCode && (
+              <Button
+                variant="outline"
+                className="w-full sm:w-auto"
+                onClick={() => referralEmailMutation.mutate(selectedAmbassador.uid)}
+                disabled={referralEmailMutation.isPending}
+              >
+                {referralEmailMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4 mr-2" />
+                )}
+                Email Referral Code
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setShowAmbassadorDetailsDialog(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
@@ -2584,7 +2626,7 @@ const AdminDashboard = () => {
               Ambassador Approved!
             </DialogTitle>
             <DialogDescription className="text-xs sm:text-sm">
-              The referral code has been generated. Copy it and send it to the ambassador.
+              The referral code is ready. Check the email status below, or resend it if needed.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 sm:space-y-4">
@@ -2596,13 +2638,32 @@ const AdminDashboard = () => {
               <Button className="flex-1" onClick={handleCopyReferralCode}>
                 <Copy className="w-4 h-4 mr-2" />Copy Code
               </Button>
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => referralEmailMutation.mutate(generatedReferralAmbassadorId)}
+                disabled={referralEmailMutation.isPending || !generatedReferralAmbassadorId}
+              >
+                {referralEmailMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4 mr-2" />
+                )}
+                {referralEmailStatus?.sent ? 'Send Again' : 'Retry Email'}
+              </Button>
               <Button variant="outline" className="flex-1" onClick={() => setShowReferralCodeDialog(false)}>
                 Close
               </Button>
             </div>
-            <p className="text-xs text-center text-gray-500">
-              An email with this referral code will be sent to the ambassador automatically.
-            </p>
+            {referralEmailStatus?.sent ? (
+              <p className="text-xs text-center text-green-700">
+                Referral email sent to {referralEmailStatus.email}.
+              </p>
+            ) : (
+              <p className="text-xs text-center text-red-700">
+                Email not sent: {referralEmailStatus?.error || 'Please try again.'}
+              </p>
+            )}
           </div>
         </DialogContent>
       </Dialog>

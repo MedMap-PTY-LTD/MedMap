@@ -23,6 +23,29 @@ const isFirebaseInitialized = () => {
   return !!(auth && db);
 };
 
+async function deliverAmbassadorReferralCodeEmail(ambassadorId: string): Promise<{ email: string }> {
+  if (!auth.currentUser) {
+    throw new Error('Your admin session has expired. Please sign in again.');
+  }
+
+  const token = await auth.currentUser.getIdToken();
+  const serviceUrl = (import.meta.env.VITE_BOOKING_SERVICE_URL || 'https://medmap-f4ob.onrender.com').replace(/\/$/, '');
+  const response = await fetch(
+    `${serviceUrl}/api/admin/ambassadors/${encodeURIComponent(ambassadorId)}/referral-code-email`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(result.error || 'The referral email could not be sent. Please try again.');
+  }
+
+  return { email: result.email };
+}
+
 // Helper function to generate referral code
 function generateReferralCode(firstName?: string, lastName?: string): string {
   if (firstName && firstName.length >= 2) {
@@ -330,7 +353,13 @@ export const adminService = {
   // Approve ambassador with referral code generation
   async approveAmbassador(ambassadorId: string) {
     if (!isFirebaseInitialized()) {
-      return { error: 'Firebase is not initialized.', referralCode: null };
+      return {
+        error: 'Firebase is not initialized.',
+        referralCode: null,
+        referralEmailSent: false,
+        referralEmail: null,
+        referralEmailError: null,
+      };
     }
 
     try {
@@ -339,7 +368,40 @@ export const adminService = {
       const ambassadorDoc = await getDoc(ambassadorRef);
       
       if (!ambassadorDoc.exists()) {
-        return { error: 'Ambassador not found', referralCode: null };
+        return {
+          error: 'Ambassador not found',
+          referralCode: null,
+          referralEmailSent: false,
+          referralEmail: null,
+          referralEmailError: null,
+        };
+      }
+
+      const ambassadorData = ambassadorDoc.data();
+      const existingReferralCode = typeof ambassadorData.referralCode === 'string'
+        ? ambassadorData.referralCode.trim()
+        : '';
+
+      // Keep the existing code if an already-approved ambassador is approved again.
+      if (ambassadorData.applicationStatus === 'approved' && existingReferralCode) {
+        try {
+          const delivery = await deliverAmbassadorReferralCodeEmail(ambassadorId);
+          return {
+            error: null,
+            referralCode: existingReferralCode,
+            referralEmailSent: true,
+            referralEmail: delivery.email,
+            referralEmailError: null,
+          };
+        } catch (emailError: any) {
+          return {
+            error: null,
+            referralCode: existingReferralCode,
+            referralEmailSent: false,
+            referralEmail: null,
+            referralEmailError: emailError.message || 'The referral email could not be sent. Please try again.',
+          };
+        }
       }
       
       // Get user data for generating personalized referral code
@@ -394,14 +456,36 @@ export const adminService = {
       
       // Log admin action
       await this.logAdminAction('approve_ambassador', ambassadorId, { referralCode });
+
+      let referralEmailSent = false;
+      let referralEmail: string | null = null;
+      let referralEmailError: string | null = null;
+      try {
+        const delivery = await deliverAmbassadorReferralCodeEmail(ambassadorId);
+        referralEmailSent = true;
+        referralEmail = delivery.email;
+      } catch (emailError: any) {
+        referralEmailError = emailError.message || 'The referral email could not be sent. Please try again.';
+        console.warn('Ambassador approved, but referral email delivery failed.');
+      }
       
       console.log(`✅ Ambassador ${ambassadorId} approved with referral code: ${referralCode}`);
       
-      return { error: null, referralCode };
+      return { error: null, referralCode, referralEmailSent, referralEmail, referralEmailError };
     } catch (error: any) {
       console.error('Error approving ambassador:', error);
-      return { error: error.message, referralCode: null };
+      return {
+        error: error.message,
+        referralCode: null,
+        referralEmailSent: false,
+        referralEmail: null,
+        referralEmailError: null,
+      };
     }
+  },
+
+  async sendAmbassadorReferralCode(ambassadorId: string) {
+    return deliverAmbassadorReferralCodeEmail(ambassadorId);
   },
   
   // Reject ambassador

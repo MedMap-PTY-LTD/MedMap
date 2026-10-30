@@ -95,12 +95,14 @@ import { createRefundsRouter } from './routes/refunds';
 import membershipsRouter from './routes/memberships';
 import accountCreditsRouter from './routes/accountCredits';
 import authRouter from './routes/auth';
+import ambassadorRouter from './routes/ambassadors';
 
 app.use(bookingsRouter);
 app.use(payfastITNRouter);
 app.use(membershipsRouter);
 app.use(accountCreditsRouter);
 app.use(authRouter);
+app.use(ambassadorRouter);
 
  //==================== SOCKET.IO SETUP ====================
 
