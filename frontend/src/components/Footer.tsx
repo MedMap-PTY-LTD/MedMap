@@ -141,6 +141,9 @@ const Footer = () => {
           <p className="px-4">
             Proudly South African. 🇿🇦 Healthcare for everyone, everywhere.
           </p>
+          <p className="mt-2 px-4">
+            Powered by <span className="font-medium text-slate-300">PSS</span>
+          </p>
         </div>
       </div>
     </footer>
