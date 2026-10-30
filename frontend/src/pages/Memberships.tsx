@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/hooks/useAuth';
+import { hasUserRole } from '@/lib/firebase';
 import { useToast } from '@/components/ui/use-toast';
 import {
   cancelPatientMembershipRenewal,
@@ -115,7 +116,7 @@ const PatientMemberships = () => {
       navigate('/signin');
       return;
     }
-    if (profile?.role && profile.role !== 'patient') {
+    if (profile && !hasUserRole(profile, 'patient')) {
       toast({
         title: 'Patient account required',
         description: 'These membership plans are for patients.',
@@ -203,7 +204,7 @@ const PatientMemberships = () => {
             </Card>
           )}
 
-          {user && profile?.role && profile.role !== 'patient' && (
+          {user && profile && !hasUserRole(profile, 'patient') && (
             <Card className="mb-6">
               <CardContent className="py-4 text-sm text-muted-foreground">
                 These plans are for patient accounts. Provider membership plans are managed separately.
@@ -211,7 +212,7 @@ const PatientMemberships = () => {
             </Card>
           )}
 
-          {user && profile?.role === 'patient' && (
+          {user && hasUserRole(profile, 'patient') && (
             <Card className="mb-8">
               <CardHeader>
                 <CardTitle className="flex flex-wrap items-center justify-between gap-3">
@@ -304,7 +305,7 @@ const PatientMemberships = () => {
                         className="w-full btn-medical-primary"
                         variant={isDowngrade ? 'outline' : 'default'}
                         onClick={() => isDowngrade ? void scheduleDowngrade(plan.id) : void subscribe(plan.id)}
-                        disabled={loading || !!processing || downgrading || (!!user && profile?.role !== 'patient')}
+                        disabled={loading || !!processing || downgrading || (!!user && !hasUserRole(profile, 'patient'))}
                       >
                         {processing === plan.id || (downgrading && isDowngrade) ? 'Updating plan…' : isUpgrade ? `Upgrade now · R${plan.price} today` : isDowngrade ? 'Downgrade at renewal' : user ? 'Subscribe with PayFast' : 'Sign in to subscribe'}
                       </Button>

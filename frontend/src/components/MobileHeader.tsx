@@ -16,6 +16,7 @@ import { User, Calendar, Settings, LogOut } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
+import { hasUserRole } from '@/lib/firebase';
 
 export function MobileHeader() {
   const { user, profile, signOut } = useAuth();
@@ -86,17 +87,24 @@ export function MobileHeader() {
                   <span>Profile Settings</span>
                 </DropdownMenuItem>
 
-                {profile?.role === 'patient' && (
+                {hasUserRole(profile, 'patient') && (
                   <>
-                    <DropdownMenuItem onClick={() => navigate('/dashboard')}>
+                    <DropdownMenuItem onClick={() => navigate(profile?.role === 'patient' ? '/dashboard' : '/patient')}>
                       <User className="mr-2 h-4 w-4" />
-                      <span>Dashboard</span>
+                      <span>{profile?.role === 'patient' ? 'Dashboard' : 'Patient Dashboard'}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => navigate('/bookings')}>
                       <Calendar className="mr-2 h-4 w-4" />
                       <span>Booking History</span>
                     </DropdownMenuItem>
                   </>
+                )}
+
+                {hasUserRole(profile, 'patient') && hasUserRole(profile, 'ambassador') && (
+                  <DropdownMenuItem onClick={() => navigate('/ambassador/portal')}>
+                    <User className="mr-2 h-4 w-4" />
+                    <span>Ambassador Dashboard</span>
+                  </DropdownMenuItem>
                 )}
                 
                 {profile?.role === 'doctor' && (

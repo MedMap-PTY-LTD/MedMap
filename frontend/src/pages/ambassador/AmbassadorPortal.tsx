@@ -45,6 +45,7 @@ import {
 } from 'lucide-react';
 import TrainingModule from './TrainingModule';
 import KnowledgeTest from './KnowledgeTest';
+import { hasUserRole } from '@/lib/firebase';
 
 // ==================== SIDEBAR COMPONENT ====================
 interface SidebarProps {
@@ -64,6 +65,7 @@ const Sidebar = ({
   activeTab, 
   onTabChange 
 }: SidebarProps) => {
+  const navigate = useNavigate();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const sidebarVisibilityClass = isOpen ? 'translate-x-0' : '-translate-x-full';
   const sidebarDesktopClass = 'lg:translate-x-0';
@@ -181,6 +183,20 @@ const Sidebar = ({
               <p className="text-xs text-purple-600 font-medium">Commission Rate</p>
               <p className="text-sm font-bold text-purple-700">10% of booking fee</p>
             </div>
+          )}
+
+          {hasUserRole(userProfile, 'patient') && (
+            <button
+              onClick={() => {
+                navigate('/patient');
+                onClose();
+              }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-blue-700 hover:bg-blue-50 transition-colors ${isCollapsed ? 'justify-center' : ''}`}
+              title={isCollapsed ? 'Patient Dashboard' : ''}
+            >
+              <Heart className="w-5 h-5" />
+              {!isCollapsed && <span className="text-sm font-medium">Patient Dashboard</span>}
+            </button>
           )}
           
           {/* Logout Button */}
@@ -754,6 +770,7 @@ const OnboardingPendingScreen = ({
   buttonAction,
   onHome,
   onLogout,
+  userProfile,
 }: any) => {
   return (
     <div className="min-h-screen bg-gray-50">
@@ -768,7 +785,7 @@ const OnboardingPendingScreen = ({
         isOpen={false}
         onClose={() => {}}
         onLogout={onLogout || (() => {})}
-        userProfile={{}}
+        userProfile={userProfile}
         activeTab="overview"
         onTabChange={() => {}}
       />
@@ -1182,6 +1199,7 @@ const AmbassadorPortal = () => {
         buttonAction={handleGoHome}
         onHome={handleGoHome}
         onLogout={handleLogout}
+        userProfile={profile}
       />
     );
   }
@@ -1278,6 +1296,7 @@ const AmbassadorPortal = () => {
         buttonAction={handleGoHome}
         onHome={handleGoHome}
         onLogout={handleLogout}
+        userProfile={profile}
       />
     );
   }

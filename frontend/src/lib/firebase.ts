@@ -94,6 +94,8 @@ export { auth, db, storage, app };
 
 // ==================== USER TYPES ====================
 
+export type UserRole = 'patient' | 'doctor' | 'ambassador' | 'admin';
+
 export interface UserProfile {
   uid: string;
   email: string;
@@ -102,13 +104,18 @@ export interface UserProfile {
   lastName: string;
   fullName: string;
   phone?: string;
-  role: 'patient' | 'doctor' | 'ambassador' | 'admin';
+  role: UserRole;
+  /** Additional roles for accounts that use more than one MedMap service. */
+  roles?: UserRole[];
   createdAt: Timestamp;
   updatedAt: Timestamp;
   lastLogin?: Timestamp;
   isActive: boolean;
   photoURL?: string;
 }
+
+export const hasUserRole = (profile: Pick<UserProfile, 'role' | 'roles'> | null | undefined, role: UserRole): boolean =>
+  profile?.role === role || Boolean(profile?.roles?.includes(role));
 
 export interface DoctorProfile extends UserProfile {
   role: 'doctor';
@@ -161,6 +168,20 @@ export interface PatientProfile extends UserProfile {
   chronicConditions?: string[];
   medications?: string[];
   bloodType?: string;
+}
+
+export interface PatientRegistrationData {
+  firstName?: string;
+  lastName?: string;
+  phone?: string | null;
+  idNumber?: string;
+  dateOfBirth?: string | null;
+  medicalAidProvider?: string | null;
+  medicalAidNumber?: string | null;
+  emergencyContact?: PatientProfile['emergencyContact'] | null;
+  allergies?: string[];
+  chronicConditions?: string[];
+  medications?: string[];
 }
 
 export interface AmbassadorProfile extends UserProfile {
@@ -337,6 +358,7 @@ export const authService = {
       await sendEmailVerification(user);
       console.log('✅ Verification email sent');
       
+      const role = profileData.role || 'patient';
       const userProfile = {
         uid: user.uid,
         email: user.email!,
@@ -344,7 +366,8 @@ export const authService = {
         firstName: profileData.firstName || '',
         lastName: profileData.lastName || '',
         fullName: `${profileData.firstName || ''} ${profileData.lastName || ''}`.trim(),
-        role: profileData.role || 'patient',
+        role,
+        roles: [role],
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         isActive: true,
@@ -356,7 +379,6 @@ export const authService = {
       await setDoc(doc(db, 'users', user.uid), userProfile);
       console.log('✅ User profile saved to users collection');
       
-      const role = profileData.role || 'patient';
       const baseProfile = {
         uid: user.uid,
         createdAt: serverTimestamp(),
@@ -439,6 +461,11 @@ export const authService = {
           const patientData = {
             ...baseProfile,
             role: 'patient',
+            email: user.email!,
+            firstName: profileData.firstName || '',
+            lastName: profileData.lastName || '',
+            fullName: `${profileData.firstName || ''} ${profileData.lastName || ''}`.trim(),
+            phone: profileData.phone || '',
             allergies: profileData.allergies || [],
             chronicConditions: profileData.chronicConditions || [],
             medications: profileData.medications || [],
@@ -522,6 +549,57 @@ export const authService = {
       }
       
       return { user: null, profile: null, error: errorMessage };
+    }
+  },
+
+  // Add a patient profile to an existing ambassador login without replacing its role.
+  addPatientProfile: async (patientData: PatientRegistrationData) => {
+    const user = auth.currentUser;
+    if (!user) return { error: 'Please sign in before adding a patient profile.' };
+    if (!user.emailVerified) return { error: 'Please verify your email before adding a patient profile.' };
+
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      const userSnapshot = await getDoc(userRef);
+      if (!userSnapshot.exists()) return { error: 'Your account profile could not be found.' };
+
+      const account = userSnapshot.data() as UserProfile;
+      if (!hasUserRole(account, 'ambassador')) {
+        return { error: 'Only an existing Ambassador account can add a patient profile here.' };
+      }
+
+      const patientRef = doc(db, 'patients', user.uid);
+      const patientSnapshot = await getDoc(patientRef);
+      if (patientSnapshot.exists()) return { error: 'This account already has a patient profile.' };
+
+      const roles = Array.from(new Set<UserRole>([account.role, ...(account.roles || []), 'patient']));
+      const batch = writeBatch(db);
+      batch.set(patientRef, {
+        uid: user.uid,
+        email: user.email || account.email,
+        role: 'patient',
+        firstName: patientData.firstName || account.firstName || '',
+        lastName: patientData.lastName || account.lastName || '',
+        fullName: `${patientData.firstName || account.firstName || ''} ${patientData.lastName || account.lastName || ''}`.trim(),
+        phone: patientData.phone || account.phone || '',
+        idNumber: patientData.idNumber || '',
+        dateOfBirth: patientData.dateOfBirth || '',
+        medicalAidProvider: patientData.medicalAidProvider || '',
+        medicalAidNumber: patientData.medicalAidNumber || '',
+        emergencyContact: patientData.emergencyContact || { name: '', relationship: '', phone: '' },
+        allergies: patientData.allergies || [],
+        chronicConditions: patientData.chronicConditions || [],
+        medications: patientData.medications || [],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      batch.update(userRef, { roles, updatedAt: serverTimestamp() });
+      await batch.commit();
+
+      return { error: null, profile: { ...account, roles } };
+    } catch (error: unknown) {
+      console.error('Error adding patient profile:', error);
+      return { error: error instanceof Error ? error.message : 'Could not add a patient profile. Please try again.' };
     }
   },
   
@@ -1092,7 +1170,7 @@ export const adminService = {
         stats: {
           totalUsers: users.length,
           totalDoctors: doctorsSnapshot.size,
-          totalPatients: users.filter((u: any) => u.role === 'patient').length,
+          totalPatients: users.filter((u: any) => u.role === 'patient' || u.roles?.includes('patient')).length,
           totalAmbassadors: users.filter((u: any) => u.role === 'ambassador').length,
           pendingDoctors: pendingDoctorsSnapshot.size,
           pendingAmbassadors: pendingAmbassadorsSnapshot.size,

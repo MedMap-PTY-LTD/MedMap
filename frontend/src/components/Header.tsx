@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Menu, X, User, LogOut, LayoutDashboard, Calendar, ChevronDown } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
+import { hasUserRole } from '@/lib/firebase';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -173,7 +174,15 @@ const Header = () => {
                         <span>Dashboard</span>
                       </Link>
                     </DropdownMenuItem>
-                    {profile.role === 'patient' && (
+                    {hasUserRole(profile, 'patient') && profile.role !== 'patient' && (
+                      <DropdownMenuItem asChild className="rounded-md">
+                        <Link to="/patient" className="flex items-center gap-2 py-2">
+                          <User className="h-4 w-4 text-slate-500" />
+                          <span>Patient Dashboard</span>
+                        </Link>
+                      </DropdownMenuItem>
+                    )}
+                    {hasUserRole(profile, 'patient') && (
                       <DropdownMenuItem asChild className="rounded-md">
                         <Link to="/bookings" className="flex items-center gap-2 py-2">
                           <Calendar className="h-4 w-4 text-slate-500" />

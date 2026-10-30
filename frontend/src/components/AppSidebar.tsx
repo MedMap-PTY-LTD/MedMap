@@ -29,6 +29,7 @@ import {
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import { useAuth } from '@/hooks/useAuth';
+import { hasUserRole, type UserRole } from '@/lib/firebase';
 
 // Main navigation items
 const mainNavItems = [
@@ -42,7 +43,7 @@ const mainNavItems = [
 
 // User-specific navigation items
 const userNavItems = [
-  { title: "Dashboard", url: "/dashboard", icon: User, roles: ['patient'] },
+  { title: "Patient Dashboard", url: "/patient", icon: User, roles: ['patient'] },
   { title: "Bookings", url: "/bookings", icon: Calendar, roles: ['patient'] },
   { title: "Doctor Dashboard", url: "/doctor", icon: Stethoscope, roles: ['doctor'] },
   { title: "Admin Dashboard", url: "/admin", icon: Settings, roles: ['admin'] },
@@ -71,7 +72,7 @@ export function AppSidebar() {
 
   // Filter user nav items based on role
   const availableUserNavItems = userNavItems.filter(item => 
-    !item.roles || (profile?.role && item.roles.includes(profile.role))
+    !item.roles || item.roles.some(role => hasUserRole(profile, role as UserRole))
   );
 
   return (

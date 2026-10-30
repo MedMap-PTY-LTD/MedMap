@@ -1,5 +1,5 @@
 // pages/patient/PatientSignUp.tsx
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
+import { hasUserRole } from '@/lib/firebase';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -51,8 +52,11 @@ interface SignUpFormData {
 
 const PatientSignUp = () => {
   const navigate = useNavigate();
-  const { signUp } = useAuth();
+  const { signUp, addPatientProfile, user, profile, loading: authLoading } = useAuth();
   const { toast } = useToast();
+  const alreadyHasPatientAccess = Boolean(user && hasUserRole(profile, 'patient'));
+  const isAddingPatientProfile = Boolean(user && !alreadyHasPatientAccess && hasUserRole(profile, 'ambassador'));
+  const awaitingAccountProfile = Boolean(user && !profile && authLoading);
   
   const [formData, setFormData] = useState<SignUpFormData>({
     firstName: '',
@@ -78,6 +82,21 @@ const PatientSignUp = () => {
   const [showMedicalAid, setShowMedicalAid] = useState(false);
   const [showMedicalInfo, setShowMedicalInfo] = useState(false);
 
+  useEffect(() => {
+    if (alreadyHasPatientAccess) navigate('/patient', { replace: true });
+  }, [alreadyHasPatientAccess, navigate]);
+
+  useEffect(() => {
+    if (!isAddingPatientProfile || !profile) return;
+    setFormData(prev => ({
+      ...prev,
+      firstName: prev.firstName || profile.firstName || '',
+      lastName: prev.lastName || profile.lastName || '',
+      email: user?.email || profile.email || '',
+      phone: prev.phone || profile.phone || '',
+    }));
+  }, [isAddingPatientProfile, profile, user?.email]);
+
   // ==================== MUTATION: Sign Up ====================
   const signUpMutation = useMutation({
     mutationFn: async (data: SignUpFormData) => {
@@ -101,12 +120,10 @@ const PatientSignUp = () => {
         ? data.currentMedications.split(',').map(item => item.trim()).filter(item => item)
         : [];
 
-      // Sign up with Firebase
-      const result = await signUp(data.email, data.password, {
+      const patientProfileData = {
         firstName: data.firstName,
         lastName: data.lastName,
         phone: data.phone || null,
-        role: 'patient',
         idNumber: data.idNumber,
         dateOfBirth: data.dateOfBirth || null,
         medicalAidProvider: data.hasMedicalAid ? data.medicalAidProvider : null,
@@ -115,15 +132,29 @@ const PatientSignUp = () => {
         allergies: allergiesList,
         chronicConditions: conditionsList,
         medications: medicationsList,
-      });
+      };
+
+      // Keep the existing login and Ambassador role when adding patient access.
+      const result = isAddingPatientProfile
+        ? await addPatientProfile(patientProfileData)
+        : await signUp(data.email, data.password, { ...patientProfileData, role: 'patient' });
 
       if (result.error) {
         throw new Error(result.error);
       }
 
-      return result;
+      return { result, isAddingPatientProfile };
     },
-    onSuccess: () => {
+    onSuccess: ({ isAddingPatientProfile: addedToExistingAccount }) => {
+      if (addedToExistingAccount) {
+        toast({
+          title: 'Patient profile added',
+          description: 'Your Ambassador account now also has patient access.',
+        });
+        navigate('/patient');
+        return;
+      }
+
       toast({
         title: 'Account Created!',
         description: "We've sent a verification link to your email. Please verify your email before signing in.",
@@ -156,9 +187,19 @@ const PatientSignUp = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isAddingPatientProfile && !user?.emailVerified) {
+      toast({
+        title: 'Verify your email first',
+        description: 'Please verify your Ambassador account email before adding patient access.',
+        variant: 'destructive',
+      });
+      if (user?.email) navigate(`/verify-email?email=${encodeURIComponent(user.email)}`);
+      return;
+    }
     
     // Validation
-    if (!formData.email || !formData.password) {
+    if (!formData.email || (!isAddingPatientProfile && !formData.password)) {
       toast({ 
         title: 'Missing details', 
         description: 'Please enter email and password.', 
@@ -167,7 +208,7 @@ const PatientSignUp = () => {
       return;
     }
 
-    if (formData.password !== formData.confirmPassword) {
+    if (!isAddingPatientProfile && formData.password !== formData.confirmPassword) {
       toast({ 
         title: 'Password mismatch', 
         description: 'Passwords do not match.', 
@@ -176,7 +217,7 @@ const PatientSignUp = () => {
       return;
     }
 
-    if (formData.password.length < 8) {
+    if (!isAddingPatientProfile && formData.password.length < 8) {
       toast({ 
         title: 'Password too short', 
         description: 'Password must be at least 8 characters long.', 
@@ -243,6 +284,14 @@ const PatientSignUp = () => {
     signUpMutation.mutate(formData);
   };
 
+  if (awaitingAccountProfile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-gray-600">
+        <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading your account...
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-cyan-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-2xl mx-auto">
@@ -252,10 +301,14 @@ const PatientSignUp = () => {
           </Link>
           <div className="flex items-center justify-center gap-2 mb-2">
             <Heart className="w-7 h-7 text-blue-600" />
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Create Patient Account</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
+              {isAddingPatientProfile ? 'Add Patient Profile' : 'Create Patient Account'}
+            </h1>
           </div>
           <p className="text-sm sm:text-base text-gray-600">
-            Sign up to book appointments and manage your healthcare
+            {isAddingPatientProfile
+              ? 'Add patient access to your existing MedMap account'
+              : 'Sign up to book appointments and manage your healthcare'}
           </p>
         </div>
 
@@ -263,7 +316,9 @@ const PatientSignUp = () => {
           <CardHeader className="space-y-1 px-4 sm:px-6">
             <CardTitle className="text-xl sm:text-2xl">Patient Registration</CardTitle>
             <CardDescription className="text-sm">
-              Fill out the form below to create your account. All medical information is kept confidential.
+              {isAddingPatientProfile
+                ? 'Complete your patient profile. Your Ambassador account and access will remain active.'
+                : 'Fill out the form below to create your account. All medical information is kept confidential.'}
             </CardDescription>
           </CardHeader>
           
@@ -318,6 +373,7 @@ const PatientSignUp = () => {
                     value={formData.email}
                     onChange={handleChange}
                     placeholder="you@example.com"
+                    readOnly={isAddingPatientProfile}
                     disabled={signUpMutation.isPending}
                     className="h-10 sm:h-11"
                     required
@@ -583,8 +639,8 @@ const PatientSignUp = () => {
                 )}
               </div>
 
-              {/* Account Security */}
-              <div className="space-y-4">
+              {/* New patients create credentials; existing Ambassadors keep their current login. */}
+              {!isAddingPatientProfile && <div className="space-y-4">
                 <h3 className="text-base sm:text-lg font-semibold text-gray-900 flex items-center gap-2">
                   <Lock className="w-4 h-4 sm:w-5 sm:h-5 text-orange-600" />
                   Account Security
@@ -623,7 +679,7 @@ const PatientSignUp = () => {
                     />
                   </div>
                 </div>
-              </div>
+              </div>}
 
               {/* Terms Agreement */}
               <div className="space-y-3 pt-2">
@@ -665,19 +721,26 @@ const PatientSignUp = () => {
                     Creating account...
                   </div>
                 ) : (
-                  'Create account'
+                  isAddingPatientProfile ? 'Add patient profile' : 'Create account'
                 )}
               </Button>
               
-              <p className="text-xs sm:text-sm text-center text-gray-600">
-                Already have an account?{' '}
-                <Link to="/signin" className="text-blue-600 hover:text-blue-700 font-medium">
-                  Sign in
-                </Link>
-              </p>
+              {!isAddingPatientProfile && (
+                <p className="text-xs sm:text-sm text-center text-gray-600">
+                  Already have an account?{' '}
+                  <Link to="/signin?redirect=/signup/patient" className="text-blue-600 hover:text-blue-700 font-medium">
+                    Sign in
+                  </Link>
+                  {' '}to add patient access to it.
+                </p>
+              )}
               
               <p className="text-xs text-center text-gray-500">
-                By signing up, you'll receive a verification email. Please verify your email to activate your account.
+                {isAddingPatientProfile
+                  ? user?.emailVerified
+                    ? 'Your current login will be used for both your Ambassador and patient profiles.'
+                    : 'Verify your account email before adding patient access.'
+                  : "By signing up, you'll receive a verification email. Please verify your email to activate your account."}
               </p>
             </CardFooter>
           </form>

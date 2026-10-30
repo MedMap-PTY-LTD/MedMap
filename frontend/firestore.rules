@@ -11,6 +11,13 @@ service cloud.firestore {
         (request.auth.uid == userId || 
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
     }
+
+    // Patient details are stored separately so patient access can be added to an existing account.
+    match /patients/{patientId} {
+      allow read, write: if request.auth != null &&
+        (request.auth.uid == patientId ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
     
     // Doctors collection
     match /doctors/{doctorId} {

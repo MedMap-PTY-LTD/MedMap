@@ -155,10 +155,13 @@ export class PatientMembershipService {
     const userRef = db.collection('users').doc(userId);
     const membershipRef = db.collection('patientMemberships').doc(userId);
     const userSnap = await userRef.get();
-    if (!userSnap.exists || (userSnap.data()?.role && userSnap.data()?.role !== 'patient')) {
+    const userData = userSnap.data();
+    const hasPatientRole = userData?.role === 'patient' ||
+      (Array.isArray(userData?.roles) && userData.roles.includes('patient'));
+    if (!userSnap.exists || (userData?.role && !hasPatientRole)) {
       throw new Error('A patient account is required to purchase this membership');
     }
-    const user = userSnap.data()!;
+    const user = userData!;
     const email = typeof user.email === 'string' ? user.email : '';
     if (!email) throw new Error('A valid account email is required for PayFast recurring billing');
 

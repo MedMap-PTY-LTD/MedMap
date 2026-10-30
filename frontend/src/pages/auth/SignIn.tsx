@@ -1,6 +1,6 @@
 // pages/auth/SignIn.tsx
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -27,6 +27,7 @@ const getDashboardPath = (role: string): string => {
 
 const SignIn = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { signIn } = useAuth();
   const { toast } = useToast();
   
@@ -76,7 +77,11 @@ const SignIn = () => {
         });
         
         // Redirect based on role
-        const redirectPath = getDashboardPath(profile?.role || 'patient');
+        const requestedRedirect = searchParams.get('redirect');
+        const safeRedirect = requestedRedirect?.startsWith('/') && !requestedRedirect.startsWith('//')
+          ? requestedRedirect
+          : null;
+        const redirectPath = safeRedirect || getDashboardPath(profile?.role || 'patient');
         console.log(`Redirecting ${profile?.role} to: ${redirectPath}`);
         navigate(redirectPath);
       }

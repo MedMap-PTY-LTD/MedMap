@@ -45,6 +45,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { format } from 'date-fns';
 import { doc, getDoc, getDocs, updateDoc, collection, query, where, orderBy, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { hasUserRole } from '@/lib/firebase';
 import { serverTimestamp } from 'firebase/firestore';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -154,10 +155,10 @@ const fetchPatientProfile = async (uid: string): Promise<PatientProfile | null> 
     return {
       uid: uid,
       email: userData.email || '',
-      firstName: userData.firstName || '',
-      lastName: userData.lastName || '',
-      fullName: userData.fullName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
-      phone: userData.phone || '',
+      firstName: patientData.firstName || userData.firstName || '',
+      lastName: patientData.lastName || userData.lastName || '',
+      fullName: patientData.fullName || userData.fullName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
+      phone: patientData.phone || userData.phone || '',
       idNumber: patientData.idNumber || '',
       dateOfBirth: patientData.dateOfBirth || '',
       medicalAidProvider: patientData.medicalAidProvider || '',
@@ -468,10 +469,10 @@ const PatientDashboard = () => {
   });
 
   useEffect(() => {
-    if (!user?.uid || profile?.role !== 'patient') return;
+    if (!user?.uid || !hasUserRole(profile, 'patient')) return;
     joinPatientRoom(user.uid);
     return () => leavePatientRoom(user.uid);
-  }, [user?.uid, profile?.role, joinPatientRoom, leavePatientRoom]);
+  }, [user?.uid, profile, joinPatientRoom, leavePatientRoom]);
   
   const [activeTab, setActiveTab] = useState('overview');
   const [appointmentFilter, setAppointmentFilter] = useState<'all' | 'upcoming' | 'past'>('all');
@@ -500,7 +501,7 @@ const PatientDashboard = () => {
   } = useQuery({
     queryKey: [QUERY_KEYS.patientProfile, user?.uid],
     queryFn: () => fetchPatientProfile(user!.uid),
-    enabled: !!user && profile?.role === 'patient',
+    enabled: !!user && hasUserRole(profile, 'patient'),
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: true,
@@ -515,7 +516,7 @@ const PatientDashboard = () => {
   } = useQuery({
     queryKey: [QUERY_KEYS.patientBookings, user?.uid],
     queryFn: () => fetchPatientBookings(user!.uid),
-    enabled: !!user && profile?.role === 'patient',
+    enabled: !!user && hasUserRole(profile, 'patient'),
     staleTime: 2 * 60 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
@@ -541,7 +542,7 @@ const PatientDashboard = () => {
   } = useQuery({
     queryKey: [QUERY_KEYS.membership, user?.uid],
     queryFn: () => fetchMembership(user!.uid),
-    enabled: !!user && profile?.role === 'patient',
+    enabled: !!user && hasUserRole(profile, 'patient'),
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
   });
@@ -549,7 +550,7 @@ const PatientDashboard = () => {
   const { data: accountCredit } = useQuery({
     queryKey: [QUERY_KEYS.accountCredit, user?.uid],
     queryFn: () => getAccountCreditSummary().catch(() => ({ balanceCents: 0, currency: 'ZAR' as const, transactions: [] })),
-    enabled: !!user && profile?.role === 'patient',
+    enabled: !!user && hasUserRole(profile, 'patient'),
     staleTime: 60 * 1000,
     refetchOnWindowFocus: true,
   });
@@ -598,17 +599,12 @@ const PatientDashboard = () => {
 
       const { editedProfile, allergiesList, conditionsList, medicationsList } = data;
       
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, {
-        firstName: editedProfile.firstName,
-        lastName: editedProfile.lastName,
-        fullName: `${editedProfile.firstName || ''} ${editedProfile.lastName || ''}`.trim(),
-        phone: editedProfile.phone || '',
-        updatedAt: serverTimestamp(),
-      });
-      
       const patientRef = doc(db, 'patients', user.uid);
       await updateDoc(patientRef, {
+        firstName: editedProfile.firstName || '',
+        lastName: editedProfile.lastName || '',
+        fullName: `${editedProfile.firstName || ''} ${editedProfile.lastName || ''}`.trim(),
+        phone: editedProfile.phone || '',
         dateOfBirth: editedProfile.dateOfBirth || '',
         medicalAidProvider: editedProfile.medicalAidProvider || '',
         medicalAidNumber: editedProfile.medicalAidNumber || '',
@@ -739,7 +735,7 @@ const PatientDashboard = () => {
 
   // Redirect if not patient
   useEffect(() => {
-    if (profile && profile.role !== 'patient') {
+    if (profile && !hasUserRole(profile, 'patient')) {
       navigate('/dashboard');
     }
   }, [profile, navigate]);

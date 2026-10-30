@@ -564,7 +564,7 @@ export const adminService = {
         stats: {
           totalUsers: users.length,
           totalDoctors: doctorsSnapshot.size,
-          totalPatients: users.filter(u => u.role === 'patient').length,
+          totalPatients: users.filter(u => u.role === 'patient' || u.roles?.includes('patient')).length,
           totalAmbassadors: users.filter(u => u.role === 'ambassador').length,
           pendingDoctors: pendingDoctorsSnapshot.size,
           pendingAmbassadors: pendingAmbassadorsSnapshot.size,

@@ -1,7 +1,7 @@
 // hooks/useAuth.tsx
 import { createContext, useContext, useEffect, useState } from 'react';
 import { User } from 'firebase/auth';
-import { auth, authService, UserProfile, db } from '../lib/firebase';
+import { auth, authService, PatientRegistrationData, UserProfile, db } from '../lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { useToast } from './use-toast';
 
@@ -11,6 +11,7 @@ interface AuthContextType {
   loading: boolean;
   isLoading: boolean;
   signUp: (email: string, password: string, profileData: any) => Promise<any>;
+  addPatientProfile: (profileData: PatientRegistrationData) => Promise<{ error: string | null; profile?: UserProfile }>;
   signIn: (email: string, password: string) => Promise<any>;
   signOut: () => Promise<void>;
   updateProfile: (data: Partial<UserProfile>) => Promise<any>;
@@ -42,12 +43,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (firebaseUser) {
+        setLoading(true);
+        setProfile(null);
         profileUnsubscribe = onSnapshot(
           doc(db, 'users', firebaseUser.uid),
           (snapshot) => {
             if (snapshot.exists()) {
               setProfile(snapshot.data() as UserProfile);
             } else {
+              setProfile(null);
               console.log('User authenticated but no profile found in Firestore');
             }
             setLoading(false);
@@ -85,6 +89,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
     }
     
+    return result;
+  };
+
+  const addPatientProfile = async (profileData: PatientRegistrationData) => {
+    const result = await authService.addPatientProfile(profileData);
+    if (!result.error && result.profile) setProfile(result.profile);
     return result;
   };
 
@@ -139,6 +149,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loading,
     isLoading: loading,
     signUp,
+    addPatientProfile,
     signIn,
     signOut,
     updateProfile,

@@ -6,6 +6,9 @@ import { AccountCreditService } from '../services/AccountCreditService';
 
 const router = Router();
 
+const isPatientAccount = (profile: any) =>
+  profile?.role === 'patient' || (Array.isArray(profile?.roles) && profile.roles.includes('patient'));
+
 router.get('/api/account-credit', requireAuth, async (req, res) => {
   try {
     const user = (req as AuthedRequest).authUser!;
@@ -26,7 +29,7 @@ router.get('/api/admin/account-credits/lookup', async (req, res) => {
 
     const authUser = await getAuth(app).getUserByEmail(email);
     const profile = await db.collection('users').doc(authUser.uid).get();
-    if (!profile.exists || profile.data()?.role !== 'patient') {
+    if (!profile.exists || !isPatientAccount(profile.data())) {
       return res.status(404).json({ error: 'No patient account found for that email' });
     }
 
@@ -71,7 +74,7 @@ router.post('/api/admin/account-credits/:userId', async (req, res) => {
     const source = typeof req.body?.source === 'string' ? req.body.source.trim().slice(0, 200) : '';
 
     const patient = await db.collection('users').doc(req.params.userId).get();
-    if (!patient.exists || patient.data()?.role !== 'patient') {
+    if (!patient.exists || !isPatientAccount(patient.data())) {
       return res.status(404).json({ error: 'Patient account not found' });
     }
 
