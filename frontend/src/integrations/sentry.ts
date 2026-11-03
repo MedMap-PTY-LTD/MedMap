@@ -40,6 +40,17 @@ if (SENTRY_DSN) {
         return null;
       }
 
+      // Keep expected connectivity noise filtered while retaining lazy-chunk
+      // failures, which can otherwise strand users on the app error screen.
+      const exceptionMessage = event.exception?.values
+        ?.map(exception => exception.value || '')
+        .join('\n') || event.message || event.logentry?.message || '';
+      const isNetworkFailure = /(?:NetworkError|Failed to fetch)/i.test(exceptionMessage);
+      const isModuleLoadFailure = /(?:dynamically imported module|vite:preloadError|chunk|preload)/i.test(exceptionMessage);
+      if (isNetworkFailure && !isModuleLoadFailure) {
+        return null;
+      }
+
       // Remove sensitive data from event
       if (event.request?.headers) {
         delete event.request.headers['Authorization'];
@@ -59,11 +70,7 @@ if (SENTRY_DSN) {
     ignoreErrors: [
       /ResizeObserver loop/,
       /Script error/,
-      /NetworkError/,
-      /Failed to fetch/,
       /AbortError/,
-      /Loading chunk \d+ failed/,
-      /ChunkLoadError/,
     ],
 
     // Enable Replay for better debugging (optional - requires extra setup)

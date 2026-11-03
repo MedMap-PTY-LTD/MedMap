@@ -1,6 +1,7 @@
 // frontend/src/components/ErrorBoundary.tsx
 import React from 'react';
 import { captureSentryError } from '@/integrations/sentry';
+import { VITE_PRELOAD_RETRY_KEY } from '@/utils/preloadRecovery';
 import { Button } from '@/components/ui/button';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 
@@ -44,6 +45,11 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   handleReset = () => {
     this.setState({ hasError: false, error: null });
+    try {
+      window.sessionStorage.removeItem(VITE_PRELOAD_RETRY_KEY);
+    } catch {
+      // Session storage may be disabled; a manual reload still works.
+    }
     window.location.reload();
   };
 

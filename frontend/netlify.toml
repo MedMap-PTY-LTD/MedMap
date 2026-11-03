@@ -6,6 +6,18 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
+# Keep the SPA entry point fresh across deployments, while allowing Vite's
+# content-hashed assets to be cached safely.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
 # Redirect API calls to functions
 [[redirects]]
   from = "/api/*"

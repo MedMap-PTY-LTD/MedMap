@@ -203,6 +203,7 @@ export class BookingService {
           ? assessedFeeCents
           : Math.min(availableCreditCents, Math.max(0, assessedFeeCents - 500));
         const payableFeeCents = assessedFeeCents - creditAppliedCents;
+        const feeCoveredAtBooking = payableFeeCents === 0;
         if (creditAppliedCents > 0) {
           if (debitLedgerSnap.exists) throw new Error('Account credit was already applied to this booking');
           const creditNow = new Date().toISOString();
@@ -233,12 +234,17 @@ export class BookingService {
           membershipPlanId,
           membershipFreeBooking,
           membershipFreeBookingPeriodStart,
-          status: 'pending',
-          paymentStatus: 'unpaid',
+          // Commit a fully covered booking as confirmed in the same
+          // transaction as the credit debit. This avoids leaving an unpaid
+          // booking behind if a follow-up update fails after consuming credit.
+          status: feeCoveredAtBooking ? 'confirmed' : 'pending',
+          paymentStatus: feeCoveredAtBooking ? 'waived' : 'unpaid',
+          ...(feeCoveredAtBooking ? { paidAt: now, confirmedAt: now } : {}),
           rescheduleCount: 0,
           maxReschedules: MAX_RESCHEDULES,
           rescheduleHistory: [],
-          ...(creditAppliedCents > 0 && payableFeeCents === 0 ? { paymentMethod: 'account_credit' as const } : {}),
+          ...(feeCoveredAtBooking && creditAppliedCents > 0 ? { paymentMethod: 'account_credit' as const } : {}),
+          ...(feeCoveredAtBooking && creditAppliedCents === 0 ? { paymentMethod: 'membership' as const } : {}),
           ...(creditAppliedCents > 0 && payableFeeCents > 0 ? { paymentMethod: 'mixed' as const } : {}),
           createdAt: now,
           updatedAt: now,
@@ -299,15 +305,8 @@ export class BookingService {
     }
 
     if (bookingFee === 0) {
-      const now = new Date().toISOString();
-      await db.collection('bookings').doc(bookingId).update({
-        status: 'confirmed',
-        paymentStatus: 'waived',
-        paymentMethod: created.bookingFeeCredit > 0 ? 'account_credit' : 'membership',
-        paidAt: now,
-        confirmedAt: now,
-        updatedAt: now,
-      });
+      // No balance is due. The booking was already confirmed atomically with
+      // its account-credit debit or membership coverage above.
       return { bookingId, bookingFee, bookingFeeCredit: created.bookingFeeCredit, bookingFeeTotal: created.bookingFeeTotal, membershipPlanId: created.membershipPlanId, freeBookingsRemaining: created.freeBookingsRemaining, error: null };
     }
 
@@ -751,7 +750,19 @@ export class BookingService {
         const bookingSnap = await transaction.get(bookingRef);
         if (!bookingSnap.exists) throw new Error('Booking not found');
         const booking = bookingSnap.data() as Booking;
-        if ((status === 'confirmed' || status === 'completed') && !['paid', 'waived'].includes(booking.paymentStatus)) {
+        const bookingFeeCents = Math.max(0, Math.round(Number(booking.bookingFee || 0) * 100));
+        const bookingFeeCreditCents = Math.max(0, Math.floor(Number(booking.bookingFeeCreditCents) || 0));
+        const coveredWithoutPayFast = bookingFeeCents === 0 && (
+          bookingFeeCreditCents > 0 ||
+          booking.paymentMethod === 'membership' ||
+          booking.membershipFreeBooking === true ||
+          booking.membershipPlanId === 'premium_plus'
+        );
+        const paymentSatisfied = ['paid', 'waived'].includes(booking.paymentStatus) || coveredWithoutPayFast;
+        if ((status === 'confirmed' || status === 'completed') && !paymentSatisfied) {
+          if (bookingFeeCents > 0 && bookingFeeCreditCents > 0) {
+            throw new Error(`Account credit was applied, but the remaining R${(bookingFeeCents / 100).toFixed(2)} booking fee must be paid before approval`);
+          }
           throw new Error('Booking fee must be paid first');
         }
         if (booking.status === 'cancelled') throw new Error('Cancelled bookings cannot be reopened');
@@ -761,6 +772,15 @@ export class BookingService {
 
         const now = new Date().toISOString();
         const updateData: Record<string, any> = { status, updatedAt: now };
+        // Repair older zero-balance account-credit or membership bookings
+        // that were created before the covered status was written atomically.
+        if (coveredWithoutPayFast && !['paid', 'waived'].includes(booking.paymentStatus)) {
+          updateData.paymentStatus = 'waived';
+          updateData.paidAt = booking.paidAt || now;
+          if (!booking.paymentMethod) {
+            updateData.paymentMethod = bookingFeeCreditCents > 0 ? 'account_credit' : 'membership';
+          }
+        }
         if (status === 'confirmed') updateData.confirmedAt = now;
         if (status === 'completed') updateData.completedAt = now;
 
