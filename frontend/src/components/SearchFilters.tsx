@@ -109,7 +109,7 @@ const SearchFilters = ({ onSearch, initialFilters }: SearchFiltersProps) => {
           <div className="relative">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Doctor or clinic name"
+              placeholder="Doctor, clinic, or practice address"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 h-12 bg-background/50 border-primary/20 focus:border-primary"
@@ -125,7 +125,7 @@ const SearchFilters = ({ onSearch, initialFilters }: SearchFiltersProps) => {
               </SelectTrigger>
               <SelectContent>
                 {provinces.map((province) => (
-                  <SelectItem key={province} value={province.toLowerCase()}>
+                  <SelectItem key={province} value={province}>
                     {province}
                   </SelectItem>
                 ))}
@@ -142,7 +142,7 @@ const SearchFilters = ({ onSearch, initialFilters }: SearchFiltersProps) => {
               </SelectTrigger>
               <SelectContent>
                 {specialties.map((spec) => (
-                  <SelectItem key={spec} value={spec.toLowerCase()}>
+                  <SelectItem key={spec} value={spec}>
                     {spec}
                   </SelectItem>
                 ))}
@@ -159,7 +159,7 @@ const SearchFilters = ({ onSearch, initialFilters }: SearchFiltersProps) => {
               </SelectTrigger>
               <SelectContent>
                 {priceRanges.map((range) => (
-                  <SelectItem key={range} value={range.toLowerCase()}>
+                  <SelectItem key={range} value={range}>
                     {range}
                   </SelectItem>
                 ))}
@@ -172,7 +172,7 @@ const SearchFilters = ({ onSearch, initialFilters }: SearchFiltersProps) => {
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="flex-1">
             <Input
-              placeholder="Zip code (optional)"
+              placeholder="Postal code (optional)"
               value={zipCode}
               onChange={(e) => setZipCode(e.target.value)}
               className="h-12 bg-background/50 border-primary/20 focus:border-primary"

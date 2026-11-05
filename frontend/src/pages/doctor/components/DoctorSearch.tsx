@@ -21,7 +21,7 @@ import {
   startAfter,
   DocumentData
 } from 'firebase/firestore';
-import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { hasPaidMembershipAccess } from '@/lib/membershipAccess';
 import { isPublicDoctorProfile } from '@/lib/doctorVisibility';
 import DriveThereLink from '@/components/maps/DriveThereLink';
@@ -68,6 +68,7 @@ interface DoctorFilters {
   province: string;
   specialty: string;
   priceRange: string;
+  zipCode: string;
 }
 
 // ==================== QUERY KEYS ====================
@@ -79,6 +80,18 @@ const QUERY_KEYS = {
   provinces: 'provinces',
 };
 
+const SOUTH_AFRICAN_PROVINCES = [
+  'Eastern Cape',
+  'Free State',
+  'Gauteng',
+  'KwaZulu-Natal',
+  'Limpopo',
+  'Mpumalanga',
+  'North West',
+  'Northern Cape',
+  'Western Cape',
+];
+
 // ==================== DATA FETCHING FUNCTIONS ====================
 
 // ✅ SIMPLIFIED FETCH - No nested queries
@@ -87,11 +100,13 @@ const fetchDoctors = async ({
   province = '', 
   specialty = '',
   search = '',
+  zipCode = '',
 }: {
   pageParam?: any;
   province?: string;
   specialty?: string;
   search?: string;
+  zipCode?: string;
 }): Promise<{ doctors: Doctor[]; nextCursor: any; hasMore: boolean }> => {
   try {
     // ✅ REMOVED orderBy to avoid index requirement
@@ -169,18 +184,27 @@ const fetchDoctors = async ({
         ['member', 'partner'].includes(data.membershipPlanId);
       const membershipPlanId = membershipIsCurrent ? data.membershipPlanId : 'free';
       const isPaidMember = membershipPlanId !== 'free';
+      const practiceAddress = isPaidMember ? String(data.practiceAddress || '') : '';
+      const postalCode = isPaidMember ? String(data.postalCode || data.postal_code || '') : '';
 
       // Check if search term matches
       if (search) {
-        const searchLower = search.toLowerCase();
+        const searchLower = search.trim().toLocaleLowerCase();
         const matchesSearch = 
-          fullName.toLowerCase().includes(searchLower) ||
-          specialization.toLowerCase().includes(searchLower) ||
-          practiceName.toLowerCase().includes(searchLower) ||
-          city.toLowerCase().includes(searchLower) ||
-          province.toLowerCase().includes(searchLower);
+          fullName.toLocaleLowerCase().includes(searchLower) ||
+          specialization.toLocaleLowerCase().includes(searchLower) ||
+          practiceName.toLocaleLowerCase().includes(searchLower) ||
+          practiceAddress.toLocaleLowerCase().includes(searchLower) ||
+          postalCode.toLocaleLowerCase().includes(searchLower) ||
+          city.toLocaleLowerCase().includes(searchLower) ||
+          province.toLocaleLowerCase().includes(searchLower);
         
         if (!matchesSearch) continue;
+      }
+
+      if (zipCode) {
+        const zipTerm = zipCode.trim().toLocaleLowerCase();
+        if (!`${practiceAddress} ${postalCode}`.toLocaleLowerCase().includes(zipTerm)) continue;
       }
 
       doctors.push({
@@ -193,7 +217,7 @@ const fetchDoctors = async ({
         specialization: specialization,
         practiceName: isPaidMember ? practiceName : '',
         searchPracticeName: practiceName,
-        practiceAddress: isPaidMember ? data.practiceAddress || '' : '',
+        practiceAddress,
         practiceLatitude: isPaidMember && data.practiceAddress && hasValidCoordinates(data.practiceLatitude, data.practiceLongitude)
           ? data.practiceLatitude
           : undefined,
@@ -270,7 +294,7 @@ const fetchProvinces = async (): Promise<string[]> => {
       where('verificationStatus', '==', 'verified')
     );
     const snapshot = await getDocs(q);
-    const provinces = new Set<string>();
+    const provinces = new Set<string>(SOUTH_AFRICAN_PROVINCES);
     snapshot.docs.forEach(doc => {
       const data = doc.data();
       if (isPublicDoctorProfile(data) && data.province) {
@@ -295,13 +319,18 @@ const PRICE_RANGES = [
   { label: 'R1200+', min: 1200, max: 999999 }
 ];
 
+const normalizeFilterOption = (value: string, options: string[], fallback: string): string => {
+  const normalizedValue = value.trim().toLocaleLowerCase();
+  if (!normalizedValue || normalizedValue === fallback.toLocaleLowerCase()) return fallback;
+  return options.find(option => option.toLocaleLowerCase() === normalizedValue) || value.trim();
+};
+
 // ==================== MAIN COMPONENT ====================
 
 const DoctorSearch = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const queryClient = useQueryClient();
 
   // Filter states from URL params
   const [filters, setFilters] = useState<DoctorFilters>({
@@ -309,7 +338,23 @@ const DoctorSearch = () => {
     province: searchParams.get('location') || 'All Provinces',
     specialty: searchParams.get('specialty') || 'All Specialties',
     priceRange: searchParams.get('price') || 'All Prices',
+    zipCode: searchParams.get('zip') || '',
   });
+  const [debouncedSearch, setDebouncedSearch] = useState(() =>
+    (searchParams.get('search') || '').trim().toLocaleLowerCase(),
+  );
+  const [debouncedZipCode, setDebouncedZipCode] = useState(() =>
+    (searchParams.get('zip') || '').trim().toLocaleLowerCase(),
+  );
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedSearch(filters.search.trim().toLocaleLowerCase());
+      setDebouncedZipCode(filters.zipCode.trim().toLocaleLowerCase());
+    }, 300);
+
+    return () => window.clearTimeout(timeout);
+  }, [filters.search, filters.zipCode]);
 
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
@@ -339,6 +384,16 @@ const DoctorSearch = () => {
     gcTime: 10 * 60 * 1000,
   });
 
+  const selectedProvince = normalizeFilterOption(filters.province, provinces, 'All Provinces');
+  const selectedSpecialty = normalizeFilterOption(filters.specialty, specialties, 'All Specialties');
+  const selectedPriceRange = normalizeFilterOption(
+    filters.priceRange,
+    PRICE_RANGES.map(range => range.label),
+    'All Prices',
+  );
+  const normalizedZipCode = debouncedZipCode;
+  const shouldSearchAllPages = debouncedSearch.length >= 2 || normalizedZipCode.length >= 2;
+
   // Infinite query for doctors
   const {
     data,
@@ -352,14 +407,17 @@ const DoctorSearch = () => {
   } = useInfiniteQuery({
     queryKey: [
       QUERY_KEYS.doctors,
-      filters.province,
-      filters.specialty,
+      selectedProvince,
+      selectedSpecialty,
+      debouncedSearch,
+      normalizedZipCode,
     ],
     queryFn: ({ pageParam }) => fetchDoctors({ 
       pageParam, 
-      province: filters.province,
-      specialty: filters.specialty,
-      search: filters.search,
+      province: selectedProvince,
+      specialty: selectedSpecialty,
+      search: debouncedSearch,
+      zipCode: normalizedZipCode,
     }),
     initialPageParam: null,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.nextCursor : undefined,
@@ -386,20 +444,27 @@ const DoctorSearch = () => {
     let filtered = allDoctors;
 
     // Search filter (client-side)
-    if (filters.search) {
-      const term = filters.search.toLowerCase();
+    if (debouncedSearch) {
+      const term = debouncedSearch;
       filtered = filtered.filter(doctor =>
         doctor.fullName.toLowerCase().includes(term) ||
         doctor.specialization.toLowerCase().includes(term) ||
         doctor.searchPracticeName.toLowerCase().includes(term) ||
+        doctor.practiceAddress.toLowerCase().includes(term) ||
         doctor.city.toLowerCase().includes(term) ||
         doctor.province.toLowerCase().includes(term)
       );
     }
 
+    if (normalizedZipCode) {
+      filtered = filtered.filter(doctor =>
+        doctor.practiceAddress.toLocaleLowerCase().includes(normalizedZipCode),
+      );
+    }
+
     // Price range filter
-    if (filters.priceRange && filters.priceRange !== 'All Prices') {
-      const range = PRICE_RANGES.find(r => r.label === filters.priceRange);
+    if (selectedPriceRange !== 'All Prices') {
+      const range = PRICE_RANGES.find(r => r.label === selectedPriceRange);
       if (range) {
         filtered = filtered.filter(doctor => 
           doctor.consultationFee >= range.min && doctor.consultationFee <= range.max
@@ -408,7 +473,7 @@ const DoctorSearch = () => {
     }
 
     return filtered;
-  }, [allDoctors, filters.search, filters.priceRange]);
+  }, [allDoctors, debouncedSearch, normalizedZipCode, selectedPriceRange]);
 
   const mappedDoctors = useMemo(
     () => filteredDoctors.filter(doctor =>
@@ -430,11 +495,15 @@ const DoctorSearch = () => {
   );
   const selectedMapDoctor = mappedDoctors.find(doctor => doctor.id === selectedMapLocationId) || null;
 
+  useEffect(() => {
+    if (!shouldSearchAllPages || !hasNextPage || isLoadingDoctors || isFetchingNextPage) return;
+    void fetchNextPage();
+  }, [shouldSearchAllPages, data?.pages.length, hasNextPage, isLoadingDoctors, isFetchingNextPage, fetchNextPage]);
+
   // ==================== HANDLERS ====================
 
   const handleFilterChange = (key: keyof DoctorFilters, value: string) => {
     setFilters(prev => ({ ...prev, [key]: value }));
-    queryClient.resetQueries({ queryKey: [QUERY_KEYS.doctors] });
   };
 
   const clearFilters = () => {
@@ -443,8 +512,8 @@ const DoctorSearch = () => {
       province: 'All Provinces',
       specialty: 'All Specialties',
       priceRange: 'All Prices',
+      zipCode: '',
     });
-    queryClient.resetQueries({ queryKey: [QUERY_KEYS.doctors] });
   };
 
   const handleBookAppointment = (doctorId: string) => {
@@ -553,12 +622,12 @@ const DoctorSearch = () => {
         {/* Search & Filters */}
         <Card className="medical-hero-card mb-8">
           <CardContent className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
               {/* Search Term */}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search doctor, specialty, or location..."
+                  placeholder="Search doctor, specialty, practice, or address..."
                   value={filters.search}
                   onChange={(e) => handleFilterChange('search', e.target.value)}
                   className="pl-10 h-12"
@@ -573,9 +642,18 @@ const DoctorSearch = () => {
                 )}
               </div>
 
+              {/* Practice postal code */}
+              <Input
+                aria-label="Practice postal code"
+                placeholder="Postal code (optional)"
+                value={filters.zipCode}
+                onChange={(e) => handleFilterChange('zipCode', e.target.value)}
+                className="h-12"
+              />
+
               {/* Province */}
               <Select 
-                value={filters.province} 
+                value={selectedProvince}
                 onValueChange={(v) => handleFilterChange('province', v)}
                 disabled={isLoadingProvinces}
               >
@@ -594,7 +672,7 @@ const DoctorSearch = () => {
 
               {/* Specialty */}
               <Select 
-                value={filters.specialty} 
+                value={selectedSpecialty}
                 onValueChange={(v) => handleFilterChange('specialty', v)}
                 disabled={isLoadingSpecialties}
               >
@@ -613,7 +691,7 @@ const DoctorSearch = () => {
 
               {/* Price Range */}
               <Select 
-                value={filters.priceRange} 
+                value={selectedPriceRange}
                 onValueChange={(v) => handleFilterChange('priceRange', v)}
               >
                 <SelectTrigger className="h-12">
@@ -683,7 +761,14 @@ const DoctorSearch = () => {
 
         {/* Results */}
         <div className="grid gap-6">
-          {filteredDoctors.length === 0 ? (
+          {filteredDoctors.length === 0 && shouldSearchAllPages && hasNextPage ? (
+            <Card className="medical-card">
+              <CardContent className="flex items-center justify-center gap-3 p-12 text-center text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span>Searching all matching providers…</span>
+              </CardContent>
+            </Card>
+          ) : filteredDoctors.length === 0 ? (
             <Card className="medical-card">
               <CardContent className="p-12 text-center">
                 <Stethoscope className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
