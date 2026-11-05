@@ -1,6 +1,6 @@
 // pages/doctor/components/DoctorSearch.tsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Search, MapPin, Stethoscope, Filter, Calendar, Clock, Star, Shield, Loader2, X } from 'lucide-react';
+import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo } from 'react';
+import { Search, MapPin, Stethoscope, Filter, Calendar, Clock, Star, Shield, Loader2, X, Map as MapIcon, List } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import RealtimeStatusBar from '@/components/RealtimeStatusBar';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '@/lib/firebase';
 import { 
   collection, 
@@ -24,6 +24,10 @@ import {
 import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { hasPaidMembershipAccess } from '@/lib/membershipAccess';
 import { isPublicDoctorProfile } from '@/lib/doctorVisibility';
+import DriveThereLink from '@/components/maps/DriveThereLink';
+import { hasValidCoordinates } from '@/lib/practiceMaps';
+
+const PracticeMap = lazy(() => import('@/components/maps/PracticeMap'));
 
 // ==================== TYPES ====================
 
@@ -38,6 +42,8 @@ interface Doctor {
   practiceName: string;
   searchPracticeName: string;
   practiceAddress: string;
+  practiceLatitude?: number;
+  practiceLongitude?: number;
   city: string;
   province: string;
   consultationFee: number;
@@ -188,6 +194,12 @@ const fetchDoctors = async ({
         practiceName: isPaidMember ? practiceName : '',
         searchPracticeName: practiceName,
         practiceAddress: isPaidMember ? data.practiceAddress || '' : '',
+        practiceLatitude: isPaidMember && data.practiceAddress && hasValidCoordinates(data.practiceLatitude, data.practiceLongitude)
+          ? data.practiceLatitude
+          : undefined,
+        practiceLongitude: isPaidMember && data.practiceAddress && hasValidCoordinates(data.practiceLatitude, data.practiceLongitude)
+          ? data.practiceLongitude
+          : undefined,
         city: city,
         province: province,
         consultationFee: data.consultationFee || 0,
@@ -300,6 +312,8 @@ const DoctorSearch = () => {
   });
 
   const [showFilters, setShowFilters] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+  const [selectedMapLocationId, setSelectedMapLocationId] = useState<string | null>(null);
 
   // ==================== QUERIES ====================
 
@@ -395,6 +409,26 @@ const DoctorSearch = () => {
 
     return filtered;
   }, [allDoctors, filters.search, filters.priceRange]);
+
+  const mappedDoctors = useMemo(
+    () => filteredDoctors.filter(doctor =>
+      doctor.isPaidMember &&
+      Boolean(doctor.practiceAddress) &&
+      hasValidCoordinates(doctor.practiceLatitude, doctor.practiceLongitude),
+    ),
+    [filteredDoctors],
+  );
+  const mapLocations = useMemo(
+    () => mappedDoctors.map(doctor => ({
+      id: doctor.id,
+      name: `Dr. ${doctor.fullName}`,
+      subtitle: [doctor.city, doctor.province].filter(Boolean).join(', '),
+      latitude: doctor.practiceLatitude!,
+      longitude: doctor.practiceLongitude!,
+    })),
+    [mappedDoctors],
+  );
+  const selectedMapDoctor = mappedDoctors.find(doctor => doctor.id === selectedMapLocationId) || null;
 
   // ==================== HANDLERS ====================
 
@@ -598,9 +632,31 @@ const DoctorSearch = () => {
 
             <div className="flex items-center justify-between flex-wrap gap-4">
               <p className="text-sm text-muted-foreground">
-                {filteredDoctors.length} doctor{filteredDoctors.length !== 1 ? 's' : ''} found
+                {filteredDoctors.length} doctor{filteredDoctors.length !== 1 ? 's' : ''} shown
               </p>
               <div className="flex gap-2">
+                <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1" role="group" aria-label="Search result view">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={viewMode === 'list' ? 'default' : 'ghost'}
+                    onClick={() => setViewMode('list')}
+                    aria-pressed={viewMode === 'list'}
+                    className="h-9"
+                  >
+                    <List className="mr-2 h-4 w-4" />List
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={viewMode === 'map' ? 'default' : 'ghost'}
+                    onClick={() => setViewMode('map')}
+                    aria-pressed={viewMode === 'map'}
+                    className="h-9"
+                  >
+                    <MapIcon className="mr-2 h-4 w-4" />Map
+                  </Button>
+                </div>
                 <Button
                   variant="outline"
                   onClick={clearFilters}
@@ -638,6 +694,64 @@ const DoctorSearch = () => {
                 </Button>
               </CardContent>
             </Card>
+          ) : viewMode === 'map' ? (
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+              <Suspense fallback={<div className="h-[440px] animate-pulse rounded-2xl bg-slate-100 sm:h-[560px]" />}>
+                <PracticeMap
+                  locations={mapLocations}
+                  selectedLocationId={selectedMapLocationId}
+                  onSelectLocation={setSelectedMapLocationId}
+                  className="h-[440px] sm:h-[560px]"
+                />
+              </Suspense>
+              <Card className="overflow-hidden border-slate-200">
+                <CardContent className="p-0">
+                  <div className="border-b border-slate-100 px-4 py-3">
+                    <p className="font-semibold text-slate-900">Practice locations</p>
+                    <p className="text-xs text-slate-500">{mappedDoctors.length} pinned of {filteredDoctors.length} shown</p>
+                  </div>
+                  {mappedDoctors.length === 0 ? (
+                    <div className="p-5 text-sm text-slate-600">
+                      No verified practice pins are available for these results yet. Providers can set a pin from their dashboard.
+                    </div>
+                  ) : (
+                    <div className="max-h-[350px] divide-y divide-slate-100 overflow-y-auto xl:max-h-[420px]">
+                      {mappedDoctors.map(doctor => (
+                        <button
+                          key={doctor.id}
+                          type="button"
+                          onClick={() => setSelectedMapLocationId(doctor.id)}
+                          className={`block w-full px-4 py-3 text-left transition-colors hover:bg-slate-50 ${selectedMapLocationId === doctor.id ? 'bg-blue-50' : ''}`}
+                          aria-pressed={selectedMapLocationId === doctor.id}
+                        >
+                          <span className="block font-medium text-slate-900">Dr. {doctor.fullName}</span>
+                          <span className="mt-0.5 block text-sm text-slate-600">{doctor.specialization}</span>
+                          <span className="mt-1 block text-xs text-slate-500">{[doctor.city, doctor.province].filter(Boolean).join(', ')}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {selectedMapDoctor && (
+                    <div className="space-y-3 border-t border-slate-100 p-4">
+                      <p className="line-clamp-2 text-xs text-slate-600">{selectedMapDoctor.practiceAddress}</p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button asChild size="sm" className="bg-blue-600 hover:bg-blue-700">
+                          <Link to={`/doctor/${selectedMapDoctor.id}`}>View profile</Link>
+                        </Button>
+                        <DriveThereLink
+                          address={selectedMapDoctor.practiceAddress}
+                          city={selectedMapDoctor.city}
+                          province={selectedMapDoctor.province}
+                          latitude={selectedMapDoctor.practiceLatitude}
+                          longitude={selectedMapDoctor.practiceLongitude}
+                          className="h-9 px-3"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           ) : (
             filteredDoctors.map((doctor) => (
               <Card key={doctor.id} className="medical-card hover:scale-[1.02] transition-all duration-300">
@@ -741,6 +855,15 @@ const DoctorSearch = () => {
                         >
                           View Profile
                         </Button>
+                        {doctor.isPaidMember && doctor.practiceAddress && (
+                          <DriveThereLink
+                            address={doctor.practiceAddress}
+                            city={doctor.city}
+                            province={doctor.province}
+                            latitude={doctor.practiceLatitude}
+                            longitude={doctor.practiceLongitude}
+                          />
+                        )}
                       </div>
                     </div>
                   </div>

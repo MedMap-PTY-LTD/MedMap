@@ -123,6 +123,8 @@ export interface DoctorProfile extends UserProfile {
   hpcsaNumber?: string;
   practiceName?: string;
   practiceAddress?: string;
+  practiceLatitude?: number;
+  practiceLongitude?: number;
   consultationFee?: number;
   consultationDuration?: number;
   verificationStatus: 'pending' | 'verified' | 'rejected';

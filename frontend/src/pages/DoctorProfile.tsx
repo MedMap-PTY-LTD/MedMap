@@ -1,5 +1,5 @@
 // pages/DoctorProfile.tsx
-import React, { useState, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { db } from '@/lib/firebase';
@@ -11,6 +11,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { hasPaidMembershipAccess } from '@/lib/membershipAccess';
+import DriveThereLink from '@/components/maps/DriveThereLink';
+import { hasValidCoordinates } from '@/lib/practiceMaps';
 import {
   Star,
   MapPin,
@@ -33,6 +35,8 @@ import {
   ExternalLink
 } from 'lucide-react';
 
+const PracticeMap = lazy(() => import('@/components/maps/PracticeMap'));
+
 interface DoctorProfileData {
   uid: string;
   firstName: string;
@@ -44,6 +48,8 @@ interface DoctorProfileData {
   hpcsaNumber?: string;
   practiceName?: string;
   practiceAddress?: string;
+  practiceLatitude?: number;
+  practiceLongitude?: number;
   practicePhone?: string;
   practiceEmail?: string;
   consultationFee?: number;
@@ -81,6 +87,16 @@ const DoctorProfile = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isBooked, setIsBooked] = useState(false);
+  const practiceMapLocations = useMemo(() => {
+    if (!doctor || !hasValidCoordinates(doctor.practiceLatitude, doctor.practiceLongitude)) return [];
+    return [{
+      id: doctor.uid,
+      name: doctor.practiceName || `Dr. ${doctor.fullName}`,
+      subtitle: doctor.location,
+      latitude: doctor.practiceLatitude,
+      longitude: doctor.practiceLongitude,
+    }];
+  }, [doctor]);
 
   useEffect(() => {
     if (doctorId) {
@@ -126,6 +142,12 @@ const DoctorProfile = () => {
         hpcsaNumber: doctorData.hpcsaNumber || '',
         practiceName: isPaidMember ? doctorData.practiceName || '' : '',
         practiceAddress: isPaidMember ? doctorData.practiceAddress || '' : '',
+        practiceLatitude: isPaidMember && doctorData.practiceAddress && hasValidCoordinates(doctorData.practiceLatitude, doctorData.practiceLongitude)
+          ? doctorData.practiceLatitude
+          : undefined,
+        practiceLongitude: isPaidMember && doctorData.practiceAddress && hasValidCoordinates(doctorData.practiceLatitude, doctorData.practiceLongitude)
+          ? doctorData.practiceLongitude
+          : undefined,
         practicePhone: isPaidMember ? doctorData.practicePhone || '' : '',
         practiceEmail: isPaidMember ? doctorData.practiceEmail || '' : '',
         location: [doctorData.city, doctorData.province].filter(Boolean).join(', '),
@@ -406,6 +428,26 @@ const DoctorProfile = () => {
                     </div>
                   </div>
                 )}
+
+                {doctor.practiceAddress && (
+                  <DriveThereLink
+                    address={doctor.practiceAddress}
+                    city={doctor.location?.split(',')[0]?.trim()}
+                    province={doctor.location?.split(',')[1]?.trim()}
+                    latitude={doctor.practiceLatitude}
+                    longitude={doctor.practiceLongitude}
+                    className="w-full"
+                  />
+                )}
+
+                {practiceMapLocations.length > 0 && (
+                    <Suspense fallback={<div className="h-[220px] animate-pulse rounded-2xl bg-slate-100" />}>
+                      <PracticeMap
+                        locations={practiceMapLocations}
+                        className="h-[220px]"
+                      />
+                    </Suspense>
+                  )}
 
                 {doctor.phone && (
                   <div className="flex items-center gap-3">

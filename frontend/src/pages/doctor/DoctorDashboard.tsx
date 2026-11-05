@@ -1,5 +1,5 @@
 // pages/doctor/DoctorDashboard.tsx
-import React, { useState, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -18,6 +18,7 @@ import {
   User,
   Building2,
   Stethoscope,
+  MapPin,
   Save,
   X,
   RefreshCw,
@@ -37,6 +38,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DoctorCalendar } from './DoctorCalendar';
 import { getDoctorBookingStatistics } from '@/client/payfastClient';
 import { hasPaidMembershipAccess } from '@/lib/membershipAccess';
+import { hasValidCoordinates } from '@/lib/practiceMaps';
 import {
   Tooltip as RechartsTooltip,
   Legend,
@@ -45,6 +47,8 @@ import {
   Pie,
   Cell
 } from 'recharts';
+
+const PracticeMap = lazy(() => import('@/components/maps/PracticeMap'));
 
 interface DoctorProfile {
   uid: string;
@@ -55,6 +59,8 @@ interface DoctorProfile {
   phone: string;
   practiceName: string;
   practiceAddress: string;
+  practiceLatitude?: number | null;
+  practiceLongitude?: number | null;
   practicePhone: string;
   practiceEmail: string;
   specialization: string;
@@ -134,6 +140,12 @@ const fetchDoctorProfile = async (uid: string): Promise<DoctorProfile | null> =>
       phone: userData.phone || doctorData.phone || '',
       practiceName: doctorData.practiceName || '',
       practiceAddress: doctorData.practiceAddress || '',
+      practiceLatitude: hasValidCoordinates(doctorData.practiceLatitude, doctorData.practiceLongitude)
+        ? doctorData.practiceLatitude
+        : null,
+      practiceLongitude: hasValidCoordinates(doctorData.practiceLatitude, doctorData.practiceLongitude)
+        ? doctorData.practiceLongitude
+        : null,
       practicePhone: doctorData.practicePhone || '',
       practiceEmail: doctorData.practiceEmail || '',
       specialization: doctorData.specialization || '',
@@ -352,6 +364,12 @@ const DoctorDashboard = () => {
       const doctorUpdateData = {
         practiceName: formData.practiceName,
         practiceAddress: formData.practiceAddress,
+        practiceLatitude: hasValidCoordinates(formData.practiceLatitude, formData.practiceLongitude)
+          ? formData.practiceLatitude
+          : null,
+        practiceLongitude: hasValidCoordinates(formData.practiceLatitude, formData.practiceLongitude)
+          ? formData.practiceLongitude
+          : null,
         practicePhone: formData.practicePhone,
         practiceEmail: formData.practiceEmail,
         specialization: formData.specialization,
@@ -1141,6 +1159,44 @@ const DoctorDashboard = () => {
                       value={editForm.practiceAddress || ''}
                       onChange={(e) => setEditForm({...editForm, practiceAddress: e.target.value})}
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <Label>Practice map pin</Label>
+                        <p className="text-xs text-gray-500">Click the practice entrance on the map or drag the pin into place.</p>
+                      </div>
+                      {hasValidCoordinates(editForm.practiceLatitude, editForm.practiceLongitude) && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEditForm({ ...editForm, practiceLatitude: null, practiceLongitude: null })}
+                        >
+                          Clear pin
+                        </Button>
+                      )}
+                    </div>
+                    <Suspense fallback={<div className="h-[240px] animate-pulse rounded-2xl bg-slate-100" />}>
+                      <PracticeMap
+                        pickLocation={hasValidCoordinates(editForm.practiceLatitude, editForm.practiceLongitude)
+                          ? { latitude: editForm.practiceLatitude, longitude: editForm.practiceLongitude }
+                          : null}
+                        onPickLocation={({ latitude, longitude }) => setEditForm((current: any) => ({
+                          ...current,
+                          practiceLatitude: latitude,
+                          practiceLongitude: longitude,
+                        }))}
+                        className="h-[240px]"
+                        initialZoom={5}
+                      />
+                    </Suspense>
+                    {hasValidCoordinates(editForm.practiceLatitude, editForm.practiceLongitude) && (
+                      <p className="flex items-center gap-1 text-xs text-gray-500">
+                        <MapPin className="h-3 w-3" />
+                        {Number(editForm.practiceLatitude).toFixed(5)}, {Number(editForm.practiceLongitude).toFixed(5)}
+                      </p>
+                    )}
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">

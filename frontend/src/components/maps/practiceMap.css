@@ -1,0 +1,35 @@
+.practice-map-marker {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 3px solid #ffffff;
+  border-radius: 9999px;
+  background: #0f766e;
+  box-shadow: 0 2px 8px rgb(15 23 42 / 35%);
+  cursor: pointer;
+}
+
+.practice-map-marker::after {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: #ffffff;
+  content: '';
+}
+
+.practice-map-marker:hover,
+.practice-map-marker:focus-visible {
+  background: #0e7490;
+  outline: 3px solid rgb(14 116 144 / 28%);
+  outline-offset: 2px;
+}
+
+.practice-map-marker.is-selected {
+  background: #2563eb;
+  box-shadow: 0 0 0 5px rgb(37 99 235 / 20%), 0 2px 8px rgb(15 23 42 / 35%);
+}
+
+.practice-map .maplibregl-ctrl-attrib {
+  font-size: 10px;
+}
