@@ -343,24 +343,28 @@ export function useBookingSocket(events?: BookingEvents) {
   }, [isConnected]);
 
   // Set availability for a doctor on a specific date
-  const setAvailability = useCallback((data: { 
+  const setAvailability = useCallback(async (data: {
     doctorId: string; 
     date: string; 
     slots: BookingSlot[] 
   }): Promise<{ success: boolean; error?: string }> => {
-    return new Promise((resolve) => {
-      if (!socket.current || !isConnected) {
-        resolve({ success: false, error: 'Not connected to booking service' });
-        return;
-      }
-      
-      console.log('📝 Setting availability:', { doctorId: data.doctorId, date: data.date, slots: data.slots.length });
-      socket.current.emit('set:availability', data, (response: any) => {
+    const currentSocket = socket.current;
+    if (!currentSocket.connected && !(await waitForSocketConnection(currentSocket))) {
+      return { success: false, error: 'Booking service is unavailable. Please try saving again.' };
+    }
+
+    console.log('📝 Setting availability:', { doctorId: data.doctorId, date: data.date, slots: data.slots.length });
+    return new Promise(resolve => {
+      currentSocket.timeout(30_000).emit('set:availability', data, (error: Error | null, response: any) => {
+        if (error) {
+          resolve({ success: false, error: 'Booking service did not respond. Please try saving again.' });
+          return;
+        }
         console.log('📝 Set availability response:', response);
-        resolve(response);
+        resolve(response || { success: false, error: 'Booking service returned an empty response.' });
       });
     });
-  }, [isConnected]);
+  }, []);
 
   // ==================== PING / HEALTH CHECK ====================
 

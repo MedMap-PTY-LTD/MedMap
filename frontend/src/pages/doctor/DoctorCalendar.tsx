@@ -30,6 +30,34 @@ import { format, startOfWeek, addDays, isSameDay, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Booking, BookingSlot } from '@/lib/firebase';
 
+const createDefaultAvailability = (
+  date: string,
+  doctorId: string,
+  duration: number,
+): BookingSlot[] => {
+  const slots: BookingSlot[] = [];
+  const openingMinutes = 8 * 60;
+  const closingMinutes = 17 * 60;
+
+  for (let startMinutes = openingMinutes; startMinutes < closingMinutes; startMinutes += 30) {
+    const endMinutes = startMinutes + duration;
+    if (endMinutes > closingMinutes) continue;
+
+    const toTime = (minutes: number) =>
+      `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+
+    slots.push({
+      date,
+      startTime: toTime(startMinutes),
+      endTime: toTime(endMinutes),
+      isAvailable: true,
+      doctorId,
+    });
+  }
+
+  return slots;
+};
+
 interface DoctorCalendarProps {
   doctorId: string;
   consultationDuration?: number;
@@ -103,6 +131,7 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
   const [showBookingDetails, setShowBookingDetails] = useState(false);
   const [showAvailabilityDialog, setShowAvailabilityDialog] = useState(false);
   const [editingAvailability, setEditingAvailability] = useState<BookingSlot[]>([]);
+  const [savingAvailability, setSavingAvailability] = useState(false);
   
   // Refresh functions
   const refreshSlots = useCallback(async () => {
@@ -269,8 +298,9 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
   };
 
   const handleSaveAvailability = async () => {
-    if (!selectedDate) return;
+    if (!selectedDate || savingAvailability) return;
     
+    setSavingAvailability(true);
     try {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
       const response = await setAvailability({
@@ -299,6 +329,8 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
         description: error.message || 'Failed to update availability.',
         variant: 'destructive',
       });
+    } finally {
+      setSavingAvailability(false);
     }
   };
 
@@ -398,7 +430,11 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
             size="sm" 
             className="mt-2"
             onClick={() => {
-              setEditingAvailability(slots);
+              setEditingAvailability(createDefaultAvailability(
+                dateStr,
+                doctorId,
+                consultationDuration,
+              ));
               setShowAvailabilityDialog(true);
             }}
           >
@@ -722,7 +758,11 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-gray-600">
-              Toggle slots to mark them as available or unavailable.
+              {editingAvailability.length > 0
+                ? isConnected
+                  ? 'Toggle slots to mark them as available or unavailable.'
+                  : 'The booking service is disconnected. You can update these hours; saving will wait for reconnection.'
+                : 'No time slots could be loaded. Check your connection and try again.'}
             </p>
             <div className="space-y-2 max-h-[400px] overflow-y-auto">
               {editingAvailability.map((slot, index) => (
@@ -751,9 +791,12 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
             <Button 
               className="bg-blue-600 hover:bg-blue-700"
               onClick={handleSaveAvailability}
+              disabled={savingAvailability || editingAvailability.length === 0}
             >
-              <Save className="w-4 h-4 mr-2" />
-              Save Availability
+              {savingAvailability
+                ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                : <Save className="w-4 h-4 mr-2" />}
+              {savingAvailability ? 'Saving…' : 'Save Availability'}
             </Button>
           </DialogFooter>
         </DialogContent>
