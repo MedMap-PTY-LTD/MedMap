@@ -81,6 +81,7 @@ router.post('/api/bookings/create-with-payment', async (req, res) => {
       bookingFeeTotal: result.bookingFeeTotal,
       membershipPlanId: result.membershipPlanId,
       freeBookingsRemaining: result.freeBookingsRemaining,
+      paymentExpiresAt: result.paymentExpiresAt,
       checkout: result.checkout,
     });
   } catch (error: any) {
@@ -96,7 +97,7 @@ router.post('/api/bookings/:bookingId/payfast-checkout', async (req, res) => {
     if (!booking) return res.status(404).json({ error: 'Booking not found' });
     if (booking.patientId !== user.uid && !user.admin) return res.status(403).json({ error: 'Forbidden' });
     const checkout = await PaymentService.createPaymentIntent(booking.id);
-    res.json({ bookingId: booking.id, checkout });
+    res.json({ bookingId: booking.id, paymentExpiresAt: booking.paymentExpiresAt, checkout });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }
@@ -241,7 +242,8 @@ router.post('/api/bookings/:bookingId/cancel', async (req, res) => {
     if (![booking.patientId, booking.doctorId].includes(user.uid) && !user.admin) return res.status(403).json({ error: 'Forbidden' });
     const result = await BookingService.cancelBooking(
       req.params.bookingId,
-      req.body.reason
+      req.body.reason,
+      user.admin ? 'admin' : (user.uid === booking.doctorId ? 'doctor' : 'patient'),
     );
     res.json(result);
   } catch (error: any) {
@@ -257,10 +259,14 @@ router.patch('/api/bookings/:bookingId/status', async (req, res) => {
     const user = (req as AuthedRequest).authUser!;
     if (!booking) return res.status(404).json({ error: 'Booking not found' });
     if (booking.doctorId !== user.uid && !user.admin) return res.status(403).json({ error: 'Forbidden' });
+    if (req.body.status === 'confirmed') {
+      return res.status(400).json({ error: 'Bookings are confirmed automatically once payment succeeds' });
+    }
     const result = await BookingService.updateBookingStatus(
       req.params.bookingId,
       req.body.status,
-      req.body.reason
+      req.body.reason,
+      user.admin ? 'admin' : 'doctor',
     );
     res.json(result);
   } catch (error: any) {

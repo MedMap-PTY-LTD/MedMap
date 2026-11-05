@@ -466,6 +466,9 @@ const PatientDashboard = () => {
   const { joinPatientRoom, leavePatientRoom } = useBookingSocket({
     onBookingCancelled: handleBookingCancelled,
     onBookingUpdated: handleBookingUpdated,
+    onBookingNotification: () => {
+      void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.accountCredit, user?.uid] });
+    },
   });
 
   useEffect(() => {

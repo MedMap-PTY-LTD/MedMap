@@ -237,7 +237,17 @@ const DoctorDashboard = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { updateBookingStatus, joinDoctorRoom, leaveDoctorRoom, isConnected } = useBookingSocket();
+  const { joinDoctorRoom, leaveDoctorRoom, isConnected } = useBookingSocket({
+    onBookingCreated: () => {
+      void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.doctorBookings] });
+    },
+    onBookingCancelled: () => {
+      void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.doctorBookings] });
+    },
+    onBookingUpdated: () => {
+      void queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.doctorBookings] });
+    },
+  });
   
   const [activeTab, setActiveTab] = useState('overview');
   const [editOpen, setEditOpen] = useState(false);
@@ -262,6 +272,12 @@ const DoctorDashboard = () => {
     refetchOnReconnect: true,
     retry: 2,
   });
+
+  useEffect(() => {
+    if (!doctor?.uid) return;
+    joinDoctorRoom(doctor.uid);
+    return () => leaveDoctorRoom(doctor.uid);
+  }, [doctor?.uid, joinDoctorRoom, leaveDoctorRoom]);
 
   const {
     data: bookings = [],
@@ -330,31 +346,6 @@ const DoctorDashboard = () => {
 
   // ==================== MUTATIONS ====================
   
-  const updateBookingStatusMutation = useMutation({
-    mutationFn: async ({ bookingId, status }: { bookingId: string; status: string }) => {
-      const response = await updateBookingStatus({ bookingId, status: status as any });
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to update booking status.');
-      }
-    },
-    onSuccess: (_, variables) => {
-      toast({
-        title: variables.status === 'confirmed' ? 'Booking Approved' : 'Booking Rejected',
-        description: variables.status === 'confirmed' 
-          ? 'The appointment has been confirmed.' 
-          : 'The appointment has been cancelled.',
-      });
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.doctorBookings] });
-    },
-    onError: (error: any) => {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to update booking status.',
-        variant: 'destructive',
-      });
-    },
-  });
-
   const updateDoctorProfileMutation = useMutation({
     mutationFn: async (formData: any) => {
       if (!user) throw new Error('User not authenticated');
@@ -402,6 +393,7 @@ const DoctorDashboard = () => {
       });
       setEditOpen(false);
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.doctorProfile] });
+      queryClient.invalidateQueries({ queryKey: ['doctors'] });
     },
     onError: (error: any) => {
       toast({
@@ -417,14 +409,6 @@ const DoctorDashboard = () => {
 
   // ==================== HANDLER FUNCTIONS ====================
   
-  const handleApproveBooking = (bookingId: string) => {
-    updateBookingStatusMutation.mutate({ bookingId, status: 'confirmed' });
-  };
-
-  const handleRejectBooking = (bookingId: string) => {
-    updateBookingStatusMutation.mutate({ bookingId, status: 'cancelled' });
-  };
-
   const handleEditProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setEditing(true);
@@ -757,19 +741,14 @@ const DoctorDashboard = () => {
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between">
-                      <span>Pending Appointments</span>
+                      <span>Awaiting Patient Payment</span>
                       <Badge className="bg-yellow-100 text-yellow-800">
                         {pendingBookings.length}
                       </Badge>
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {updateBookingStatusMutation.isPending ? (
-                      <div className="text-center py-8 text-gray-500">
-                        <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin" />
-                        <p>Updating booking...</p>
-                      </div>
-                    ) : pendingBookings.length === 0 ? (
+                    {pendingBookings.length === 0 ? (
                       <div className="text-center py-8 text-gray-500">
                         <Clock className="w-12 h-12 mx-auto mb-4 opacity-50" />
                         <p>No pending appointments</p>
@@ -787,28 +766,9 @@ const DoctorDashboard = () => {
                                 {booking.notes && (
                                   <p className="text-sm text-gray-500 mt-1">{booking.notes}</p>
                                 )}
+                                <p className="text-xs text-amber-700 mt-1">The appointment confirms automatically after payment. Unpaid holds expire after 10 minutes.</p>
                               </div>
-                              <div className="flex gap-2">
-                                <Button 
-                                  size="sm" 
-                                  className="bg-green-600 hover:bg-green-700"
-                                  onClick={() => handleApproveBooking(booking.id)}
-                                  disabled={updateBookingStatusMutation.isPending}
-                                >
-                                  <CheckCircle className="w-3 h-3 mr-1" />
-                                  Approve
-                                </Button>
-                                <Button 
-                                  size="sm" 
-                                  variant="outline" 
-                                  className="text-red-600 border-red-200 hover:bg-red-50"
-                                  onClick={() => handleRejectBooking(booking.id)}
-                                  disabled={updateBookingStatusMutation.isPending}
-                                >
-                                  <X className="w-3 h-3 mr-1" />
-                                  Decline
-                                </Button>
-                              </div>
+                              <Badge className="bg-amber-100 text-amber-800">Payment pending</Badge>
                             </div>
                           </div>
                         ))}
@@ -1158,7 +1118,16 @@ const DoctorDashboard = () => {
                     <Input
                       id="practiceAddress"
                       value={editForm.practiceAddress || ''}
-                      onChange={(e) => setEditForm({...editForm, practiceAddress: e.target.value})}
+                      onChange={(e) => {
+                        const nextAddress = e.target.value;
+                        setEditForm((current: any) => ({
+                          ...current,
+                          practiceAddress: nextAddress,
+                          ...(String(current.practiceAddress || '').trim() !== nextAddress.trim()
+                            ? { practiceLatitude: null, practiceLongitude: null }
+                            : {}),
+                        }));
+                      }}
                     />
                     <PracticeAddressLookup
                       address={editForm.practiceAddress || ''}
@@ -1169,6 +1138,11 @@ const DoctorDashboard = () => {
                         practiceLongitude: longitude,
                       }))}
                     />
+                    {!hasValidCoordinates(editForm.practiceLatitude, editForm.practiceLongitude) && (
+                      <p className="text-xs text-amber-700">
+                        Set the pin for this address with “Find address on map” or by clicking the map before saving, so patients get the right directions.
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-3">

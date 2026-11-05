@@ -41,6 +41,10 @@ export declare class AccountCreditService {
         balanceCents: number;
         transactionId: string;
         alreadyProcessed?: boolean;
+        bookingId?: string;
+        patientId?: string;
+        doctorId?: string;
+        bookingCancelled?: boolean;
     }>;
     static declineBookingRefundReview(input: {
         queueId: string;

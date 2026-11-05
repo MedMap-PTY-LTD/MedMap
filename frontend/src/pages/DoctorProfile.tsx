@@ -3,7 +3,7 @@ import React, { lazy, Suspense, useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -104,6 +104,40 @@ const DoctorProfile = () => {
     }
   }, [doctorId]);
 
+  useEffect(() => {
+    if (!doctorId) return;
+
+    return onSnapshot(doc(db, 'doctors', doctorId), snapshot => {
+      if (!snapshot.exists()) return;
+      const data = snapshot.data();
+      setDoctor(current => {
+        if (!current) return current;
+        const canShowPracticeDetails = current.membershipPlanId !== 'free';
+        const practiceAddress = canShowPracticeDetails
+          ? data.practiceAddress || data.practice_address || data.address || ''
+          : '';
+        const practiceName = canShowPracticeDetails ? data.practiceName || '' : '';
+        const location = [data.city, data.province].filter(Boolean).join(', ');
+        const hasCoordinates = canShowPracticeDetails && hasValidCoordinates(
+          data.practiceLatitude,
+          data.practiceLongitude,
+        );
+        const practiceLatitude = hasCoordinates ? data.practiceLatitude : undefined;
+        const practiceLongitude = hasCoordinates ? data.practiceLongitude : undefined;
+
+        if (current.practiceAddress === practiceAddress &&
+          current.practiceName === practiceName &&
+          current.location === location &&
+          current.practiceLatitude === practiceLatitude &&
+          current.practiceLongitude === practiceLongitude) return current;
+
+        return { ...current, practiceAddress, practiceName, location, practiceLatitude, practiceLongitude };
+      });
+    }, error => {
+      console.error('Unable to watch practice location updates:', error);
+    });
+  }, [doctorId]);
+
   const fetchDoctorProfile = async () => {
     setLoading(true);
     setError(null);
@@ -142,10 +176,10 @@ const DoctorProfile = () => {
         hpcsaNumber: doctorData.hpcsaNumber || '',
         practiceName: isPaidMember ? doctorData.practiceName || '' : '',
         practiceAddress: isPaidMember ? doctorData.practiceAddress || '' : '',
-        practiceLatitude: isPaidMember && doctorData.practiceAddress && hasValidCoordinates(doctorData.practiceLatitude, doctorData.practiceLongitude)
+        practiceLatitude: isPaidMember && hasValidCoordinates(doctorData.practiceLatitude, doctorData.practiceLongitude)
           ? doctorData.practiceLatitude
           : undefined,
-        practiceLongitude: isPaidMember && doctorData.practiceAddress && hasValidCoordinates(doctorData.practiceLatitude, doctorData.practiceLongitude)
+        practiceLongitude: isPaidMember && hasValidCoordinates(doctorData.practiceLatitude, doctorData.practiceLongitude)
           ? doctorData.practiceLongitude
           : undefined,
         practicePhone: isPaidMember ? doctorData.practicePhone || '' : '',
@@ -429,7 +463,7 @@ const DoctorProfile = () => {
                   </div>
                 )}
 
-                {doctor.practiceAddress && (
+                {(doctor.practiceAddress || hasValidCoordinates(doctor.practiceLatitude, doctor.practiceLongitude)) && (
                   <DriveThereLink
                     address={doctor.practiceAddress}
                     city={doctor.location?.split(',')[0]?.trim()}

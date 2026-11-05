@@ -10,6 +10,7 @@ dotenv.config();
 import { PaymentService } from './services/PaymentService';
 import { MembershipLifecycleService } from './services/MembershipLifecycleService';
 import { AppointmentLifecycleService } from './services/AppointmentLifecycleService';
+import { BookingNotificationService } from './services/BookingNotificationService';
 
 const app = express();
 app.set('trust proxy', 1); // Render's edge proxy forwards the original PayFast IP.
@@ -112,6 +113,7 @@ const io = new Server(httpServer, {
   transports: ['websocket', 'polling'],
   allowEIO3: true,
 });
+BookingNotificationService.configure(io);
 
 app.use(createRefundsRouter(io));
 

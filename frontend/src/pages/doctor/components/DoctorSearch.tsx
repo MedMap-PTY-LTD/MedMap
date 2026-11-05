@@ -42,6 +42,9 @@ interface Doctor {
   practiceName: string;
   searchPracticeName: string;
   practiceAddress: string;
+  searchAddress: string;
+  searchLocation: string;
+  searchPostalCode: string;
   practiceLatitude?: number;
   practiceLongitude?: number;
   city: string;
@@ -91,6 +94,31 @@ const SOUTH_AFRICAN_PROVINCES = [
   'Northern Cape',
   'Western Cape',
 ];
+
+const normalizeSearchText = (value: unknown): string => String(value ?? '')
+  .toLocaleLowerCase()
+  .replace(/\b(?:rd|road)\b/g, 'road')
+  .replace(/\b(?:st|street)\b/g, 'street')
+  .replace(/\b(?:ave|avenue)\b/g, 'avenue')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim()
+  .replace(/\s+/g, ' ');
+
+const searchableString = (value: unknown): string => {
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (Array.isArray(value)) return value.map(searchableString).filter(Boolean).join(' ');
+  if (value && typeof value === 'object') return Object.values(value).map(searchableString).filter(Boolean).join(' ');
+  return '';
+};
+
+const matchesSearchText = (fields: unknown[], searchTerm: string): boolean => {
+  const tokens = normalizeSearchText(searchTerm).split(' ').filter(Boolean);
+  if (tokens.length === 0) return true;
+  const haystack = normalizeSearchText(fields.map(searchableString).join(' '));
+  return tokens.every(token => haystack.includes(token));
+};
 
 // ==================== DATA FETCHING FUNCTIONS ====================
 
@@ -184,27 +212,46 @@ const fetchDoctors = async ({
         ['member', 'partner'].includes(data.membershipPlanId);
       const membershipPlanId = membershipIsCurrent ? data.membershipPlanId : 'free';
       const isPaidMember = membershipPlanId !== 'free';
-      const practiceAddress = isPaidMember ? String(data.practiceAddress || '') : '';
-      const postalCode = isPaidMember ? String(data.postalCode || data.postal_code || '') : '';
+      const searchAddress = [
+        data.practiceAddress,
+        data.practice_address,
+        data.address,
+        data.addressLine1,
+        data.address_line_1,
+        data.streetAddress,
+        data.street_address,
+      ].map(searchableString).filter(Boolean).join(', ');
+      const searchPostalCode = searchableString(
+        data.postalCode || data.postal_code || data.postalCodeNumber || data.postcode || data.zipCode || data.zip_code,
+      );
+      const searchLocation = [
+        searchAddress,
+        searchPostalCode,
+        data.suburb,
+        data.town,
+        data.district,
+        data.area,
+        data.locality,
+        data.neighbourhood,
+        data.neighborhood,
+        data.location,
+        city,
+        province,
+      ].map(searchableString).filter(Boolean).join(' ');
+      const practiceAddress = isPaidMember ? searchAddress : '';
 
       // Check if search term matches
       if (search) {
-        const searchLower = search.trim().toLocaleLowerCase();
-        const matchesSearch = 
-          fullName.toLocaleLowerCase().includes(searchLower) ||
-          specialization.toLocaleLowerCase().includes(searchLower) ||
-          practiceName.toLocaleLowerCase().includes(searchLower) ||
-          practiceAddress.toLocaleLowerCase().includes(searchLower) ||
-          postalCode.toLocaleLowerCase().includes(searchLower) ||
-          city.toLocaleLowerCase().includes(searchLower) ||
-          province.toLocaleLowerCase().includes(searchLower);
-        
-        if (!matchesSearch) continue;
+        if (!matchesSearchText([
+          fullName,
+          specialization,
+          practiceName,
+          searchLocation,
+        ], search)) continue;
       }
 
-      if (zipCode) {
-        const zipTerm = zipCode.trim().toLocaleLowerCase();
-        if (!`${practiceAddress} ${postalCode}`.toLocaleLowerCase().includes(zipTerm)) continue;
+      if (zipCode && !matchesSearchText([searchLocation], zipCode)) {
+        continue;
       }
 
       doctors.push({
@@ -218,10 +265,13 @@ const fetchDoctors = async ({
         practiceName: isPaidMember ? practiceName : '',
         searchPracticeName: practiceName,
         practiceAddress,
-        practiceLatitude: isPaidMember && data.practiceAddress && hasValidCoordinates(data.practiceLatitude, data.practiceLongitude)
+        searchAddress,
+        searchLocation,
+        searchPostalCode,
+        practiceLatitude: isPaidMember && hasValidCoordinates(data.practiceLatitude, data.practiceLongitude)
           ? data.practiceLatitude
           : undefined,
-        practiceLongitude: isPaidMember && data.practiceAddress && hasValidCoordinates(data.practiceLatitude, data.practiceLongitude)
+        practiceLongitude: isPaidMember && hasValidCoordinates(data.practiceLatitude, data.practiceLongitude)
           ? data.practiceLongitude
           : undefined,
         city: city,
@@ -425,6 +475,7 @@ const DoctorSearch = () => {
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
+    refetchInterval: 30 * 1000,
     retry: 2,
   });
 
@@ -446,19 +497,19 @@ const DoctorSearch = () => {
     // Search filter (client-side)
     if (debouncedSearch) {
       const term = debouncedSearch;
-      filtered = filtered.filter(doctor =>
-        doctor.fullName.toLowerCase().includes(term) ||
-        doctor.specialization.toLowerCase().includes(term) ||
-        doctor.searchPracticeName.toLowerCase().includes(term) ||
-        doctor.practiceAddress.toLowerCase().includes(term) ||
-        doctor.city.toLowerCase().includes(term) ||
-        doctor.province.toLowerCase().includes(term)
-      );
+      filtered = filtered.filter(doctor => matchesSearchText([
+        doctor.fullName,
+        doctor.specialization,
+        doctor.searchPracticeName,
+        doctor.searchAddress,
+        doctor.searchLocation,
+        doctor.searchPostalCode,
+      ], term));
     }
 
     if (normalizedZipCode) {
       filtered = filtered.filter(doctor =>
-        doctor.practiceAddress.toLocaleLowerCase().includes(normalizedZipCode),
+        matchesSearchText([doctor.searchLocation], normalizedZipCode),
       );
     }
 
@@ -478,7 +529,6 @@ const DoctorSearch = () => {
   const mappedDoctors = useMemo(
     () => filteredDoctors.filter(doctor =>
       doctor.isPaidMember &&
-      Boolean(doctor.practiceAddress) &&
       hasValidCoordinates(doctor.practiceLatitude, doctor.practiceLongitude),
     ),
     [filteredDoctors],
@@ -940,7 +990,7 @@ const DoctorSearch = () => {
                         >
                           View Profile
                         </Button>
-                        {doctor.isPaidMember && doctor.practiceAddress && (
+                        {doctor.isPaidMember && (doctor.practiceAddress || hasValidCoordinates(doctor.practiceLatitude, doctor.practiceLongitude)) && (
                           <DriveThereLink
                             address={doctor.practiceAddress}
                             city={doctor.city}

@@ -193,28 +193,8 @@ export class SocketHandlers {
         return;
       }
 
-      const result = await BookingService.cancelBooking(data.bookingId, data.reason);
-      
-      if (result.success) {
-        // Emit to doctor and patient rooms
-        this.io.to(`doctor_${booking.doctorId}`).emit(BookingEvents.BOOKING_CANCELLED, {
-          bookingId: data.bookingId,
-          reason: data.reason || 'Cancelled by patient',
-        });
-        this.io.to(`patient_${booking.patientId}`).emit(BookingEvents.BOOKING_CANCELLED, {
-          bookingId: data.bookingId,
-          reason: data.reason || 'Cancelled by patient',
-        });
-
-        // Emit availability update
-        this.io.to(`doctor_${booking.doctorId}`).emit(BookingEvents.AVAILABILITY_UPDATED, {
-          doctorId: booking.doctorId,
-          date: booking.appointmentDate,
-          time: booking.appointmentTime,
-          isAvailable: true,
-        });
-      }
-      
+      const actor = this.user.admin ? 'admin' : (this.user.uid === booking.doctorId ? 'doctor' : 'patient');
+      const result = await BookingService.cancelBooking(data.bookingId, data.reason, actor);
       callback(result);
     } catch (error: any) {
       console.error('❌ Error cancelling booking:', error);
@@ -239,7 +219,8 @@ export class SocketHandlers {
       const result = await BookingService.updateBookingStatus(
         data.bookingId,
         data.status,
-        data.reason
+        data.reason,
+        this.user.admin ? 'admin' : 'doctor',
       );
       
       if (result.success) {

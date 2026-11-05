@@ -87,10 +87,6 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
     updateBookingStatus,
   } = useBookingSocket({
     onBookingCreated: () => {
-      toast({
-        title: 'New Booking Request',
-        description: 'A patient has requested an appointment.',
-      });
       refreshAll();
     },
     onBookingRescheduled: (data) => {
@@ -100,12 +96,7 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
       });
       refreshAll();
     },
-    onBookingCancelled: (data) => {
-      toast({
-        title: 'Booking Cancelled',
-        description: data.reason || 'A booking has been cancelled.',
-        variant: 'destructive',
-      });
+    onBookingCancelled: () => {
       refreshAll();
     },
     onBookingUpdated: (data) => {
@@ -207,36 +198,6 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
     setSelectedDate(date);
   };
 
-  const handleConfirmBooking = async (bookingId: string) => {
-    try {
-      const response = await updateBookingStatus({
-        bookingId,
-        status: 'confirmed',
-      });
-      
-      if (response.success) {
-        toast({
-          title: 'Booking Confirmed',
-          description: 'The appointment has been confirmed.',
-        });
-        refreshAll();
-        setShowBookingDetails(false);
-      } else {
-        toast({
-          title: 'Error',
-          description: response.error || 'Failed to confirm booking.',
-          variant: 'destructive',
-        });
-      }
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to confirm booking.',
-        variant: 'destructive',
-      });
-    }
-  };
-
   const handleCompleteBooking = async (bookingId: string) => {
     try {
       const response = await updateBookingStatus({
@@ -292,6 +253,31 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
       toast({
         title: 'Error',
         description: error.message || 'Failed to mark as no-show.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDoctorCancelBooking = async (bookingId: string) => {
+    const confirmed = window.confirm('Cancel this appointment? The patient will be notified, and R10 will be added to their account credit if they paid the live booking fee.');
+    if (!confirmed) return;
+    try {
+      const response = await updateBookingStatus({
+        bookingId,
+        status: 'cancelled',
+        reason: 'Cancelled by doctor; unable to honor appointment',
+      });
+      if (!response.success) throw new Error(response.error || 'Could not cancel the appointment.');
+      toast({
+        title: 'Appointment cancelled',
+        description: 'The patient has been notified and any eligible R10 credit has been added to their account.',
+      });
+      refreshAll();
+      setShowBookingDetails(false);
+    } catch (error: any) {
+      toast({
+        title: 'Could not cancel appointment',
+        description: error.message || 'Please try again.',
         variant: 'destructive',
       });
     }
@@ -714,13 +700,7 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
 
               <div className="flex flex-wrap gap-2 pt-2">
                 {selectedBooking.status === 'pending' && (
-                  <Button 
-                    className="flex-1 bg-green-600 hover:bg-green-700"
-                    onClick={() => handleConfirmBooking(selectedBooking.id)}
-                  >
-                    <CheckCircle className="w-4 h-4 mr-2" />
-                    Confirm
-                  </Button>
+                  <Badge className="bg-amber-100 text-amber-800">Awaiting patient payment</Badge>
                 )}
                 {(selectedBooking.status === 'confirmed' || selectedBooking.status === 'rescheduled') && (
                   <>
@@ -738,6 +718,13 @@ export const DoctorCalendar: React.FC<DoctorCalendarProps> = ({
                     >
                       <XCircle className="w-4 h-4 mr-2" />
                       No-Show
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="w-full text-red-700 hover:text-red-800 border-red-200"
+                      onClick={() => handleDoctorCancelBooking(selectedBooking.id)}
+                    >
+                      Cancel appointment
                     </Button>
                   </>
                 )}

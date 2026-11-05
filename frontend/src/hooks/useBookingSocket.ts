@@ -8,6 +8,7 @@ export interface BookingEvents {
   onBookingRescheduled?: (data: any) => void;
   onBookingCancelled?: (data: any) => void;
   onBookingUpdated?: (data: any) => void;
+  onBookingNotification?: (data: any) => void;
   onAvailabilityUpdated?: (data: any) => void;
 }
 
@@ -101,6 +102,9 @@ export function useBookingSocket(events?: BookingEvents) {
       console.log('📊 Booking updated event:', data);
       eventsRef.current?.onBookingUpdated?.(data);
     };
+    const onBookingNotification = (data: any) => {
+      eventsRef.current?.onBookingNotification?.(data);
+    };
 
     const onAvailabilityUpdated = (data: any) => {
       console.log('📡 Availability updated event:', data);
@@ -115,6 +119,7 @@ export function useBookingSocket(events?: BookingEvents) {
     currentSocket.on('booking:rescheduled', onBookingRescheduled);
     currentSocket.on('booking:cancelled', onBookingCancelled);
     currentSocket.on('booking:updated', onBookingUpdated);
+    currentSocket.on('booking:notification', onBookingNotification);
     currentSocket.on('availability:updated', onAvailabilityUpdated);
 
     // If the shared socket was already connected before this hook mounted,
@@ -134,6 +139,7 @@ export function useBookingSocket(events?: BookingEvents) {
       currentSocket.off('booking:rescheduled', onBookingRescheduled);
       currentSocket.off('booking:cancelled', onBookingCancelled);
       currentSocket.off('booking:updated', onBookingUpdated);
+      currentSocket.off('booking:notification', onBookingNotification);
       currentSocket.off('availability:updated', onAvailabilityUpdated);
     };
   }, []);

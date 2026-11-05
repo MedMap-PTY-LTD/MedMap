@@ -696,6 +696,9 @@ const BookAppointment = () => {
                     {payFastConfig?.mode === 'live' && (
                       <p className="text-sm font-semibold text-blue-800">Available account credit is applied to the booking fee first. Any remaining amount is paid through PayFast. The consultation fee is paid separately at the doctor’s office.</p>
                     )}
+                    {payFastConfig?.mode === 'live' && bookingFeeQuote.bookingFee > 0 && (
+                      <p className="text-xs text-muted-foreground">Complete PayFast checkout within 10 minutes to hold this appointment. If the payment window expires, the slot is released and you’ll need to choose a time again. Any PayFast charge completed after expiry is returned as account credit.</p>
+                    )}
                     {paymentConfigError && (
                       <p className="text-sm font-semibold text-destructive">PayFast is temporarily unavailable: {paymentConfigError}</p>
                     )}

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Menu, X, User, LogOut, LayoutDashboard, Calendar, ChevronDown } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { hasUserRole } from '@/lib/firebase';
+import { NotificationCenter } from '@/components/notifications/NotificationCenter';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -145,6 +146,8 @@ const Header = () => {
             {/* Desktop Right Side - Hidden on mobile */}
             <div className="hidden md:flex items-center gap-3 flex-shrink-0">
               {user && profile ? (
+                <>
+                <NotificationCenter />
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button 
@@ -200,6 +203,7 @@ const Header = () => {
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+                </>
               ) : (
                 <div className="flex items-center gap-2">
                   <Button
@@ -261,6 +265,11 @@ const Header = () => {
             </div>
 
             {/* Mobile Menu Button */}
+            {user && profile && (
+              <div className="md:hidden">
+                <NotificationCenter />
+              </div>
+            )}
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               className="md:hidden flex items-center justify-center w-9 h-9 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors"

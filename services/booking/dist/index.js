@@ -37,6 +37,7 @@ const auth_1 = require("./middleware/auth");
 dotenv_1.default.config();
 const PaymentService_1 = require("./services/PaymentService");
 const MembershipLifecycleService_1 = require("./services/MembershipLifecycleService");
+const AppointmentLifecycleService_1 = require("./services/AppointmentLifecycleService");
 const app = (0, express_1.default)();
 exports.app = app;
 app.set('trust proxy', 1); // Render's edge proxy forwards the original PayFast IP.
@@ -108,14 +109,17 @@ app.get('/api/test', (req, res) => {
 // ==================== ROUTES ====================
 const bookings_1 = __importDefault(require("./routes/bookings"));
 const payfastITN_1 = __importStar(require("./routes/payfastITN"));
-const refunds_1 = __importDefault(require("./routes/refunds"));
+const refunds_1 = require("./routes/refunds");
 const memberships_1 = __importDefault(require("./routes/memberships"));
 const accountCredits_1 = __importDefault(require("./routes/accountCredits"));
+const auth_2 = __importDefault(require("./routes/auth"));
+const ambassadors_1 = __importDefault(require("./routes/ambassadors"));
 app.use(bookings_1.default);
 app.use(payfastITN_1.default);
-app.use(refunds_1.default);
 app.use(memberships_1.default);
 app.use(accountCredits_1.default);
+app.use(auth_2.default);
+app.use(ambassadors_1.default);
 //==================== SOCKET.IO SETUP ====================
 const io = new socket_io_1.Server(httpServer, {
     cors: corsOptions,
@@ -124,6 +128,7 @@ const io = new socket_io_1.Server(httpServer, {
     allowEIO3: true,
 });
 exports.io = io;
+app.use((0, refunds_1.createRefundsRouter)(io));
 io.use(async (socket, next) => {
     try {
         socket.data.authUser = await (0, auth_1.authenticateToken)(String(socket.handshake.auth?.token || ''));
@@ -161,6 +166,7 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
     MembershipLifecycleService_1.MembershipLifecycleService.start();
+    AppointmentLifecycleService_1.AppointmentLifecycleService.start(io);
     console.log(`📅 Booking Service running on port ${PORT}`);
     console.log(`📍 Health check: http://localhost:${PORT}/health`);
     console.log(`🔌 WebSocket: ws://localhost:${PORT}/socket.io`);

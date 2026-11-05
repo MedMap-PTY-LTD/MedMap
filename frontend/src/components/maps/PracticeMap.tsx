@@ -143,11 +143,8 @@ const PracticeMap = ({
     pickMarkerRef.current?.remove();
     pickMarkerRef.current = null;
 
-    if (
-      pickLatitude !== undefined &&
-      pickLongitude !== undefined &&
-      hasValidCoordinates(pickLatitude, pickLongitude)
-    ) {
+    if (typeof pickLatitude === 'number' && typeof pickLongitude === 'number' &&
+      hasValidCoordinates(pickLatitude, pickLongitude)) {
       const marker = new Marker({ color: '#0f766e', draggable: true, anchor: 'bottom' })
         .setLngLat([pickLongitude, pickLatitude])
         .addTo(map);

@@ -52,7 +52,7 @@ class BookingService {
             const bookingsSnapshot = await firebase_1.db.collection('bookings')
                 .where('doctorId', '==', doctorId)
                 .where('appointmentDate', '==', date)
-                .where('status', 'in', ['pending', 'confirmed', 'rescheduled'])
+                .where('status', 'in', ['pending', 'confirmed', 'rescheduled', 'live'])
                 .get();
             const bookedTimes = new Set();
             bookingsSnapshot.forEach(doc => {
@@ -115,7 +115,7 @@ class BookingService {
                         .where('doctorId', '==', bookingData.doctorId)
                         .where('appointmentDate', '==', bookingData.appointmentDate)
                         .where('appointmentTime', '==', bookingData.appointmentTime)
-                        .where('status', 'in', ['pending', 'confirmed', 'rescheduled'])),
+                        .where('status', 'in', ['pending', 'confirmed', 'rescheduled', 'live'])),
                     transaction.get(availabilityRef),
                     transaction.get(membershipRef),
                     transaction.get(creditRef),
@@ -333,7 +333,7 @@ class BookingService {
             const snapshot = await firebase_1.db.collection('bookings')
                 .where('doctorId', '==', doctorId)
                 .where('appointmentDate', '>=', today)
-                .where('status', 'in', ['pending', 'confirmed', 'rescheduled'])
+                .where('status', 'in', ['confirmed', 'rescheduled', 'live'])
                 .orderBy('appointmentDate', 'asc')
                 .orderBy('appointmentTime', 'asc')
                 .limit(50)
@@ -390,7 +390,7 @@ class BookingService {
                         .where('doctorId', '==', booking.doctorId)
                         .where('appointmentDate', '==', newDate)
                         .where('appointmentTime', '==', newTime)
-                        .where('status', 'in', ['pending', 'confirmed', 'rescheduled'])),
+                        .where('status', 'in', ['pending', 'confirmed', 'rescheduled', 'live'])),
                     transaction.get(oldAvailabilityRef),
                     transaction.get(newAvailabilityRef),
                 ]);
@@ -583,31 +583,45 @@ class BookingService {
     static async markRefundProcessed(bookingId, refundReference) {
         try {
             const bookingRef = firebase_1.db.collection('bookings').doc(bookingId);
-            const bookingSnap = await bookingRef.get();
-            if (!bookingSnap.exists) {
-                return { success: false, error: 'Booking not found' };
-            }
-            await bookingRef.update({
-                paymentStatus: 'refunded',
-                refundedAt: new Date().toISOString(),
-                refundReference: refundReference || null,
-                updatedAt: new Date().toISOString(),
-            });
-            // Update the refund queue entry if it exists
-            const queueSnapshot = await firebase_1.db.collection('refundQueue')
-                .where('bookingId', '==', bookingId)
-                .where('status', '==', 'pending_manual_refund')
-                .get();
-            const batch = firebase_1.db.batch();
-            queueSnapshot.forEach(doc => {
-                batch.update(doc.ref, {
-                    status: 'completed',
+            const result = await firebase_1.db.runTransaction(async (transaction) => {
+                const [bookingSnap, queueSnapshot] = await Promise.all([
+                    transaction.get(bookingRef),
+                    transaction.get(firebase_1.db.collection('refundQueue')
+                        .where('bookingId', '==', bookingId)
+                        .where('status', '==', 'pending_manual_refund')),
+                ]);
+                if (!bookingSnap.exists)
+                    throw new Error('Booking not found');
+                const booking = bookingSnap.data();
+                const cancellationReview = booking.paymentStatus === 'refund_pending' || queueSnapshot.docs.some(document => document.data().reviewType === 'booking_cancellation');
+                const canCancel = ['pending', 'unconfirmed', 'live', 'confirmed', 'rescheduled'].includes(booking.status);
+                const now = new Date().toISOString();
+                const bookingUpdate = {
+                    paymentStatus: 'refunded',
+                    refundedAt: now,
                     refundReference: refundReference || null,
-                    processedAt: new Date().toISOString(),
+                    updatedAt: now,
+                };
+                if (cancellationReview && canCancel) {
+                    bookingUpdate.status = 'cancelled';
+                    bookingUpdate.cancelledAt = booking.cancelledAt || now;
+                    bookingUpdate.cancellationReason = booking.cancellationReason || 'Cancelled with refund';
+                }
+                transaction.update(bookingRef, bookingUpdate);
+                queueSnapshot.docs.forEach(document => {
+                    transaction.update(document.ref, {
+                        status: 'completed',
+                        refundReference: refundReference || null,
+                        processedAt: now,
+                    });
                 });
+                return {
+                    patientId: booking.patientId,
+                    doctorId: booking.doctorId,
+                    bookingCancelled: cancellationReview && (canCancel || booking.status === 'cancelled'),
+                };
             });
-            await batch.commit();
-            return { success: true, error: null };
+            return { success: true, error: null, ...result };
         }
         catch (error) {
             console.error('Error marking refund processed:', error);
@@ -651,6 +665,9 @@ class BookingService {
                 }
                 if (booking.status === 'cancelled')
                     throw new Error('Cancelled bookings cannot be reopened');
+                if (status === 'completed' && !['confirmed', 'rescheduled', 'live'].includes(booking.status)) {
+                    throw new Error('Only an active appointment can be completed');
+                }
                 const now = new Date().toISOString();
                 const updateData = { status, updatedAt: now };
                 if (status === 'confirmed')
@@ -705,7 +722,7 @@ class BookingService {
             const bookingsSnapshot = await firebase_1.db.collection('bookings')
                 .where('doctorId', '==', doctorId)
                 .where('appointmentDate', '==', date)
-                .where('status', 'in', ['pending', 'confirmed', 'rescheduled'])
+                .where('status', 'in', ['pending', 'confirmed', 'rescheduled', 'live'])
                 .get();
             const bookedTimes = new Set();
             bookingsSnapshot.forEach(doc => {

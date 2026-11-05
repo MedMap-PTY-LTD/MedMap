@@ -40,6 +40,9 @@ export declare class BookingService {
     static markRefundProcessed(bookingId: string, refundReference?: string): Promise<{
         success: boolean;
         error: string | null;
+        patientId?: string;
+        doctorId?: string;
+        bookingCancelled?: boolean;
     }>;
     static getPendingRefunds(): Promise<any[]>;
     static updateBookingStatus(bookingId: string, status: Booking['status'], reason?: string): Promise<{

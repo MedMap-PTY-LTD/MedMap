@@ -282,6 +282,9 @@ export interface Booking {
   status: 'pending' | 'confirmed' | 'rescheduled' | 'completed' | 'cancelled' | 'no-show';
   notes?: string;
   consultationFee: number;
+  paymentStatus?: 'unpaid' | 'pending' | 'paid' | 'waived' | 'failed' | 'refund_pending' | 'credited' | 'refunded' | 'expired';
+  paymentExpiresAt?: string;
+  cancellationActor?: 'patient' | 'doctor' | 'admin' | 'system';
   rescheduleCount: number;
   maxReschedules: number;
   rescheduleHistory: RescheduleHistory[];

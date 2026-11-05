@@ -2,9 +2,21 @@ import crypto from 'crypto';
 import { lookup } from 'dns/promises';
 import { db } from '../config/firebase';
 import { Booking } from '../types';
+import { accountCreditRef, accountCreditTransactionRef } from './AccountCreditService';
+import { BookingNotificationService } from './BookingNotificationService';
 import { payFastSignature } from './payfastSignature';
 
 export const BOOKING_FEE = 10;
+const BOOKING_PAYMENT_WINDOW_MS = 10 * 60 * 1000;
+
+function bookingPaymentExpiry(booking: Booking): number {
+  const explicitExpiry = Date.parse(String(booking.paymentExpiresAt || ''));
+  if (Number.isFinite(explicitExpiry)) return explicitExpiry;
+  const createdAt = typeof booking.createdAt === 'string'
+    ? Date.parse(booking.createdAt)
+    : booking.createdAt?.toDate?.().getTime?.();
+  return Number.isFinite(createdAt) ? createdAt + BOOKING_PAYMENT_WINDOW_MS : Number.NaN;
+}
 export type PayFastMode = 'sandbox' | 'live';
 
 export interface PayFastCheckout {
@@ -218,8 +230,12 @@ export class PaymentService {
       if (config.mode === 'live' && (booking.isTestBooking || booking.paymentEnvironment !== 'live')) {
         throw new Error('Only live bookings can be paid in this deployment');
       }
-      if (booking.status !== 'pending' || ['paid', 'refund_pending', 'refunded'].includes(booking.paymentStatus)) {
+      if (booking.status !== 'pending' || ['paid', 'refund_pending', 'refunded', 'credited', 'expired'].includes(booking.paymentStatus)) {
         throw new Error('This booking cannot be paid');
+      }
+      const expiresAt = bookingPaymentExpiry(booking);
+      if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+        throw new Error('The 10-minute payment session has expired. Please select an available time again.');
       }
       const amount = Number(booking.bookingFee ?? BOOKING_FEE);
       if (!Number.isFinite(amount) || amount < 5) throw new Error('PayFast checkout requires at least R5.00; apply enough account credit or pay the minimum amount');
@@ -242,9 +258,10 @@ export class PaymentService {
       });
       transaction.update(bookingRef, {
         bookingFee: amount, paymentEnvironment: config.mode, isTestBooking: config.mode === 'sandbox',
-        paymentId: reference, paymentReference: reference, paymentStatus: 'pending', updatedAt: now,
+        paymentId: reference, paymentReference: reference, paymentStatus: 'pending',
+        paymentExpiresAt: booking.paymentExpiresAt || new Date(expiresAt).toISOString(), updatedAt: now,
       });
-      return { booking, reference, amount };
+      return { booking: { ...booking, paymentExpiresAt: booking.paymentExpiresAt || new Date(expiresAt).toISOString() }, reference, amount };
     });
     return checkoutFor(result.booking, result.reference, result.amount, config);
   }
@@ -258,7 +275,7 @@ export class PaymentService {
     const amountGross = Number(fields.amount_gross);
 
     const paymentRef = db.collection('payments').doc(fields.m_payment_id);
-    await db.runTransaction(async transaction => {
+    const outcome = await db.runTransaction(async transaction => {
       const paymentSnap = await transaction.get(paymentRef);
       if (!paymentSnap.exists) throw new InvalidPayFastNotification('Unknown payment reference');
       const payment = paymentSnap.data()!;
@@ -275,11 +292,11 @@ export class PaymentService {
           (matchedConfig.mode === 'live' && booking.isTestBooking)) {
         throw new InvalidPayFastNotification('Booking payment environment mismatch');
       }
-      if ((payment.status === 'paid' || payment.status === 'refund_pending') &&
+      if ((payment.status === 'paid' || payment.status === 'refund_pending' || payment.status === 'credited') &&
           payment.pfPaymentId === fields.pf_payment_id) return;
       const now = new Date().toISOString();
       if (payment.pfPaymentId && payment.pfPaymentId !== fields.pf_payment_id &&
-          (payment.status === 'paid' || payment.status === 'refund_pending')) {
+          (payment.status === 'paid' || payment.status === 'refund_pending' || payment.status === 'credited')) {
         if (fields.payment_status === 'COMPLETE') {
           transaction.set(db.collection('refundQueue').doc(`duplicate_${fields.pf_payment_id}`), {
             bookingId: payment.bookingId, paymentId: paymentRef.id,
@@ -293,34 +310,121 @@ export class PaymentService {
       }
       if (fields.payment_status === 'COMPLETE') {
         if (booking.status === 'pending' && booking.paymentId === paymentRef.id && booking.paymentStatus !== 'paid') {
+          const expiresAt = bookingPaymentExpiry(booking);
+          if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+            const accountRef = accountCreditRef(booking.patientId);
+            const ledgerRef = accountCreditTransactionRef(booking.patientId, `late_payment_${paymentRef.id}`);
+            const [accountSnap, ledgerSnap] = await Promise.all([
+              transaction.get(accountRef), transaction.get(ledgerRef),
+            ]);
+            let balanceCents = Math.max(0, Math.floor(Number(accountSnap.data()?.balanceCents) || 0));
+            let creditIssued = false;
+            const amountCents = Math.max(0, Math.round(Number(payment.amount) * 100));
+            if (!ledgerSnap.exists && amountCents > 0) {
+              balanceCents += amountCents;
+              transaction.set(accountRef, { userId: booking.patientId, currency: 'ZAR', balanceCents, updatedAt: now }, { merge: true });
+              transaction.create(ledgerRef, {
+                userId: booking.patientId,
+                amountCents,
+                balanceAfterCents: balanceCents,
+                kind: 'booking_fee_return',
+                reason: 'PayFast completed after the 10-minute booking payment session expired',
+                source: `Late payment ${paymentRef.id}`,
+                bookingId: payment.bookingId,
+                createdAt: now,
+              });
+              creditIssued = true;
+            }
+            transaction.update(paymentRef, { status: 'credited', pfPaymentId: fields.pf_payment_id, creditedAt: now, updatedAt: now });
+            transaction.update(bookingRef, {
+              paymentStatus: 'expired',
+              latePaymentCreditCents: amountCents,
+              latePaymentCreditedAt: now,
+              updatedAt: now,
+            });
+            return creditIssued ? { type: 'late_credit' as const, booking, amountCents } : { type: 'none' as const };
+          }
           transaction.update(paymentRef, { status: 'paid', pfPaymentId: fields.pf_payment_id, updatedAt: now });
           transaction.update(bookingRef, {
             paymentStatus: 'paid', pfPaymentId: fields.pf_payment_id,
             paidAt: now, status: 'confirmed', confirmedAt: now, updatedAt: now,
           });
+          return { type: 'confirmed' as const, booking };
         } else {
-          // Late payments need a manual refund; a cancelled slot must never be revived.
-          transaction.set(db.collection('refundQueue').doc(paymentRef.id), {
-            bookingId: payment.bookingId, paymentId: paymentRef.id,
-            pfPaymentId: fields.pf_payment_id, amount: payment.amount,
-            customerEmail: booking.patientEmail, customerName: booking.patientName,
-            reason: 'Payment arrived after booking was cancelled or replaced',
-            environment: matchedConfig.mode, status: 'pending_manual_refund', createdAt: now,
-          }, { merge: true });
-          transaction.update(paymentRef, { status: 'refund_pending', pfPaymentId: fields.pf_payment_id, updatedAt: now });
-          if (booking.status === 'cancelled' && booking.paymentId === paymentRef.id) {
-            transaction.update(bookingRef, { paymentStatus: 'refund_pending', updatedAt: now });
+          const expiredAt = bookingPaymentExpiry(booking);
+          const shouldCreditLateCharge = (Number.isFinite(expiredAt) && expiredAt <= Date.now()) ||
+            booking.cancellationActor === 'doctor' || booking.cancellationActor === 'system' ||
+            booking.paymentId !== paymentRef.id;
+          if (shouldCreditLateCharge) {
+            const accountRef = accountCreditRef(booking.patientId);
+            const ledgerRef = accountCreditTransactionRef(booking.patientId, `late_payment_${paymentRef.id}`);
+            const [accountSnap, ledgerSnap] = await Promise.all([
+              transaction.get(accountRef), transaction.get(ledgerRef),
+            ]);
+            const amountCents = Math.max(0, Math.round(Number(payment.amount) * 100));
+            const currentBalance = Math.max(0, Math.floor(Number(accountSnap.data()?.balanceCents) || 0));
+            if (!ledgerSnap.exists && amountCents > 0) {
+              const balanceCents = currentBalance + amountCents;
+              transaction.set(accountRef, { userId: booking.patientId, currency: 'ZAR', balanceCents, updatedAt: now }, { merge: true });
+              transaction.create(ledgerRef, {
+                userId: booking.patientId, amountCents, balanceAfterCents: balanceCents,
+                kind: 'booking_fee_return',
+                reason: 'PayFast completed after the 10-minute booking payment session expired',
+                source: `Late payment ${paymentRef.id}`, bookingId: payment.bookingId, createdAt: now,
+              });
+            }
+            transaction.update(paymentRef, { status: 'credited', pfPaymentId: fields.pf_payment_id, creditedAt: now, updatedAt: now });
+            if (booking.status === 'pending' && booking.paymentId === paymentRef.id) {
+              transaction.update(bookingRef, { paymentStatus: 'expired', latePaymentCreditCents: amountCents, latePaymentCreditedAt: now, updatedAt: now });
+            }
+            return { type: 'late_credit' as const, booking, amountCents };
           }
+          // Never revive a cancelled booking. A patient cancellation keeps a timely paid fee.
+          transaction.update(paymentRef, { status: 'paid', pfPaymentId: fields.pf_payment_id, updatedAt: now });
+          if (booking.status === 'cancelled' && booking.paymentId === paymentRef.id) {
+            transaction.update(bookingRef, { paymentStatus: 'paid', pfPaymentId: fields.pf_payment_id, paidAt: now, updatedAt: now });
+          }
+          return { type: 'none' as const };
         }
       } else if (fields.payment_status === 'FAILED' || fields.payment_status === 'CANCELLED') {
-        if (payment.status === 'paid') return;
+        if (payment.status === 'paid' || payment.status === 'credited' || payment.status === 'expired') return { type: 'none' as const };
         transaction.update(paymentRef, { status: 'failed', pfPaymentId: fields.pf_payment_id, updatedAt: now });
         if (booking.status === 'pending' && booking.paymentId === paymentRef.id) {
           transaction.update(bookingRef, { paymentStatus: 'failed', updatedAt: now });
         }
+        return { type: 'none' as const };
       } else if (fields.payment_status !== 'PENDING') {
         throw new InvalidPayFastNotification('Unknown payment status');
       }
+      return { type: 'none' as const };
     });
+
+    if (outcome?.type === 'confirmed') {
+      await BookingNotificationService.notify({
+        userId: outcome.booking.doctorId,
+        room: 'doctor',
+        id: `booking_${outcome.booking.id}_created`,
+        type: 'booking_created',
+        title: 'New booking confirmed',
+        message: `${outcome.booking.patientName} booked ${outcome.booking.appointmentDate} at ${outcome.booking.appointmentTime}. The appointment is confirmed.`,
+        bookingId: outcome.booking.id,
+        actionUrl: '/doctor',
+        eventPayload: {
+          patientId: outcome.booking.patientId,
+          appointmentDate: outcome.booking.appointmentDate,
+          appointmentTime: outcome.booking.appointmentTime,
+        },
+      });
+    } else if (outcome?.type === 'late_credit') {
+      await BookingNotificationService.notify({
+        userId: outcome.booking.patientId,
+        room: 'patient',
+        id: `booking_${outcome.booking.id}_late_payment_${paymentRef.id}`,
+        type: 'booking_payment_expired',
+        title: 'Payment returned as account credit',
+        message: `This PayFast checkout was no longer valid when payment completed. R${(outcome.amountCents / 100).toFixed(2)} has been added to your account credit. Check your booking status before trying again.`,
+        bookingId: outcome.booking.id,
+      });
+    }
   }
 }

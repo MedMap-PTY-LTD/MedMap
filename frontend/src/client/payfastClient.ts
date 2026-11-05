@@ -372,12 +372,22 @@ export async function getBookingPaymentDetails(bookingId: string): Promise<{
   paymentStatus: string;
   paymentEnvironment?: 'sandbox' | 'live';
   bookingFee?: number;
+  bookingStatus?: string;
+  paymentExpiresAt?: string;
+  accountCreditCents?: number;
+  paymentMethod?: string;
+  membershipPlanId?: string;
 }> {
   const booking = await request(`/api/bookings/${encodeURIComponent(bookingId)}`);
   return {
     paymentStatus: booking.paymentStatus || 'unpaid',
     paymentEnvironment: booking.paymentEnvironment,
     bookingFee: booking.bookingFee,
+    bookingStatus: booking.status,
+    paymentExpiresAt: booking.paymentExpiresAt,
+    accountCreditCents: Math.max(0, Number(booking.latePaymentCreditCents || booking.refundCreditAmountCents) || 0),
+    paymentMethod: booking.paymentMethod,
+    membershipPlanId: booking.membershipPlanId,
   };
 }
 

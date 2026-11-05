@@ -26,7 +26,8 @@ export type PaymentStatus =
   | 'failed'
   | 'refund_pending'   // 🔥 waiting for admin to process in PayFast dashboard
   | 'credited'
-  | 'refunded';
+  | 'refunded'
+  | 'expired';
 
 export interface Booking {
   id: string;
@@ -61,6 +62,12 @@ export interface Booking {
 
   // 🔥 Payment fields (PayFast-aware)
   paymentStatus: PaymentStatus;
+  /** Deadline for completing the PayFast checkout that is holding this slot. */
+  paymentExpiresAt?: string;
+  paymentExpiredAt?: string;
+  cancellationActor?: 'patient' | 'doctor' | 'admin' | 'system';
+  latePaymentCreditCents?: number;
+  latePaymentCreditedAt?: string;
   paymentId?: string;          // internal payment record ID
   paymentReference?: string;   // your booking reference sent to PayFast (m_payment_id)
   paymentUrl?: string;         // PayFast hosted checkout URL

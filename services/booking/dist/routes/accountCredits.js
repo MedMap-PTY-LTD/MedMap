@@ -6,6 +6,7 @@ const firebase_1 = require("../config/firebase");
 const auth_2 = require("../middleware/auth");
 const AccountCreditService_1 = require("../services/AccountCreditService");
 const router = (0, express_1.Router)();
+const isPatientAccount = (profile) => profile?.role === 'patient' || (Array.isArray(profile?.roles) && profile.roles.includes('patient'));
 router.get('/api/account-credit', auth_2.requireAuth, async (req, res) => {
     try {
         const user = req.authUser;
@@ -24,7 +25,7 @@ router.get('/api/admin/account-credits/lookup', async (req, res) => {
         }
         const authUser = await (0, auth_1.getAuth)(firebase_1.app).getUserByEmail(email);
         const profile = await firebase_1.db.collection('users').doc(authUser.uid).get();
-        if (!profile.exists || profile.data()?.role !== 'patient') {
+        if (!profile.exists || !isPatientAccount(profile.data())) {
             return res.status(404).json({ error: 'No patient account found for that email' });
         }
         const data = profile.data();
@@ -66,7 +67,7 @@ router.post('/api/admin/account-credits/:userId', async (req, res) => {
         }
         const source = typeof req.body?.source === 'string' ? req.body.source.trim().slice(0, 200) : '';
         const patient = await firebase_1.db.collection('users').doc(req.params.userId).get();
-        if (!patient.exists || patient.data()?.role !== 'patient') {
+        if (!patient.exists || !isPatientAccount(patient.data())) {
             return res.status(404).json({ error: 'Patient account not found' });
         }
         const result = await AccountCreditService_1.AccountCreditService.issueAdminCredit({

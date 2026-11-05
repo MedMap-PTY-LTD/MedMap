@@ -2,9 +2,11 @@ import { Server } from 'socket.io';
 import { db } from '../config/firebase';
 import { Booking, BookingEvents } from '../types';
 import { PATIENT_MEMBERSHIP_PLANS } from './PatientMembershipService';
+import { BookingService } from './BookingService';
 
 const ACTIVE_APPOINTMENT_STATUSES: Booking['status'][] = ['confirmed', 'rescheduled', 'live'];
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+const PAYMENT_EXPIRY_SWEEP_INTERVAL_MS = 30 * 1000;
 const SOUTH_AFRICA_OFFSET = '+02:00';
 
 interface CompletedBookingNotice {
@@ -39,6 +41,14 @@ export class AppointmentLifecycleService {
 
     run();
     setInterval(run, SWEEP_INTERVAL_MS).unref?.();
+
+    const expirePaymentSessions = () => {
+      void BookingService.expirePendingPaymentSessions().then(expired => {
+        if (expired) console.info(`Expired ${expired} unpaid booking payment session(s)`);
+      }).catch(error => console.error('Booking payment expiry sweep failed:', error));
+    };
+    expirePaymentSessions();
+    setInterval(expirePaymentSessions, PAYMENT_EXPIRY_SWEEP_INTERVAL_MS).unref?.();
   }
 
   static async sweep(nowMs = Date.now()): Promise<CompletedBookingNotice[]> {
