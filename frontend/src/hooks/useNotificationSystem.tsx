@@ -198,12 +198,6 @@ export const useNotificationSystem = () => {
     }
   }, [bookingNotifications, user?.uid]);
 
-  // Archive notification 
-  const archiveNotification = useCallback(async (id: string) => {
-      // Treat as delete for now to clean up
-      await deleteNotification(id);
-  }, [deleteNotification]);
-
   // Delete notification
   const deleteNotification = useCallback(async (id: string) => {
     setState(prev => ({
@@ -229,6 +223,12 @@ export const useNotificationSystem = () => {
         console.error('Failed to delete notification', e);
     }
   }, [user?.uid]);
+
+  // Archive notification
+  const archiveNotification = useCallback(async (id: string) => {
+      // Treat as delete for now to clean up
+      await deleteNotification(id);
+  }, [deleteNotification]);
   
   // Clear all
   const clearAllNotifications = useCallback(async () => {
