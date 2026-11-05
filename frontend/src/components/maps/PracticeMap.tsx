@@ -48,6 +48,9 @@ const PracticeMap = ({
   const onPickRef = useRef(onPickLocation);
   const onSelectRef = useRef(onSelectLocation);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const pickLatitude = pickLocation?.latitude;
+  const pickLongitude = pickLocation?.longitude;
+  const isPickMode = Boolean(onPickLocation);
 
   const validLocations = useMemo(
     () => locations.filter(location => hasValidCoordinates(location.latitude, location.longitude)),
@@ -135,22 +138,31 @@ const PracticeMap = ({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded || !onPickLocation) return;
+    if (!map || !mapLoaded || !isPickMode) return;
 
     pickMarkerRef.current?.remove();
     pickMarkerRef.current = null;
 
-    if (pickLocation && hasValidCoordinates(pickLocation.latitude, pickLocation.longitude)) {
+    if (
+      pickLatitude !== undefined &&
+      pickLongitude !== undefined &&
+      hasValidCoordinates(pickLatitude, pickLongitude)
+    ) {
       const marker = new Marker({ color: '#0f766e', draggable: true, anchor: 'bottom' })
-        .setLngLat([pickLocation.longitude, pickLocation.latitude])
+        .setLngLat([pickLongitude, pickLatitude])
         .addTo(map);
       marker.on('dragend', () => {
         const next = marker.getLngLat();
         onPickRef.current?.({ latitude: next.lat, longitude: next.lng });
       });
       pickMarkerRef.current = marker;
+      map.flyTo({
+        center: [pickLongitude, pickLatitude],
+        zoom: 14,
+        duration: 500,
+      });
     }
-  }, [pickLocation, mapLoaded]);
+  }, [pickLatitude, pickLongitude, isPickMode, mapLoaded]);
 
   useEffect(() => {
     if (!selectedLocationId || onPickLocation || validLocations.length < 2) return;

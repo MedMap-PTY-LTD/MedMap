@@ -39,6 +39,7 @@ import { DoctorCalendar } from './DoctorCalendar';
 import { getDoctorBookingStatistics } from '@/client/payfastClient';
 import { hasPaidMembershipAccess } from '@/lib/membershipAccess';
 import { hasValidCoordinates } from '@/lib/practiceMaps';
+import PracticeAddressLookup from '@/components/maps/PracticeAddressLookup';
 import {
   Tooltip as RechartsTooltip,
   Legend,
@@ -1158,6 +1159,15 @@ const DoctorDashboard = () => {
                       id="practiceAddress"
                       value={editForm.practiceAddress || ''}
                       onChange={(e) => setEditForm({...editForm, practiceAddress: e.target.value})}
+                    />
+                    <PracticeAddressLookup
+                      address={editForm.practiceAddress || ''}
+                      disabled={editing || updateDoctorProfileMutation.isPending}
+                      onPickLocation={({ latitude, longitude }) => setEditForm((current: any) => ({
+                        ...current,
+                        practiceLatitude: latitude,
+                        practiceLongitude: longitude,
+                      }))}
                     />
                   </div>
                   <div className="space-y-2">
