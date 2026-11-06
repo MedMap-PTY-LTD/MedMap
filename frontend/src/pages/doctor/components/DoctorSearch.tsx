@@ -268,10 +268,11 @@ const fetchDoctors = async ({
         searchAddress,
         searchLocation,
         searchPostalCode,
-        practiceLatitude: isPaidMember && hasValidCoordinates(data.practiceLatitude, data.practiceLongitude)
+        // Practice pins are provider-confirmed public locations, regardless of membership tier.
+        practiceLatitude: hasValidCoordinates(data.practiceLatitude, data.practiceLongitude)
           ? data.practiceLatitude
           : undefined,
-        practiceLongitude: isPaidMember && hasValidCoordinates(data.practiceLatitude, data.practiceLongitude)
+        practiceLongitude: hasValidCoordinates(data.practiceLatitude, data.practiceLongitude)
           ? data.practiceLongitude
           : undefined,
         city: city,
@@ -528,7 +529,6 @@ const DoctorSearch = () => {
 
   const mappedDoctors = useMemo(
     () => filteredDoctors.filter(doctor =>
-      doctor.isPaidMember &&
       hasValidCoordinates(doctor.practiceLatitude, doctor.practiceLongitude),
     ),
     [filteredDoctors],
@@ -990,7 +990,7 @@ const DoctorSearch = () => {
                         >
                           View Profile
                         </Button>
-                        {doctor.isPaidMember && (doctor.practiceAddress || hasValidCoordinates(doctor.practiceLatitude, doctor.practiceLongitude)) && (
+                        {(doctor.practiceAddress || hasValidCoordinates(doctor.practiceLatitude, doctor.practiceLongitude)) && (
                           <DriveThereLink
                             address={doctor.practiceAddress}
                             city={doctor.city}

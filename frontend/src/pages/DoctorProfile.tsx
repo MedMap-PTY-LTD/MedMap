@@ -176,10 +176,10 @@ const DoctorProfile = () => {
         hpcsaNumber: doctorData.hpcsaNumber || '',
         practiceName: isPaidMember ? doctorData.practiceName || '' : '',
         practiceAddress: isPaidMember ? doctorData.practiceAddress || '' : '',
-        practiceLatitude: isPaidMember && hasValidCoordinates(doctorData.practiceLatitude, doctorData.practiceLongitude)
+        practiceLatitude: hasValidCoordinates(doctorData.practiceLatitude, doctorData.practiceLongitude)
           ? doctorData.practiceLatitude
           : undefined,
-        practiceLongitude: isPaidMember && hasValidCoordinates(doctorData.practiceLatitude, doctorData.practiceLongitude)
+        practiceLongitude: hasValidCoordinates(doctorData.practiceLatitude, doctorData.practiceLongitude)
           ? doctorData.practiceLongitude
           : undefined,
         practicePhone: isPaidMember ? doctorData.practicePhone || '' : '',
