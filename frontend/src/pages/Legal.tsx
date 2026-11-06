@@ -10,7 +10,7 @@ const Legal = () => {
     {
       icon: <Shield className="h-6 w-6" />,
       title: 'Platform Disclaimer',
-      content: `IronLedgerMedMap is a booking platform that facilitates connections between patients and healthcare providers. We are NOT a medical practice and do NOT provide medical services, diagnoses, treatments, or medical advice. All medical services are provided solely by independent healthcare professionals listed on our platform.`
+      content: `MedMap is a booking platform that facilitates connections between patients and healthcare providers. We are NOT a medical practice and do NOT provide medical services, diagnoses, treatments, or medical advice. All medical services are provided solely by independent healthcare professionals listed on our platform.`
     },
     {
       icon: <AlertTriangle className="h-6 w-6" />,
@@ -25,7 +25,7 @@ const Legal = () => {
     {
       icon: <FileText className="h-6 w-6" />,
       title: 'Terms of Service',
-      content: `By using IronLedgerMedMap, you agree to our terms of service. You must be 18 years or older, or have parental consent. You are responsible for providing accurate information and maintaining the confidentiality of your account. We reserve the right to suspend or terminate accounts for misuse.`
+      content: `By using MedMap, you agree to our terms of service. You must be 18 years or older, or have parental consent. You are responsible for providing accurate information and maintaining the confidentiality of your account. We reserve the right to suspend or terminate accounts for misuse.`
     },
     {
       icon: <Lock className="h-6 w-6" />,
@@ -35,7 +35,7 @@ const Legal = () => {
     {
       icon: <Scale className="h-6 w-6" />,
       title: 'Limitation of Liability',
-      content: `IronLedgerMedMap's liability is limited to the booking fee paid. We are not liable for medical outcomes, provider-patient interactions, treatment results, or any direct or indirect damages arising from platform use. Healthcare providers are independent contractors responsible for their own professional conduct and malpractice insurance.`
+      content: `MedMap's liability is limited to the booking fee paid. We are not liable for medical outcomes, provider-patient interactions, treatment results, or any direct or indirect damages arising from platform use. Healthcare providers are independent contractors responsible for their own professional conduct and malpractice insurance.`
     }
   ];
 
@@ -97,7 +97,7 @@ const Legal = () => {
           </CardHeader>
           <CardContent>
             <p className="text-foreground mb-6">
-              IronLedgerMedMap operates in full compliance with South African healthcare and data protection regulations:
+              MedMap operates in full compliance with South African healthcare and data protection regulations:
             </p>
             <div className="grid md:grid-cols-2 gap-4">
               {regulations.map((regulation, index) => (
@@ -192,7 +192,7 @@ const Legal = () => {
               For legal inquiries, compliance questions, or to report concerns:
             </p>
             <div className="space-y-2">
-              <p className="font-medium">Email: legal@ironledgermedmap.co.za</p>
+              <p className="font-medium">Email: legal@medmap.co.za</p>
               <p className="font-medium">Phone: +27 11 123 4567</p>
               <p className="text-sm text-muted-foreground">
                 Business Hours: Monday - Friday, 9:00 AM - 5:00 PM (SAST)
@@ -200,10 +200,10 @@ const Legal = () => {
             </div>
             <div className="mt-6 space-y-2">
               <p className="text-sm text-muted-foreground">
-                <strong>Privacy & Data Protection:</strong> privacy@ironledgermedmap.co.za
+                <strong>Privacy & Data Protection:</strong> privacy@medmap.co.za
               </p>
               <p className="text-sm text-muted-foreground">
-                <strong>PAIA Requests:</strong> paia@ironledgermedmap.co.za
+                <strong>PAIA Requests:</strong> paia@medmap.co.za
               </p>
             </div>
             <div className="mt-6 p-4 bg-accent/50 rounded-lg border-l-4 border-primary">

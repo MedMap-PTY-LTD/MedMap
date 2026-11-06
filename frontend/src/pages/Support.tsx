@@ -13,7 +13,7 @@ const Support = () => {
           <Card className="medical-card">
             <CardHeader><CardTitle>Contact Support</CardTitle></CardHeader>
             <CardContent>
-              <p className="text-sm">Email: support@ironledgermedmap.co.za</p>
+              <p className="text-sm">Email: <a href="mailto:support@medmap.co.za">support@medmap.co.za</a></p>
             </CardContent>
           </Card>
         </div>

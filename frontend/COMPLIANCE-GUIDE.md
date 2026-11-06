@@ -172,8 +172,8 @@ Updated `src/pages/Legal.tsx` to include:
 - Download buttons for PDF and markdown versions
 - Contact information for privacy and PAIA requests
 - Separate email addresses:
-  - `privacy@ironledgermedmap.co.za` (Privacy matters)
-  - `paia@ironledgermedmap.co.za` (PAIA requests)
+  - `privacy@medmap.co.za` (Privacy matters)
+  - `paia@medmap.co.za` (PAIA requests)
 
 ### Component Structure
 Both documents are React components with:
@@ -214,12 +214,12 @@ Both documents are React components with:
 
 1. **Information Officer Details**
    - Full name/title
-   - Email address: `privacy@ironledgermedmap.co.za`
+   - Email address: `privacy@medmap.co.za`
    - Phone number: `+27 (0) XX XXX XXXX`
    - Physical address
 
 2. **PAIA Officer Details**
-   - Email address: `paia@ironledgermedmap.co.za`
+   - Email address: `paia@medmap.co.za`
    - Phone number
    - Deputy Information Officer (if applicable)
 
@@ -379,7 +379,7 @@ These documents should be reviewed by:
 ## 14. Support and Ongoing Management
 
 ### Request Volume Preparation:
-- Establish mailbox for paia@ironledgermedmap.co.za
+- Establish mailbox for paia@medmap.co.za
 - Set up tracking system for requests
 - Document response times
 - Create templates for common responses

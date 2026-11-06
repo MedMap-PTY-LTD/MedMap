@@ -49,7 +49,7 @@
 
 Replace placeholders in both files:
 ```
-- Email addresses: privacy@ironledgermedmap.co.za, paia@ironledgermedmap.co.za
+- Email addresses: privacy@medmap.co.za, paia@medmap.co.za
 - Phone numbers: +27 (0) XX XXX XXXX
 - Physical address: South Africa
 ```
@@ -121,8 +121,8 @@ pandoc public/documents/PAIA-Manual.md -o public/documents/PAIA-Manual.pdf
 ### Step 4: Setup Infrastructure
 
 **Email Configuration:**
-- [ ] Create mailbox: privacy@ironledgermedmap.co.za
-- [ ] Create mailbox: paia@ironledgermedmap.co.za
+- [ ] Create mailbox: privacy@medmap.co.za
+- [ ] Create mailbox: paia@medmap.co.za
 - [ ] Set up auto-responders with response timeframes
 - [ ] Configure forwarding if needed
 - [ ] Set up staff access/notification
@@ -159,12 +159,12 @@ pandoc public/documents/PAIA-Manual.md -o public/documents/PAIA-Manual.pdf
 **Sitemap Entry:**
 ```xml
 <url>
-  <loc>https://ironledgermedmap.co.za/privacy-policy</loc>
+  <loc>https://medmap.co.za/privacy-policy</loc>
   <changefreq>yearly</changefreq>
   <priority>0.8</priority>
 </url>
 <url>
-  <loc>https://ironledgermedmap.co.za/paia-manual</loc>
+  <loc>https://medmap.co.za/paia-manual</loc>
   <changefreq>yearly</changefreq>
   <priority>0.8</priority>
 </url>

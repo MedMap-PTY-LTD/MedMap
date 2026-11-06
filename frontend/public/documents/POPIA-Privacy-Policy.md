@@ -175,7 +175,7 @@ The Platform is intended for users 18 years and older. We do not knowingly colle
 
 If you have questions about this Privacy Policy, wish to exercise your rights, or have privacy concerns, please contact our Information Officer:
 
-**Email:** privacy@ironledgermedmap.co.za
+**Email:** privacy@medmap.co.za
 
 **Phone:** +27 (0) XX XXX XXXX
 

@@ -270,7 +270,7 @@ export default function PrivacyPolicy() {
                   <Mail className="h-5 w-5 text-medical-primary mt-0.5" />
                   <div>
                     <p className="font-semibold">Email</p>
-                    <p className="text-muted-foreground">privacy@ironledgermedmap.co.za</p>
+                    <p className="text-muted-foreground">privacy@medmap.co.za</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">

@@ -22,7 +22,7 @@ The Manual explains the procedures for requesting access to records, the fees ch
 
 **Address:** South Africa
 
-**Website:** https://ironledgermedmap.co.za
+**Website:** https://medmap.co.za
 
 ---
 
@@ -151,7 +151,7 @@ To submit requests for access to information or for general inquiries about this
 
 **Position:** Information Officer
 
-**Email:** paia@ironledgermedmap.co.za
+**Email:** paia@medmap.co.za
 
 **Phone:** +27 (0) XX XXX XXXX
 

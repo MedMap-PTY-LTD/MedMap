@@ -4,7 +4,7 @@
 
 **MedMap** is a comprehensive South African healthcare appointment booking and medical services platform. It's a full-stack web application designed for patients to book appointments with doctors, manage memberships, make payments, and for healthcare providers to manage their practices and patient interactions. The platform prioritizes POPIA (Protection of Personal Information Act) and PAIA (Promotion of Access to Information Act) compliance for South African regulations.
 
-**Organization**: Iron Ledger Medical (ironledgermedmap.co.za)
+**Organization**: MedMap (medmap.co.za)
 **Project ID**: be49719b-7db9-4b97-af14-04a31caaef23
 **Supabase Project ID**: ualtuoghgruwxefqynfg
 **Development Platform**: Lovable (Lovable.dev)
@@ -989,9 +989,9 @@ npm run dev
 ## 21. Support & Maintenance
 
 ### Contact Information
-- **Privacy Matters:** privacy@ironledgermedmap.co.za
-- **PAIA Requests:** paia@ironledgermedmap.co.za
-- **General Support:** [support-email-to-configure]
+- **Privacy Matters:** privacy@medmap.co.za
+- **PAIA Requests:** paia@medmap.co.za
+- **General Support:** support@medmap.co.za
 
 ### Regular Maintenance
 - **Database Backups:** Supabase automatic backups

@@ -73,7 +73,7 @@ export default function PAIAManual() {
                 </div>
                 <div>
                   <p className="font-semibold">Website</p>
-                  <p className="text-muted-foreground">https://ironledgermedmap.co.za</p>
+                  <p className="text-muted-foreground">https://medmap.co.za</p>
                 </div>
               </div>
             </CardContent>
@@ -290,7 +290,7 @@ export default function PAIAManual() {
                   <Mail className="h-5 w-5 text-medical-primary mt-0.5" />
                   <div>
                     <p className="font-semibold">Email</p>
-                    <p className="text-muted-foreground">paia@ironledgermedmap.co.za</p>
+                    <p className="text-muted-foreground">paia@medmap.co.za</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">

@@ -60,7 +60,7 @@ export const FloatingButtons = () => {
             ))}
             <div className="mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
               <p className="text-xs text-red-700">
-                <strong>Disclaimer:</strong> IronLedgerMedMap is a booking platform only. 
+                <strong>Disclaimer:</strong> MedMap is a booking platform only.
                 For medical emergencies, always contact professional emergency services directly.
               </p>
             </div>
@@ -95,7 +95,7 @@ export const FloatingButtons = () => {
                   <Button 
                     variant="outline" 
                     className="w-full justify-start"
-                    onClick={() => window.open('mailto:support@ironledgermedmap.co.za?subject=Booking Assistance', '_blank')}
+                    onClick={() => window.open('mailto:support@medmap.co.za?subject=Booking Assistance', '_blank')}
                   >
                     <Phone className="h-4 w-4 mr-2" />
                     Booking Assistance
@@ -103,7 +103,7 @@ export const FloatingButtons = () => {
                   <Button 
                     variant="outline" 
                     className="w-full justify-start"
-                    onClick={() => window.open('mailto:technical@ironledgermedmap.co.za?subject=Technical Support', '_blank')}
+                    onClick={() => window.open('mailto:support@medmap.co.za?subject=Technical Support', '_blank')}
                   >
                     <MessageCircle className="h-4 w-4 mr-2" />
                     Technical Support
@@ -111,7 +111,7 @@ export const FloatingButtons = () => {
                   <Button 
                     variant="outline" 
                     className="w-full justify-start"
-                    onClick={() => window.open('mailto:billing@ironledgermedmap.co.za?subject=Billing Inquiry', '_blank')}
+                    onClick={() => window.open('mailto:support@medmap.co.za?subject=Billing Inquiry', '_blank')}
                   >
                     <Phone className="h-4 w-4 mr-2" />
                     Billing Support
