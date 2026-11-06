@@ -852,17 +852,31 @@ const DoctorSearch = () => {
                   ) : (
                     <div className="max-h-[350px] divide-y divide-slate-100 overflow-y-auto xl:max-h-[420px]">
                       {mappedDoctors.map(doctor => (
-                        <button
+                        <div
                           key={doctor.id}
-                          type="button"
-                          onClick={() => setSelectedMapLocationId(doctor.id)}
-                          className={`block w-full px-4 py-3 text-left transition-colors hover:bg-slate-50 ${selectedMapLocationId === doctor.id ? 'bg-blue-50' : ''}`}
-                          aria-pressed={selectedMapLocationId === doctor.id}
+                          className={`px-4 py-3 transition-colors ${selectedMapLocationId === doctor.id ? 'bg-blue-50' : ''}`}
                         >
-                          <span className="block font-medium text-slate-900">Dr. {doctor.fullName}</span>
-                          <span className="mt-0.5 block text-sm text-slate-600">{doctor.specialization}</span>
-                          <span className="mt-1 block text-xs text-slate-500">{[doctor.city, doctor.province].filter(Boolean).join(', ')}</span>
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedMapLocationId(doctor.id)}
+                            className="block w-full text-left"
+                            aria-pressed={selectedMapLocationId === doctor.id}
+                          >
+                            <span className="block font-medium text-slate-900">Dr. {doctor.fullName}</span>
+                            <span className="mt-0.5 block text-sm text-slate-600">{doctor.specialization}</span>
+                            <span className="mt-1 block text-xs text-slate-500">{[doctor.city, doctor.province].filter(Boolean).join(', ')}</span>
+                          </button>
+                          <div className="mt-3">
+                            <DriveThereLink
+                              address={doctor.practiceAddress}
+                              city={doctor.city}
+                              province={doctor.province}
+                              latitude={doctor.practiceLatitude}
+                              longitude={doctor.practiceLongitude}
+                              className="h-9 px-3"
+                            />
+                          </div>
+                        </div>
                       ))}
                     </div>
                   )}
@@ -873,14 +887,6 @@ const DoctorSearch = () => {
                         <Button asChild size="sm" className="bg-blue-600 hover:bg-blue-700">
                           <Link to={`/doctor/${selectedMapDoctor.id}`}>View profile</Link>
                         </Button>
-                        <DriveThereLink
-                          address={selectedMapDoctor.practiceAddress}
-                          city={selectedMapDoctor.city}
-                          province={selectedMapDoctor.province}
-                          latitude={selectedMapDoctor.practiceLatitude}
-                          longitude={selectedMapDoctor.practiceLongitude}
-                          className="h-9 px-3"
-                        />
                       </div>
                     </div>
                   )}
